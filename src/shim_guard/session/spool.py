@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import fcntl
 import hashlib
 import json
 import os
@@ -9,9 +10,10 @@ import tempfile
 from collections.abc import Iterator
 from pathlib import Path
 
+from . import _files
+
 MAX_SPOOL_BYTES = 1_000_000
 MAX_ENTRY_BYTES = 2_048
-_DIR_MODE = 0o700
 _FILE_MODE = 0o600
 
 
@@ -35,18 +37,11 @@ def root_path() -> Path:
 
 @contextlib.contextmanager
 def _root() -> Iterator[int]:
-    path = root_path()
     try:
-        path.mkdir(mode=_DIR_MODE, parents=True, exist_ok=True)
-        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_DIRECTORY)
+        descriptor = _files.open_root(root_path())
     except OSError as error:
-        raise SpoolError("session directory could not be opened") from error
+        raise SpoolError("session directory could not be opened safely") from error
     try:
-        info = os.fstat(descriptor)
-        if info.st_uid != _identity():
-            raise SpoolError("session directory belongs to another user")
-        if stat.S_IMODE(info.st_mode) & 0o077:
-            raise SpoolError("session directory is readable by other users")
         yield descriptor
     finally:
         os.close(descriptor)
@@ -62,20 +57,9 @@ def _name(session_id: str, suffix: str) -> str:
 
 def _read(root: int, name: str, limit: int) -> bytes:
     try:
-        descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=root)
-    except FileNotFoundError:
-        return b""
+        return _files.read(root, name, limit)
     except OSError as error:
-        raise SpoolError("session spool could not be read") from error
-    try:
-        info = os.fstat(descriptor)
-        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
-            raise SpoolError("session spool is not a regular file")
-        return os.read(descriptor, limit)
-    except OSError as error:
-        raise SpoolError("session spool could not be read") from error
-    finally:
-        os.close(descriptor)
+        raise SpoolError("session spool could not be read safely") from error
 
 
 def _parse(content: bytes) -> list:
@@ -98,32 +82,22 @@ def append(session_id: str, entry: dict) -> bool:
         raise SpoolError("session record is too large")
     with _root() as root:
         try:
-            descriptor = os.open(
-                _name(session_id, ".jsonl"),
-                os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW,
-                _FILE_MODE,
-                dir_fd=root,
+            return _files.append(
+                root, _name(session_id, ".jsonl"), line, MAX_SPOOL_BYTES
             )
         except OSError as error:
-            raise SpoolError("session spool could not be opened") from error
-        try:
-            if os.fstat(descriptor).st_size + len(line) > MAX_SPOOL_BYTES:
-                return False
-            os.write(descriptor, line)
-            return True
-        except OSError as error:
-            raise SpoolError("session spool could not be written") from error
-        finally:
-            os.close(descriptor)
+            raise SpoolError("session spool could not be written safely") from error
 
 
 def _at_cap(root: int, name: str) -> bool:
     try:
-        descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=root)
+        descriptor = os.open(
+            name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=root
+        )
     except OSError:
         return False
     try:
-        return os.fstat(descriptor).st_size + MAX_ENTRY_BYTES > MAX_SPOOL_BYTES
+        return _files.validate(descriptor).st_size + MAX_ENTRY_BYTES > MAX_SPOOL_BYTES
     finally:
         os.close(descriptor)
 
@@ -164,12 +138,17 @@ def mark_summarized(session_id: str, count: int) -> None:
         try:
             descriptor = os.open(
                 _name(session_id, ".mark"),
-                os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW,
+                os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK,
                 _FILE_MODE,
                 dir_fd=root,
             )
             try:
-                os.write(descriptor, str(max(0, int(count))).encode("ascii"))
+                _files.validate(descriptor)
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                content = str(max(0, int(count))).encode("ascii")
+                if os.write(descriptor, content) != len(content):
+                    raise OSError("session mark write was incomplete")
+                os.ftruncate(descriptor, len(content))
             finally:
                 os.close(descriptor)
         except OSError as error:

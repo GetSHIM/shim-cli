@@ -129,6 +129,9 @@ actions, bounded labels, and a detector-scrubbed target path or URL. They never
 contain a finding value, replacement value, prompt, response body, or shell
 command. Storage failure cannot disable masking or blocking.
 
+`session/_files.py` owns private descriptor validation, bounded reads, and
+non-blocking locked appends shared by the spool and ledger.
+
 The spool uses a hashed session filename in a private OS-temporary directory.
 Claude's `Stop` renders only unseen records and `SessionEnd` removes that
 session's spool. The ledger is a separate, explicit opt-in store. Exact
@@ -143,8 +146,11 @@ binds to loopback, starts before the client, edits no setting or shell profile,
 originates no provider request, rewrites no byte, and never retries a `POST`.
 If the proxy cannot start, the client is not launched.
 
-Measurement stays beside the forwarding path: request bytes go upstream before
-they are scanned, and streaming response bytes go to the client while a second
-incremental reader extracts usage. Request and response bodies are not written
-to disk. Provider usage is exact; attribution across tools, system, and messages
-is inferred from byte share and is always marked approximate.
+Measurement stays beside the forwarding path: accepted request bodies stream
+upstream in bounded chunks, and request detection runs after response relay.
+Two non-blocking inspection slots bound retained request copies to 8 MB each;
+there is no measurement queue. Saturation and shutdown leave explicit incomplete
+measurements. A bounded incremental reader handles SSE and JSON usage, reporting
+known, partial, or unavailable usage independently of request inspection.
+Request and response bodies are not written to disk. Attribution across tools,
+system, and messages is inferred from byte share and marked approximate.

@@ -205,10 +205,10 @@ def _write_redacted_prompt(text: str) -> str:
     return str(path)
 
 
-def _envelope(raw: bytes) -> tuple:
+def _envelope(raw: bytes | dict[str, object]) -> tuple:
     from shim_guard.clients.user_prompt_hook import parse_object
 
-    document = parse_object(raw)
+    document = parse_object(raw) if isinstance(raw, bytes) else raw
     event = document.get("hook_event_name")
     session = document.get("session_id")
     if not isinstance(session, str):
@@ -334,7 +334,9 @@ def _policy_ledger() -> bool:
         return False
 
 
-def _tool_output(raw: bytes, entry, event: str, session_id: str) -> bytes:
+def _tool_output(
+    raw: bytes | dict[str, object], entry, event: str, session_id: str
+) -> bytes:
     from shim_guard.config import load_policy
     from shim_guard.events.pipeline import process
     from shim_guard.guard import evaluate
@@ -389,7 +391,10 @@ def _output(raw: bytes, client: str = "codex") -> bytes:
 
             try:
                 try:
-                    event, session_id, stop_active = _envelope(raw)
+                    from shim_guard.clients.user_prompt_hook import parse_object
+
+                    document = parse_object(raw)
+                    event, session_id, stop_active = _envelope(document)
                 except ValueError:
                     return _refusal_output(raw, client)
                 if event == _STOP_EVENT:
@@ -403,12 +408,12 @@ def _output(raw: bytes, client: str = "codex") -> bytes:
                     if entry is None:
                         return b""
                     try:
-                        return _tool_output(raw, entry, event, session_id)
+                        return _tool_output(document, entry, event, session_id)
                     except Exception:
                         _uninspected(raw, client, entry.event, session_id)
                         return _tool_error_output(client, entry.event)
 
-                prompt = parse_input(raw)
+                prompt = parse_input(document)
                 from shim_guard.config import load_policy
                 from shim_guard.guard import evaluate
                 from shim_guard.session import remember

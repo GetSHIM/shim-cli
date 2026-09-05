@@ -160,11 +160,12 @@ def _deep(levels: int):
         ("leaves", ["leaf"] * (payload.MAX_LEAVES + 1)),
         ("depth", _deep(payload.MAX_DEPTH + 2)),
     ),
+    ids=("characters", "leaves", "depth"),
 )
 def test_a_payload_past_a_bound_is_observed_and_says_why(name: str, body) -> None:
     outcome = _process(_fetched(body), ENFORCE)
 
-    assert outcome.output == b""
+    assert "inspection incomplete" in json.loads(outcome.output)["systemMessage"]
     assert outcome.record.action == ALLOW
     assert outcome.record.note, f"{name} bound recorded no reason"
     assert outcome.record.entities == ()
@@ -585,3 +586,30 @@ def test_a_per_tool_entity_scope_narrows_only_that_tool() -> None:
     )
     assert wide.record.action == MASK
     assert wide.record.entities == (("EMAIL", 1),)
+
+
+@pytest.mark.parametrize(
+    "bad", ["%ff", "x" * 100_001], ids=["invalid-encoding", "detector-limit"]
+)
+def test_uninspectable_sibling_preserves_redaction_and_reports_partial(bad):
+    outcome = _process(
+        _fetched({"credential": "AKIAIOSFODNN7EXAMPLE", "bad": bad}), ENFORCE
+    )
+    output = json.loads(outcome.output)
+    rewritten = output["hookSpecificOutput"]["updatedToolOutput"]["content"]
+    assert rewritten["credential"] == "<SECRET_1>"
+    assert rewritten["bad"] == bad
+    assert "inspection incomplete" in output["systemMessage"]
+    assert outcome.record.action == MASK
+    assert outcome.record.note.startswith("partial:")
+    assert outcome.record.entities == (("SECRET", 1),)
+
+
+@pytest.mark.parametrize("mode", [WARN, OBSERVE])
+def test_partial_inspection_respects_non_rewriting_modes(mode):
+    outcome = _process(
+        _fetched({"credential": "AKIAIOSFODNN7EXAMPLE", "bad": "%ff"}), mode
+    )
+    output = json.loads(outcome.output)
+    assert "hookSpecificOutput" not in output
+    assert "inspection incomplete" in output["systemMessage"]

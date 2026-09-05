@@ -1,15 +1,17 @@
 from __future__ import annotations
 
+import codecs
 import http.client
 import http.server
 import socketserver
 import ssl
 import threading
+import time
 import urllib.parse
 import zlib
 from dataclasses import dataclass, field
 
-from .measure import Exchange, UsageReader, inspect_request
+from .measure import MAX_BODY_BYTES, Exchange, UsageReader, inspect_request
 
 # Preserve provider auth headers.
 HOP_BY_HOP = frozenset(
@@ -28,6 +30,7 @@ HOP_BY_HOP = frozenset(
 # `read` would buffer SSE.
 CHUNK_BYTES = 65_536
 UPSTREAM_TIMEOUT_SECONDS = 900
+DOWNSTREAM_TIMEOUT_SECONDS = 30
 
 
 @dataclass
@@ -35,6 +38,9 @@ class Session:
     exchanges: list = field(default_factory=list)
     errors: int = 0
     _lock: threading.Lock = field(default_factory=threading.Lock)
+    _measurement_slots: threading.BoundedSemaphore = field(
+        default_factory=lambda: threading.BoundedSemaphore(2)
+    )
     _in_flight: int = 0
     _idle: threading.Event = field(default_factory=threading.Event)
 
@@ -72,6 +78,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     tls_context: ssl.SSLContext
     evaluate = None
 
+    def setup(self) -> None:
+        super().setup()
+        self.connection.settimeout(DOWNSTREAM_TIMEOUT_SECONDS)
+
     def log_message(self, *_args: object, **_kwargs: object) -> None:
         pass
 
@@ -83,44 +93,80 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self.session.ended()
 
     def _forward(self) -> None:
-        length = int(self.headers.get("Content-Length") or 0)
-        body = self.rfile.read(length) if length else b""
+        self.close_connection = True
+        lengths = self.headers.get_all("Content-Length", [])
+        if self.headers.get_all("Transfer-Encoding") or len(lengths) > 1:
+            self.send_error(400, "unsupported or ambiguous request framing")
+            return
+        value = lengths[0].strip(" \t") if lengths else "0"
+        if not value.isascii() or not value.isdecimal() or len(value) > 20:
+            self.send_error(400, "invalid Content-Length")
+            return
+        length = int(value)
+        exchange = Exchange(
+            path=urllib.parse.urlsplit(self.path).path,
+            request_bytes=length,
+            measured=False,
+        )
+        capture = bytearray()
+        measuring = (
+            length <= MAX_BODY_BYTES and self.session._measurement_slots.acquire(False)
+        )
 
-        path = urllib.parse.urlsplit(self.path).path
-        exchange = Exchange(path=path, request_bytes=len(body))
+        def body():
+            deadline = time.monotonic() + DOWNSTREAM_TIMEOUT_SECONDS
+            remaining = length
+            while remaining:
+                timeout = deadline - time.monotonic()
+                if timeout <= 0:
+                    raise TimeoutError("request body deadline exceeded")
+                self.connection.settimeout(timeout)
+                chunk = self.rfile.read1(min(CHUNK_BYTES, remaining))
+                if not chunk:
+                    raise ValueError("truncated request body")
+                remaining -= len(chunk)
+                if measuring:
+                    capture.extend(chunk)
+                yield chunk
 
-        headers = {
-            name: value
-            for name, value in self.headers.items()
-            if name.lower() not in HOP_BY_HOP
-        }
-        headers["Host"] = self.upstream_host
-
+        connection = None
+        responded = False
         try:
+            headers = {
+                name: value
+                for name, value in self.headers.items()
+                if name.lower() not in HOP_BY_HOP
+                and name.lower() not in {"host", "content-length"}
+            }
+            headers["Host"] = self.upstream_host
+            headers["Content-Length"] = str(length)
             connection = http.client.HTTPSConnection(
                 self.upstream_host,
                 timeout=UPSTREAM_TIMEOUT_SECONDS,
                 context=self.tls_context,
             )
-            connection.request(self.command, self.path, body=body, headers=headers)
-            self._measure(body, exchange)
+            connection.request(self.command, self.path, body=body(), headers=headers)
             upstream = connection.getresponse()
-        except Exception:
-            self.session.failed()
-            try:
-                self.send_error(502, "upstream unreachable")
-            except Exception:
-                return
-            return
-
-        exchange.status = upstream.status
-        try:
-            self._stream(upstream, exchange)
-        finally:
-            connection.close()
+            exchange.status = upstream.status
+            responded = True
             self.session.record(exchange)
+            self._stream(upstream, exchange)
+            if measuring:
+                self._measure(capture, exchange)
+        except (OSError, ValueError, http.client.HTTPException):
+            self.session.failed()
+            if not responded:
+                try:
+                    self.send_error(502, "request could not be forwarded")
+                except OSError:
+                    pass
+        finally:
+            if connection is not None:
+                connection.close()
+            if measuring:
+                self.session._measurement_slots.release()
 
-    def _measure(self, body: bytes, exchange: Exchange) -> None:
+    def _measure(self, body: bytes | bytearray, exchange: Exchange) -> None:
         try:
             measured = inspect_request(body, self.evaluate)
         except Exception:
@@ -144,24 +190,31 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             if safe_name != name or safe_value != value:
                 continue
             self.send_header(safe_name, safe_value)
+        self.send_header("Connection", "close")
         self.send_header("Transfer-Encoding", "chunked")
         self.end_headers()
 
-        reader = UsageReader()
+        reader = UsageReader(upstream.getheader("Content-Type") or "")
+        text_decoder = codecs.getincrementaldecoder("utf-8")()
+        decoded_bytes = 0
         # Relay compressed bytes unchanged.
         encoding = (upstream.getheader("Content-Encoding") or "").lower()
         decoder = None
         if encoding == "gzip":
             decoder = zlib.decompressobj(16 + zlib.MAX_WBITS)
-        elif encoding in ("deflate", ""):
-            decoder = zlib.decompressobj() if encoding else None
+        elif encoding == "deflate":
+            decoder = zlib.decompressobj()
 
+        readable = encoding in ("", "gzip", "deflate")
         while True:
             try:
                 chunk = upstream.read1(CHUNK_BYTES)
             except Exception:
                 self.session.failed()
                 exchange.usage = reader.usage
+                exchange.usage_status = (
+                    "partial" if reader.status != "unavailable" else "unavailable"
+                )
                 self.close_connection = True
                 return
             if not chunk:
@@ -171,24 +224,44 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 self.wfile.write(chunk)
                 self.wfile.write(b"\r\n")
                 self.wfile.flush()
-            except (BrokenPipeError, ConnectionResetError, OSError):
+            except OSError:
                 return
+            if not readable:
+                continue
             try:
-                if decoder is None:
-                    reader.feed(chunk.decode("utf-8", "replace"))
-                else:
-                    decoded = decoder.decompress(chunk)
-                    while decoder.eof and decoder.unused_data:
-                        leftover = decoder.unused_data
-                        decoder = zlib.decompressobj(16 + zlib.MAX_WBITS)
-                        decoded += decoder.decompress(leftover)
-                    reader.feed(decoded.decode("utf-8", "replace"))
-            except Exception:
-                decoder = None
+                decoded = (
+                    chunk
+                    if decoder is None
+                    else decoder.decompress(chunk, MAX_BODY_BYTES - decoded_bytes + 1)
+                )
+                while decoder is not None and decoder.eof and decoder.unused_data:
+                    leftover = decoder.unused_data
+                    decoder = zlib.decompressobj(16 + zlib.MAX_WBITS)
+                    decoded += decoder.decompress(
+                        leftover,
+                        max(1, MAX_BODY_BYTES - decoded_bytes - len(decoded) + 1),
+                    )
+                    if len(decoded) + decoded_bytes > MAX_BODY_BYTES:
+                        break
+                decoded_bytes += len(decoded)
+                if decoded_bytes > MAX_BODY_BYTES:
+                    readable = False
+                    continue
+                reader.feed(text_decoder.decode(decoded))
+            except (UnicodeError, ValueError, zlib.error):
+                readable = False
+        readable = readable and (decoder is None or decoder.eof)
+        if readable:
+            try:
+                reader.feed(text_decoder.decode(b"", final=True))
+                reader.finish()
+            except UnicodeError:
+                readable = False
+        exchange.usage_status = reader.status if readable else "unavailable"
         try:
             self.wfile.write(b"0\r\n\r\n")
             self.wfile.flush()
-        except (BrokenPipeError, ConnectionResetError, OSError):
+        except OSError:
             pass
         exchange.usage = reader.usage
 

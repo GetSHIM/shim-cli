@@ -203,6 +203,7 @@ def test_response_headers_with_line_breaks_are_dropped() -> None:
 
     assert sent == [
         ("x-provider-header", "kept"),
+        ("Connection", "close"),
         ("Transfer-Encoding", "chunked"),
     ]
 
@@ -523,3 +524,159 @@ def test_the_request_is_on_its_way_before_it_is_measured(watched, monkeypatch) -
     assert "measured" in order
     assert order[order.index("measured") - 1] == "sent"
     assert upstream.seen
+
+
+@pytest.mark.parametrize(
+    "framing",
+    [
+        b"Transfer-Encoding: chunked",
+        b"Content-Length: -1",
+        b"Content-Length: nope",
+        b"Content-Length: 1\r\nContent-Length: 1",
+    ],
+)
+def test_invalid_framing_never_contacts_provider(watched, framing):
+    running, upstream = watched
+    with socket.create_connection(("127.0.0.1", running.port), timeout=3) as client:
+        client.sendall(
+            b"POST /v1/messages HTTP/1.1\r\nHost: local\r\n" + framing + b"\r\n\r\n"
+        )
+        assert b"400" in client.recv(4096)
+    assert not upstream.seen
+
+
+def test_request_beyond_measurement_limit_is_forwarded_whole(watched, monkeypatch):
+    running, upstream = watched
+    monkeypatch.setattr(proxy, "MAX_BODY_BYTES", 100)
+    status, _, _ = _post(running, BODY * 2000, HEADERS)
+    assert status == 200
+    assert upstream.seen[0]["body"] == BODY * 2000
+    assert not running.session.exchanges[0].measured
+
+
+def test_slow_measurement_does_not_delay_response_or_shutdown(watched, monkeypatch):
+    running, _ = watched
+    entered = threading.Event()
+    release = threading.Event()
+
+    def slow(*args):
+        entered.set()
+        assert release.wait(5)
+        return proxy.Exchange()
+
+    monkeypatch.setattr(proxy, "inspect_request", slow)
+    monkeypatch.setattr(proxy.Watch, "DRAIN_SECONDS", 0.05)
+    try:
+        with urllib.request.urlopen(
+            urllib.request.Request(running.base_url + "/v1/messages", data=BODY),
+            timeout=2,
+        ) as response:
+            assert response.read()
+        assert entered.wait(1)
+        started = time.monotonic()
+        running.stop()
+        assert time.monotonic() - started < 1.5
+        assert not running.session.exchanges[0].measured
+        from shim_guard.watch import report
+
+        assert report.as_json(running.session, 1)["inspection_incomplete"] == 1
+    finally:
+        release.set()
+        running.session.drain(2)
+
+
+@pytest.mark.parametrize("failure", ["request", "getresponse"])
+def test_upstream_connection_closes_on_failure(monkeypatch, failure):
+    from unittest.mock import Mock
+
+    connection = Mock()
+    getattr(connection, failure).side_effect = OSError("synthetic failure")
+    monkeypatch.setattr(
+        http.client, "HTTPSConnection", lambda *args, **kwargs: connection
+    )
+    running = proxy.start()
+    try:
+        with pytest.raises(urllib.error.HTTPError):
+            _post(running, BODY, HEADERS)
+        assert running.session.drain(2)
+        connection.close.assert_called_once()
+    finally:
+        running.stop()
+
+
+@pytest.mark.parametrize("truncated", [True, False], ids=["truncated", "slow"])
+def test_incomplete_request_body_has_bounded_failure(monkeypatch, truncated):
+    from unittest.mock import Mock
+
+    connection = Mock()
+    connection.request.side_effect = lambda *args, **kwargs: list(kwargs["body"])
+    monkeypatch.setattr(
+        http.client, "HTTPSConnection", lambda *args, **kwargs: connection
+    )
+    monkeypatch.setattr(proxy, "DOWNSTREAM_TIMEOUT_SECONDS", 0.15)
+    running = proxy.start()
+    try:
+        started = time.monotonic()
+        with socket.create_connection(("127.0.0.1", running.port), timeout=2) as client:
+            client.sendall(
+                b"POST /v1/messages HTTP/1.1\r\nHost: local\r\nContent-Length: 10\r\n\r\nx"
+            )
+            if truncated:
+                client.shutdown(socket.SHUT_WR)
+            assert b"502" in client.recv(4096)
+        assert running.session.drain(1)
+        assert time.monotonic() - started < 1.5
+        connection.close.assert_called_once()
+        connection.getresponse.assert_not_called()
+    finally:
+        running.stop()
+
+
+def test_saturated_measurement_still_forwards(watched, monkeypatch):
+    from unittest.mock import Mock
+
+    running, upstream = watched
+    slots = running.session._measurement_slots
+    assert slots.acquire(False) and slots.acquire(False)
+    inspect = Mock()
+    monkeypatch.setattr(proxy, "inspect_request", inspect)
+    try:
+        assert _post(running, BODY, HEADERS)[0] == 200
+        assert upstream.seen[0]["body"] == BODY
+        assert not running.session.exchanges[0].measured
+        inspect.assert_not_called()
+    finally:
+        slots.release()
+        slots.release()
+
+
+def test_decompression_budget_never_changes_forwarded_bytes(monkeypatch):
+    compressed = gzip.compress(b"x" * 100_000)
+
+    class Response:
+        status = 200
+        chunks = iter([compressed, b""])
+
+        def getheaders(self):
+            return [("Content-Encoding", "gzip")]
+
+        def getheader(self, name):
+            return "gzip" if name == "Content-Encoding" else "text/event-stream"
+
+        def read1(self, size):
+            return next(self.chunks)
+
+    handler = object.__new__(proxy._Handler)
+    handler.session = proxy.Session()
+    handler.wfile = io.BytesIO()
+    handler.send_response = lambda status: None
+    handler.send_header = lambda name, value: None
+    handler.end_headers = lambda: None
+    monkeypatch.setattr(proxy, "MAX_BODY_BYTES", 100)
+    exchange = proxy.Exchange()
+    handler._stream(Response(), exchange)
+    assert handler.wfile.getvalue() == b"%x\r\n%s\r\n0\r\n\r\n" % (
+        len(compressed),
+        compressed,
+    )
+    assert exchange.usage_status == "unavailable"

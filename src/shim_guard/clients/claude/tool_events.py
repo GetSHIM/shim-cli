@@ -15,10 +15,10 @@ _FILE_VIEW_KEYS = ("file_path", "notebook_path", "path")
 
 
 def _decoder(expected_event: str, root: str):
-    def decode(raw: bytes) -> Event:
-        if len(raw) > MAX_INPUT_BYTES:
+    def decode(raw: bytes | dict[str, object]) -> Event:
+        if isinstance(raw, bytes) and len(raw) > MAX_INPUT_BYTES:
             raise ValueError("hook input exceeds the safe limit")
-        document = parse_object(raw)
+        document = parse_object(raw) if isinstance(raw, bytes) else raw
         if document.get("hook_event_name") != expected_event:
             raise ValueError("unexpected tool-hook event")
         tool = document.get("tool_name")
@@ -62,9 +62,12 @@ def pre_tool_use(action: str, payload: object, message: str) -> bytes:
     if action == REPORT:
         return _dump({"systemMessage": message})
     if action == MASK:
-        return _dump(
-            _specific("PreToolUse", permissionDecision="allow", updatedInput=payload)
+        output = _specific(
+            "PreToolUse", permissionDecision="allow", updatedInput=payload
         )
+        if message:
+            output["systemMessage"] = message
+        return _dump(output)
     if action == DENY:
         return _dump(
             _specific(
@@ -82,7 +85,10 @@ def post_tool_use(action: str, payload: object, message: str) -> bytes:
     if action == REPORT:
         return _dump({"systemMessage": message})
     if action == MASK:
-        return _dump(_specific("PostToolUse", updatedToolOutput=payload))
+        output = _specific("PostToolUse", updatedToolOutput=payload)
+        if message:
+            output["systemMessage"] = message
+        return _dump(output)
     if action == DENY:
         raise ValueError("a tool result cannot be denied")
     raise ValueError("unsupported action")

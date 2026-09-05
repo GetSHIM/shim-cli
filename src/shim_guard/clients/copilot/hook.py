@@ -15,8 +15,8 @@ _ERROR_PROMPT = (
 )
 
 
-def parse_input(raw: bytes) -> str:
-    payload = user_prompt_hook.parse_object(raw)
+def parse_input(raw: bytes | dict[str, object]) -> str:
+    payload = user_prompt_hook.parse_object(raw) if isinstance(raw, bytes) else raw
     prompt = payload.get("prompt")
     transformed = payload.get("transformedPrompt")
     if not isinstance(prompt, str) or not isinstance(transformed, str):

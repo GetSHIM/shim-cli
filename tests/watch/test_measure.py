@@ -206,3 +206,45 @@ def test_a_body_that_is_not_a_request_measures_to_nothing(body: bytes) -> None:
 
     assert exchange.sections == {}
     assert exchange.entities == {}
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+def test_usage_delimiter_split_at_every_boundary(newline):
+    text = 'data: {"usage":\ndata: {"input_tokens":0,"output_tokens":0}}\n\n'.replace(
+        "\n", newline
+    )
+    for split in range(len(text) + 1):
+        reader = measure.UsageReader()
+        reader.feed(text[:split])
+        reader.feed(text[split:])
+        reader.finish()
+        assert reader.status == "known"
+        assert reader.usage == measure.Usage()
+
+
+def test_json_usage_and_unavailable_are_distinct():
+    reader = measure.UsageReader("application/json; charset=utf-8")
+    reader.feed('{"usage":{"input_tokens":0,"output_tokens":0}}')
+    reader.finish()
+    assert reader.status == "known"
+    missing = measure.UsageReader("application/json")
+    missing.feed('{"no_usage":true}')
+    missing.finish()
+    assert missing.status == "unavailable"
+
+
+def test_nested_json_usage_does_not_escape_measurement():
+    reader = measure.UsageReader("application/json")
+    reader.feed("[" * 2000 + "0" + "]" * 2000)
+    reader.finish()
+    assert reader.status == "unavailable"
+
+
+@pytest.mark.parametrize(
+    "document", ['{"usage":{}}', '{"usage":{"input_tokens":true}}', '{"usage":']
+)
+def test_invalid_or_missing_usage_is_unavailable(document):
+    reader = measure.UsageReader("Application/JSON")
+    reader.feed(document)
+    reader.finish()
+    assert reader.status == "unavailable"

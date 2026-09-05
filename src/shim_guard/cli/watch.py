@@ -34,6 +34,11 @@ def watch(*, command: tuple, as_json: bool) -> None:
             f"shim watch does not support {client}. Supported: "
             + ", ".join(sorted(BASE_URL_VARIABLES)),
         )
+    if os.environ.get(variable):
+        _fail(
+            as_json,
+            f"{variable} is already configured; custom upstreams are unsupported.",
+        )
     if shutil.which(command[0]) is None and not os.path.exists(command[0]):
         _fail(as_json, f"{command[0]} was not found on PATH.")
 

@@ -11,7 +11,7 @@ from shim_guard.cli.output import console, emit, emit_json
 from shim_guard.config import (
     MAX_CONFIG_BYTES,
     config_path,
-    load_policy,
+    policy_from_state,
     render_settings,
 )
 from shim_guard.events.diet import DEFAULT_TRANSFORMS
@@ -110,10 +110,16 @@ def configure(
     if set(enable).intersection(disable):
         _fail(as_json, "The same entity cannot be enabled and disabled.")
 
-    # Preserve modes and tool scopes.
     try:
-        policy = load_policy(target)
-    except (OSError, ValueError):
+        if changing:
+            ensure_parent(target)
+    except (InstallationError, OSError):
+        _fail(as_json, "Entity settings path is unsafe; nothing was saved.")
+    state = inspect_file(target, MAX_CONFIG_BYTES)
+    # Parse and plan from the same snapshot, before confirmation.
+    try:
+        policy = policy_from_state(state)
+    except ValueError:
         policy = None
     if policy is None and not (reset or only):
         _fail(
@@ -157,6 +163,11 @@ def configure(
         emit("PASS", f"File: {target}")
         return
 
+    plan = plan_change(
+        target,
+        state,
+        render_settings(enabled, modes, tool_entities, keep_ledger, keep_diet),
+    )
     if as_json and not yes:
         _fail(True)
     if not as_json:
@@ -167,15 +178,7 @@ def configure(
             raise typer.Exit(1)
 
     try:
-        ensure_parent(target)
-        state = inspect_file(target, MAX_CONFIG_BYTES)
-        changed = apply(
-            plan_change(
-                target,
-                state,
-                render_settings(enabled, modes, tool_entities, keep_ledger, keep_diet),
-            )
-        )
+        changed = apply(plan)
     except (InstallationError, OSError, ValueError):
         _fail(as_json, "Entity settings were unsafe or changed; nothing was saved.")
 

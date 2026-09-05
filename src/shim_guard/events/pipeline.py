@@ -4,15 +4,23 @@ import json
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from shim_guard.policy import ALLOW, DENY, INBOUND, MASK, OBSERVE, decide, direction_for
+from shim_guard.policy import (
+    ALLOW,
+    DENY,
+    INBOUND,
+    MASK,
+    OBSERVE,
+    REPORT,
+    decide,
+    direction_for,
+)
 from shim_guard.session.record import (
-    NOT_INSPECTED,
     UNKNOWN_TOOL_LABEL,
     Record,
     display_label,
 )
 
-from .payload import PayloadTooLarge, inspect
+from .payload import inspect
 
 
 @dataclass(frozen=True)
@@ -32,7 +40,7 @@ class Adapter:
     client: str
     event: str
     root: str
-    decode: Callable[[bytes], Event]
+    decode: Callable[[bytes | dict[str, object]], Event]
     encode: Callable[[str, object, str], bytes]
 
 
@@ -91,7 +99,7 @@ def _message(tool: str, counts: tuple, action: str) -> str:
 
 def process(
     entry: Adapter,
-    raw: bytes,
+    raw: bytes | dict[str, object],
     mode_for,
     evaluate,
     diet: tuple = (),
@@ -150,10 +158,32 @@ def process(
     inbound = direction == INBOUND
     shrinkable = inbound and mode != OBSERVE and not event.views_file
     transforms = diet if shrinkable else ()
-    try:
-        result = inspect(body, evaluate, transforms, scan_markers=inbound)
-    except PayloadTooLarge as error:
-        return Outcome(b"", record(ALLOW, note=f"{NOT_INSPECTED}: {error}"))
+    result = inspect(body, evaluate, transforms, scan_markers=inbound)
+    if result.skipped:
+        note = f"{result.status}: {result.skipped} fields or subtrees not inspected ({', '.join(result.reasons)})"
+        counts = _counts(result.findings)
+        action = decide(direction, mode) if counts else ALLOW
+        can_rewrite = action == MASK or (not counts and shrinkable and result.changed)
+        message = "shim: inspection incomplete; uninspected content was not modified."
+        if counts:
+            message = _message(tool_label, counts, action) + " " + message
+        emitted = result.value if can_rewrite else body
+        return Outcome(
+            entry.encode(
+                MASK if can_rewrite else DENY if action == DENY else REPORT,
+                emitted,
+                message,
+            ),
+            record(
+                action,
+                counts,
+                out_bytes=_size(emitted),
+                fields=len(result.findings),
+                note=note,
+                transforms=result.transforms if can_rewrite else (),
+                markers=result.markers,
+            ),
+        )
 
     rewritten, findings, changed = result.value, result.findings, result.changed
 
@@ -177,7 +207,7 @@ def process(
 
     message = _message(tool_label, counts, action)
     emitted = rewritten if action == MASK and changed else body
-    output = entry.encode(action, emitted, message)
+    output = entry.encode(action, emitted, message if action != MASK else "")
     out_bytes = _size(emitted) if action == MASK else in_bytes
     return Outcome(
         output,

@@ -50,8 +50,8 @@ def parse_object(raw: bytes) -> dict[str, object]:
     return payload
 
 
-def parse_input(raw: bytes) -> str:
-    payload = parse_object(raw)
+def parse_input(raw: bytes | dict[str, object]) -> str:
+    payload = parse_object(raw) if isinstance(raw, bytes) else raw
     if payload.get("hook_event_name") != EVENT_NAME:
         raise ValueError("unexpected prompt-hook event")
     prompt = payload.get("prompt")

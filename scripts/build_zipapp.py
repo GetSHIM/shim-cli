@@ -41,6 +41,7 @@ INCLUDED = (
     "guard/recognizers.py",
     "guard/suffixes.py",
     "session/__init__.py",
+    "session/_files.py",
     "session/ledger.py",
     "session/record.py",
     "session/spool.py",

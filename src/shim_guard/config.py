@@ -3,6 +3,10 @@ from __future__ import annotations
 import os
 from collections.abc import Iterable
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from shim_guard.settings_files import FileState
 
 from shim_guard import policy
 from shim_guard.guard import entities as entity_catalog
@@ -139,9 +143,15 @@ def parse_settings(text: str) -> dict:
 
 def load_policy(path: Path | None = None) -> policy.Policy:
     target = config_path() if path is None else _validated_path(path)
-    from shim_guard.settings_files import StateKind, inspect_file
+    from shim_guard.settings_files import inspect_file
 
     state = inspect_file(target, MAX_CONFIG_BYTES)
+    return policy_from_state(state)
+
+
+def policy_from_state(state: FileState) -> policy.Policy:
+    from shim_guard.settings_files import StateKind
+
     if state.kind is StateKind.ABSENT:
         from shim_guard.events.diet import DEFAULT_TRANSFORMS
 
