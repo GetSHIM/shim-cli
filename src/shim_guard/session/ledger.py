@@ -4,13 +4,12 @@ import contextlib
 import datetime
 import json
 import os
-import stat
 from pathlib import Path
+
+from . import _files
 
 RETENTION_DAYS = 30
 MAX_LEDGER_BYTES = 5_000_000
-_DIR_MODE = 0o700
-_FILE_MODE = 0o600
 _PREFIX = "ledger-"
 _SUFFIX = ".jsonl"
 
@@ -40,25 +39,16 @@ def _month(when: datetime.datetime) -> str:
 
 
 def _open_root() -> int:
-    path = root_path()
     try:
-        path.mkdir(mode=_DIR_MODE, parents=True, exist_ok=True)
-        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_DIRECTORY)
+        return _files.open_root(root_path())
     except OSError as error:
-        raise LedgerError("ledger directory could not be opened") from error
-    try:
-        info = os.fstat(descriptor)
-        if info.st_uid != getattr(os, "getuid", lambda: info.st_uid)():
-            raise LedgerError("ledger directory belongs to another user")
-        if stat.S_IMODE(info.st_mode) & 0o077:
-            raise LedgerError("ledger directory is readable by other users")
-    except Exception:
-        os.close(descriptor)
-        raise
-    return descriptor
+        raise LedgerError("ledger directory could not be opened safely") from error
 
 
 def files() -> list:
+    if not root_path().exists():
+        return []
+    root = _open_root()
     try:
         return sorted(
             path
@@ -67,6 +57,8 @@ def files() -> list:
         )
     except OSError as error:
         raise LedgerError("ledger could not be listed") from error
+    finally:
+        os.close(root)
 
 
 def _month_end(path: Path) -> datetime.datetime | None:
@@ -98,19 +90,7 @@ def append(entry: dict, now: datetime.datetime | None = None) -> bool:
     prune(moment)
     root = _open_root()
     try:
-        descriptor = os.open(
-            _month(moment),
-            os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW,
-            _FILE_MODE,
-            dir_fd=root,
-        )
-        try:
-            if os.fstat(descriptor).st_size + len(line) > MAX_LEDGER_BYTES:
-                return False
-            os.write(descriptor, line)
-            return True
-        finally:
-            os.close(descriptor)
+        return _files.append(root, _month(moment), line, MAX_LEDGER_BYTES)
     except OSError as error:
         raise LedgerError("ledger could not be written") from error
     finally:
@@ -122,7 +102,11 @@ def entries(since: datetime.datetime | None = None) -> list:
     boundary = since.isoformat().replace("+00:00", "Z") if since else ""
     for path in files():
         try:
-            content = path.read_bytes()
+            root = _open_root()
+            try:
+                content = _files.read(root, path.name, MAX_LEDGER_BYTES)
+            finally:
+                os.close(root)
         except OSError as error:
             raise LedgerError("ledger could not be read") from error
         for line in content.decode("utf-8", "replace").splitlines():

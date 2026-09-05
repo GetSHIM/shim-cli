@@ -124,3 +124,20 @@ def test_a_real_read_result_is_masked_in_place() -> None:
     assert result["file"]["truncatedByTokenCap"] is False
     assert result["type"] == "text"
     assert len(findings) == 1
+
+
+def test_partial_inspection_stops_at_deadline_and_keeps_completed_redactions():
+    seen = []
+
+    def deadline(text):
+        seen.append(text)
+        if text == "timeout":
+            raise ValueError("analysis limit") from TimeoutError("hook deadline")
+        return evaluate(text)
+
+    result = payload.inspect(["alice@example.com", "timeout", "never scan"], deadline)
+    assert seen == ["alice@example.com", "timeout"]
+    assert result.value == ["<EMAIL_1>", "timeout", "never scan"]
+    assert result.status == "partial"
+    assert result.skipped == 2
+    assert result.reasons == ("deadline",)

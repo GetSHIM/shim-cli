@@ -58,16 +58,29 @@ def deduplicate(results: list[Match]) -> list[Match]:
             item.entity_type,
         ),
     )
+    starts: dict[str, set[int]] = {}
+    for item in ordered:
+        starts.setdefault(item.entity_type, set()).add(item.start)
+    indices = {
+        entity: {start: i for i, start in enumerate(sorted(offsets), 1)}
+        for entity, offsets in starts.items()
+    }
+    # Prefix-maximum Fenwick trees preserve score order in O(n log n).
+    trees = {entity: [-1] * (len(offsets) + 1) for entity, offsets in starts.items()}
     kept: list[Match] = []
     for item in ordered:
-        if any(
-            other.entity_type == item.entity_type
-            and item.start >= other.start
-            and item.end <= other.end
-            for other in kept
-        ):
+        tree = trees[item.entity_type]
+        index = indices[item.entity_type][item.start]
+        cursor, furthest = index, -1
+        while cursor:
+            furthest = max(furthest, tree[cursor])
+            cursor -= cursor & -cursor
+        if furthest >= item.end:
             continue
         kept.append(item)
+        while index < len(tree):
+            tree[index] = max(tree[index], item.end)
+            index += index & -index
     return kept
 
 

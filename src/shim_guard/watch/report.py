@@ -102,12 +102,20 @@ def _order(names) -> list:
 
 def render(session, seconds: float) -> str:
     exchanges = [
-        exchange for exchange in session.exchanges if exchange.path.endswith("messages")
+        exchange
+        for exchange in session.exchanges
+        if exchange.path.endswith(("messages", "responses", "completions"))
     ]
     if not exchanges and not session.errors:
         return ""
     lines = [f"shim watch — {_duration(seconds)}, {len(exchanges)} requests"]
 
+    incomplete = sum(not exchange.measured for exchange in exchanges)
+    unknown_usage = sum(exchange.usage_status != "known" for exchange in exchanges)
+    if incomplete:
+        lines.append(f"  inspection incomplete for {incomplete} request(s)")
+    if unknown_usage:
+        lines.append(f"  usage unavailable or partial for {unknown_usage} request(s)")
     combined = totals(exchanges)
     if combined.total_input:
         lines.append(f"  input     {_thousands(combined.total_input)} tokens  (exact)")
@@ -171,7 +179,9 @@ def render(session, seconds: float) -> str:
 
 def as_json(session, seconds: float) -> dict:
     exchanges = [
-        exchange for exchange in session.exchanges if exchange.path.endswith("messages")
+        exchange
+        for exchange in session.exchanges
+        if exchange.path.endswith(("messages", "responses", "completions"))
     ]
     combined = totals(exchanges)
     dollars, priced, unpriced = spend(exchanges)
@@ -180,6 +190,15 @@ def as_json(session, seconds: float) -> dict:
         "seconds": round(seconds, 1),
         "requests": len(exchanges),
         "errors": session.errors,
+        "inspection_incomplete": sum(not exchange.measured for exchange in exchanges),
+        "usage_status": (
+            "known"
+            if exchanges
+            and all(exchange.usage_status == "known" for exchange in exchanges)
+            else "partial"
+            if any(exchange.usage_status != "unavailable" for exchange in exchanges)
+            else "unavailable"
+        ),
         "exact": {
             "input_tokens": combined.total_input,
             "output_tokens": combined.output_tokens,

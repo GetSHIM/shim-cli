@@ -121,7 +121,7 @@ def _uninspected(records: list) -> list:
         record
         for record in records
         if isinstance(record.get("note"), str)
-        and record["note"].startswith(NOT_INSPECTED)
+        and record["note"].startswith((NOT_INSPECTED, "not-inspected:"))
     ]
 
 
@@ -134,6 +134,11 @@ def render(records: list, capped: bool = False) -> str:
     saved = _saved(records)
     markers = _marker_totals(records)
     skipped = _uninspected(records)
+    partial = [
+        record
+        for record in records
+        if str(record.get("note", "")).startswith("partial:")
+    ]
     lines: list = []
     for action, label in ACTION_LABELS:
         matching = [record for record in acted if record.get("action") == action]
@@ -161,6 +166,10 @@ def render(records: list, capped: bool = False) -> str:
         lines.append(
             f"  {'skipped':<9} {len(skipped)} not inspected, passed through"
             f"{_where(skipped)}"
+        )
+    if partial:
+        lines.append(
+            f"  incomplete inspection of {len(partial)} tool event(s){_where(partial)}"
         )
     if saved:
         lines.append(
@@ -199,6 +208,10 @@ def as_json(records: list, capped: bool = False) -> dict:
         "bytes_saved": saved,
         "tokens_saved_approx": saved // BYTES_PER_TOKEN,
         "not_inspected": len(_uninspected(records)),
+        "incomplete": sum(
+            str(record.get("note", "")).startswith(("partial:", "not-inspected:"))
+            for record in records
+        ),
         "markers": {
             marker: {"count": count, "sources": _sources(_carrying(records, marker))}
             for marker, count in _marker_totals(records)

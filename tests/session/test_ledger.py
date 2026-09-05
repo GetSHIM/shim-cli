@@ -217,3 +217,13 @@ def test_remember_persists_only_a_session_key_and_keeps_storage_best_effort(
     assert written["latency_ms"] == 5
     assert len(written["ts"]) == len("2026-08-29T14:51:06Z")
     assert written["ts"].endswith("Z")
+
+
+def test_unsafe_directory_is_refused_before_pruning(tmp_path):
+    root = tmp_path / "state"
+    root.mkdir(mode=0o755)
+    old = root / "ledger-2020-01.jsonl"
+    old.write_bytes(b"keep\n")
+    with pytest.raises(ledger.LedgerError):
+        ledger.append(_entry(), JANUARY)
+    assert old.read_bytes() == b"keep\n"

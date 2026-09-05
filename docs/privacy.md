@@ -151,13 +151,13 @@ On a **prompt**, shim fails closed. The prompt is withheld and the message
 names `shim doctor`, because the usual cause is a settings file that will not
 parse, and that blocks every prompt of the session until it is fixed.
 
-On a **tool event**, shim fails open: the result already exists, so refusing it
-destroys the user's work while protecting nothing. The payload is passed
-through **unchanged and unmasked**, the client is told so, and — the part that
-matters here — it is written to the session record and appears in the summary
-as `skipped … not inspected, passed through`. Failing open is a considered
-trade; failing open silently is not, because a clean-looking summary would then
-stand for a payload shim never examined.
+On a **tool event**, uninspectable content passes through unchanged. Validated
+redactions in independently rewritable sibling fields are preserved according
+to policy. The client and session summary explicitly report incomplete
+inspection, with bounded reason codes and skipped field or subtree counts.
+Commands and local writes are never rewritten. If no inspection is possible,
+the event passes through unchanged and unmasked with a visible warning; prompt
+errors still fail closed.
 
 ## What is changed on the way in
 

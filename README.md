@@ -86,8 +86,16 @@ behind — no shell profile is edited and no setting is changed.
 
 Overhead measured against a live session: about 6 ms of proxy plumbing plus a
 23 ms TLS handshake per request. Scanning the body costs more than that, but it
-runs after the request has been sent, inside the window where the provider is
-already thinking, so it does not delay anything.
+runs after the response has been relayed. Request inspection retains at most
+8 MB per request, with two concurrent inspection slots and no pending queue.
+Larger requests still pass through in full; skipped or unfinished measurements
+are reported as incomplete. Usage can be known, partial, or unavailable.
+
+`shim watch` refuses a non-empty `ANTHROPIC_BASE_URL` (Claude) or
+`OPENAI_BASE_URL` (Codex) before startup. Custom upstreams are not supported.
+Requests need an unambiguous non-negative `Content-Length`; transfer coding
+(including chunked requests) is rejected. Request-body reads have a 30-second
+deadline.
 
 Claude Code is verified. Codex runs with a warning — a ChatGPT sign-in behind a
 third-party proxy is documented but untested. Copilot is out of scope: it

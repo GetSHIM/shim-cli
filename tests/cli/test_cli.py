@@ -817,3 +817,34 @@ def test_install_creates_a_config_directory_that_does_not_exist_yet(
         json.loads(runner.invoke(app, ["status", client, "--json"]).output)["state"]
         == "installed"
     )
+
+
+def test_config_refuses_change_during_confirmation(monkeypatch, tmp_path):
+    target = tmp_path / "config.toml"
+    target.write_text('enabled_entities = ["EMAIL"]\n')
+    monkeypatch.setenv("SHIM_GUARD_CONFIG", str(target))
+    concurrent = b'enabled_entities = ["SECRET"]\n[mode]\nuser-prompt = "enforce"\n'
+
+    def confirm(*args, **kwargs):
+        target.write_bytes(concurrent)
+        return True
+
+    monkeypatch.setattr("typer.confirm", confirm)
+    result = CliRunner().invoke(app, ["config", "--enable", "PHONE"])
+    assert result.exit_code == 2
+    assert target.read_bytes() == concurrent
+
+
+def test_config_refuses_file_created_during_confirmation(monkeypatch, tmp_path):
+    target = tmp_path / "new-parent" / "config.toml"
+    monkeypatch.setenv("SHIM_GUARD_CONFIG", str(target))
+    concurrent = b"ledger = true\n"
+
+    def confirm(*args, **kwargs):
+        target.write_bytes(concurrent)
+        return True
+
+    monkeypatch.setattr("typer.confirm", confirm)
+    result = CliRunner().invoke(app, ["config", "--enable", "PHONE"])
+    assert result.exit_code == 2
+    assert target.read_bytes() == concurrent
