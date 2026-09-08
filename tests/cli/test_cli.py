@@ -1260,3 +1260,28 @@ def test_an_empty_ledger_says_how_to_turn_it_on(monkeypatch, tmp_path) -> None:
 
     assert result.exit_code == 0
     assert "shim config --ledger" in unstyle(result.output)
+
+
+def test_a_failed_removal_is_not_reported_as_a_removal(monkeypatch, tmp_path) -> None:
+    """`removed the old hook file at ...` printed even when the unlink raised,
+    because the message sat outside the suppress. The file was still there and
+    doctor kept naming it, while the user had been told it was gone.
+    """
+    from shim_cli.cli import integrations
+
+    legacy = tmp_path / "shim-guard.json"
+    legacy.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(integrations, "_legacy_copilot_file", lambda: legacy)
+
+    def refuse(self):
+        raise OSError("read-only file system")
+
+    monkeypatch.setattr(Path, "unlink", refuse)
+    printed: list[str] = []
+    monkeypatch.setattr(
+        integrations, "emit", lambda level, text, **kw: printed.append(text)
+    )
+
+    integrations._remove_legacy_copilot_file()
+
+    assert printed == [], "nothing was removed, so nothing may say it was"

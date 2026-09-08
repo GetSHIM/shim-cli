@@ -177,6 +177,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             for name, value in upstream.getheaders():
                 if name.lower() in HOP_BY_HOP or name.lower() == "content-length":
                     continue
+                # An upstream header carrying CR or LF would split the response
+                # we write back. Nothing upstream should send one; drop it if it
+                # does rather than forward it.
+                if any(character in f"{name}{value}" for character in "\r\n"):
+                    continue
                 self.send_header(name, value)
             self.send_header("Content-Length", str(len(payload)))
             self.end_headers()

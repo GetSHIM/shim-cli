@@ -190,8 +190,13 @@ def _remove_legacy_copilot_file() -> None:
     legacy = _legacy_copilot_file()
     if legacy is None:
         return
-    with contextlib.suppress(OSError):
+    try:
         legacy.unlink()
+    except OSError:
+        # Saying "removed" over a failed unlink is the same defect this branch
+        # has been fixing everywhere else: a message that does not match what
+        # happened. The file is still there and doctor will keep naming it.
+        return
     emit("PASS", f"removed the old hook file at {legacy}")
 
 
