@@ -2,7 +2,7 @@
 
 ## What this does and does not prevent
 
-**With the default configuration, shim Guard does not prevent a secret typed
+**With the default configuration, shim does not prevent a secret typed
 into a Codex or Claude Code prompt from reaching the model.** It detects the
 value, reports what it found, and lets the prompt through. Those clients offer
 no prompt-rewrite field, so the only available alternative is refusing the
@@ -124,8 +124,10 @@ that is where the numbers came from.
 
 `shim config --ledger` opts in to keeping the same records after the session
 ends. It is off unless you turn it on, and `shim config --no-ledger` turns it
-back off. Files live under `$XDG_STATE_HOME/shim-guard` (or
-`~/.local/state/shim-guard`), one per month, `0600`, capped at 5 MB each.
+back off. Files live under `$XDG_STATE_HOME/shim` (or `~/.local/state/shim`),
+one per month, `0600`, capped at 5 MB each. A 0.2.0 install kept them under
+`shim-guard/`; those files are read and moved once, by the first `shim report`,
+`shim ledger purge` or `shim install` after the upgrade.
 
 Retention uses whole months. A month becomes eligible for deletion 30 days
 after its end, and the next ledger write prunes every eligible file. An entry

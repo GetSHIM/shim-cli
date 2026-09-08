@@ -9,7 +9,7 @@ architecture specification or an active checklist.
 
 ## Decision
 
-Keep shim Guard as one domain-sliced modular monolith and one Python
+Keep shim-cli as one domain-sliced modular monolith and one Python
 distribution. The product has no demonstrated need for services, Polylith,
 dependency injection, a provider-neutral plugin system, or an
 architecture-specific library.

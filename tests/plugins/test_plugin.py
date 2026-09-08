@@ -90,3 +90,25 @@ def test_a_double_install_is_reported_with_the_uninstall_command(
     assert check.status == "FAIL"
     assert "inspected twice" in check.detail
     assert "claude plugin uninstall shim-guard@shim-guard" in check.detail
+
+
+def test_the_plugin_readme_documents_the_launcher_order() -> None:
+    from pathlib import Path as _Path
+
+    text = (
+        _Path(__file__).parents[2] / "plugins" / "shim-cli" / "README.md"
+    ).read_text(encoding="utf-8")
+
+    assert text.startswith("# shim-cli plugin\n")
+    assert "`hooks/run-shim <client> [plugin-root]`" in text
+    assert "Python 3.9 or newer" in text
+    for step in (
+        "`shim-hook` on `PATH`",
+        "`shim-guard-hook` on `PATH`",
+        "`<plugin-root>/bin/shim.pyz`",
+    ):
+        assert step in text, step
+    assert text.index("`shim-hook` on `PATH`") < text.index(
+        "`shim-guard-hook` on `PATH`"
+    )
+    assert "Codex sets no such variable" in text

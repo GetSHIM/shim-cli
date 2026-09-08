@@ -1,7 +1,7 @@
 {
   "name": "shim-cli",
   "displayName": "shim-cli",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Detect and report sensitive prompts locally; verified Claude events mask eligible tool results and structured arguments by default, and prompt blocking is opt in.",
   "author": {
     "name": "shim Engineering"

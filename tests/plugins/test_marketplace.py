@@ -113,3 +113,18 @@ def test_both_listings_point_at_the_same_directory() -> None:
         }
 
     assert directory(CLAUDE) == directory(CODEX) == {"./plugins/shim-cli"}
+
+
+README = ROOT / "README.md"
+
+
+def test_the_readme_install_commands_name_the_manifest_plugin() -> None:
+    """A reader pastes these; they must not drift from the manifests."""
+    current = json.loads(CLAUDE.read_text())["plugins"][0]["name"]
+    marketplace = json.loads(CLAUDE.read_text())["name"]
+    text = README.read_text(encoding="utf-8")
+
+    assert f"/plugin install {current}@{marketplace}" in text
+    assert f"codex plugin add {current}@{marketplace}" in text
+    assert "/plugin marketplace add GetSHIM/shim-cli" in text
+    assert "codex plugin marketplace add GetSHIM/shim-cli" in text

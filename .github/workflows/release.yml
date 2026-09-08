@@ -32,10 +32,10 @@ jobs:
       - run: uv run --locked pytest
       - name: Require verification inputs to match the tagged tree
         run: |
-          mkdir /tmp/shim-guard-verified-source
-          /usr/bin/git archive "$GITHUB_SHA" | /usr/bin/tar -x -C /tmp/shim-guard-verified-source
+          mkdir /tmp/shim-cli-verified-source
+          /usr/bin/git archive "$GITHUB_SHA" | /usr/bin/tar -x -C /tmp/shim-cli-verified-source
           git diff --exit-code "$GITHUB_SHA" --
-          diff -qr --exclude=.git --exclude=.venv --exclude=.pytest_cache --exclude=.ruff_cache --exclude=__pycache__ /tmp/shim-guard-verified-source .
+          diff -qr --exclude=.git --exclude=.venv --exclude=.pytest_cache --exclude=.ruff_cache --exclude=__pycache__ /tmp/shim-cli-verified-source .
       - run: uv build --no-build-isolation --no-create-gitignore --out-dir dist/tested
       - name: Allow only the versioned wheel and source distribution
         run: python -c 'import os; from pathlib import Path; version = os.environ["GITHUB_REF_NAME"].removeprefix("v"); expected = {f"shim-{version}-py3-none-any.whl", f"shim-{version}.tar.gz"}; assert {path.name for path in Path("dist/tested").iterdir()} == expected'
@@ -43,27 +43,27 @@ jobs:
       - run: uv export --locked --only-dev --no-emit-project --output-file /tmp/shim-dev.lock
       - name: Verify packaged wheel contracts
         run: |
-          uv venv --python 3.13 /tmp/shim-guard-wheel
-          uv pip install --python /tmp/shim-guard-wheel --require-hashes -r dist/requirements.lock -r /tmp/shim-dev.lock
-          uv pip install --python /tmp/shim-guard-wheel --no-deps "dist/tested/shim-${GITHUB_REF_NAME#v}-py3-none-any.whl"
-          test -x /tmp/shim-guard-wheel/bin/shim-hook
-          test -x /tmp/shim-guard-wheel/bin/shim-guard-hook
-          test -z "$(printf '%s' '{"hook_event_name":"UserPromptSubmit","prompt":"Synthetic safe prompt"}' | /tmp/shim-guard-wheel/bin/shim-guard-hook codex 2>&1)"
-          /tmp/shim-guard-wheel/bin/shim demo codex --json
-          /tmp/shim-guard-wheel/bin/python -I -B -m pytest tests/contracts/codex/test_hook.py
-          /tmp/shim-guard-wheel/bin/python -I -B -m pytest tests/contracts/claude/test_claude_hook.py
+          uv venv --python 3.13 /tmp/shim-cli-wheel
+          uv pip install --python /tmp/shim-cli-wheel --require-hashes -r dist/requirements.lock -r /tmp/shim-dev.lock
+          uv pip install --python /tmp/shim-cli-wheel --no-deps "dist/tested/shim-${GITHUB_REF_NAME#v}-py3-none-any.whl"
+          test -x /tmp/shim-cli-wheel/bin/shim-hook
+          test -x /tmp/shim-cli-wheel/bin/shim-guard-hook
+          test -z "$(printf '%s' '{"hook_event_name":"UserPromptSubmit","prompt":"Synthetic safe prompt"}' | /tmp/shim-cli-wheel/bin/shim-guard-hook codex 2>&1)"
+          /tmp/shim-cli-wheel/bin/shim demo codex --json
+          /tmp/shim-cli-wheel/bin/python -I -B -m pytest tests/contracts/codex/test_hook.py
+          /tmp/shim-cli-wheel/bin/python -I -B -m pytest tests/contracts/claude/test_claude_hook.py
           python scripts/benchmark_hook.py --self-check
       - name: Verify packaged source distribution contracts
         run: |
-          uv venv --python 3.13 /tmp/shim-guard-sdist
-          uv pip install --python /tmp/shim-guard-sdist --require-hashes -r dist/requirements.lock -r /tmp/shim-dev.lock
-          uv pip install --python /tmp/shim-guard-sdist --no-deps --no-build-isolation "dist/tested/shim-${GITHUB_REF_NAME#v}.tar.gz"
-          test -x /tmp/shim-guard-sdist/bin/shim-hook
-          test -x /tmp/shim-guard-sdist/bin/shim-guard-hook
-          test -z "$(printf '%s' '{"hook_event_name":"UserPromptSubmit","prompt":"Synthetic safe prompt"}' | /tmp/shim-guard-sdist/bin/shim-guard-hook codex 2>&1)"
-          /tmp/shim-guard-sdist/bin/shim demo codex --json
-          /tmp/shim-guard-sdist/bin/python -I -B -m pytest tests/contracts/codex/test_hook.py
-          /tmp/shim-guard-sdist/bin/python -I -B -m pytest tests/contracts/claude/test_claude_hook.py
+          uv venv --python 3.13 /tmp/shim-cli-sdist
+          uv pip install --python /tmp/shim-cli-sdist --require-hashes -r dist/requirements.lock -r /tmp/shim-dev.lock
+          uv pip install --python /tmp/shim-cli-sdist --no-deps --no-build-isolation "dist/tested/shim-${GITHUB_REF_NAME#v}.tar.gz"
+          test -x /tmp/shim-cli-sdist/bin/shim-hook
+          test -x /tmp/shim-cli-sdist/bin/shim-guard-hook
+          test -z "$(printf '%s' '{"hook_event_name":"UserPromptSubmit","prompt":"Synthetic safe prompt"}' | /tmp/shim-cli-sdist/bin/shim-guard-hook codex 2>&1)"
+          /tmp/shim-cli-sdist/bin/shim demo codex --json
+          /tmp/shim-cli-sdist/bin/python -I -B -m pytest tests/contracts/codex/test_hook.py
+          /tmp/shim-cli-sdist/bin/python -I -B -m pytest tests/contracts/claude/test_claude_hook.py
       - name: Recheck the verified package allowlist
         run: python -c 'import os; from pathlib import Path; version = os.environ["GITHUB_REF_NAME"].removeprefix("v"); expected = {f"shim-{version}-py3-none-any.whl", f"shim-{version}.tar.gz"}; assert {path.name for path in Path("dist/tested").iterdir()} == expected'
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -85,18 +85,18 @@ jobs:
       - name: Snapshot the tagged source before dependency execution
         run: |
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          mkdir /tmp/shim-guard-build-source
-          /usr/bin/git archive "$GITHUB_SHA" | /usr/bin/tar -x -C /tmp/shim-guard-build-source
+          mkdir /tmp/shim-cli-build-source
+          /usr/bin/git archive "$GITHUB_SHA" | /usr/bin/tar -x -C /tmp/shim-cli-build-source
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: '3.13'
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
       - name: Require matching version and completed release evidence
         run: |
-          python -c 'import os, pathlib, tomllib; root = pathlib.Path("/tmp/shim-guard-build-source"); version = tomllib.loads((root / "pyproject.toml").read_text())["project"]["version"]; assert os.environ["GITHUB_REF_NAME"] == f"v{version}"'
-          python -c 'from pathlib import Path; assert "PENDING_RELEASE_EVIDENCE" not in Path("/tmp/shim-guard-build-source/docs/compatibility.md").read_text()'
-      - run: uv sync --project /tmp/shim-guard-build-source --locked --no-install-project
-      - run: uv build --python /tmp/shim-guard-build-source/.venv/bin/python --no-build-isolation --no-create-gitignore /tmp/shim-guard-build-source --out-dir dist/packages
+          python -c 'import os, pathlib, tomllib; root = pathlib.Path("/tmp/shim-cli-build-source"); version = tomllib.loads((root / "pyproject.toml").read_text())["project"]["version"]; assert os.environ["GITHUB_REF_NAME"] == f"v{version}"'
+          python -c 'from pathlib import Path; assert "PENDING_RELEASE_EVIDENCE" not in Path("/tmp/shim-cli-build-source/docs/compatibility.md").read_text()'
+      - run: uv sync --project /tmp/shim-cli-build-source --locked --no-install-project
+      - run: uv build --python /tmp/shim-cli-build-source/.venv/bin/python --no-build-isolation --no-create-gitignore /tmp/shim-cli-build-source --out-dir dist/packages
       - name: Allow only the versioned wheel and source distribution
         run: python -c 'import os; from pathlib import Path; version = os.environ["GITHUB_REF_NAME"].removeprefix("v"); expected = {f"shim-{version}-py3-none-any.whl", f"shim-{version}.tar.gz"}; assert {path.name for path in Path("dist/packages").iterdir()} == expected'
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
@@ -110,31 +110,31 @@ jobs:
           cmp "verified/shim-${GITHUB_REF_NAME#v}.tar.gz" "dist/packages/shim-${GITHUB_REF_NAME#v}.tar.gz"
       - name: Re-extract immutable release evidence inputs
         run: |
-          mkdir /tmp/shim-guard-evidence-source
-          /usr/bin/git archive "$GITHUB_SHA" | /usr/bin/tar -x -C /tmp/shim-guard-evidence-source
-          python -c 'import os, pathlib, tomllib; root = pathlib.Path("/tmp/shim-guard-evidence-source"); version = tomllib.loads((root / "pyproject.toml").read_text())["project"]["version"]; assert os.environ["GITHUB_REF_NAME"] == f"v{version}"'
-          python -c 'from pathlib import Path; assert "PENDING_RELEASE_EVIDENCE" not in Path("/tmp/shim-guard-evidence-source/docs/compatibility.md").read_text()'
-      - run: uv export --project /tmp/shim-guard-evidence-source --locked --no-dev --no-emit-project --output-file dist/requirements.lock
+          mkdir /tmp/shim-cli-evidence-source
+          /usr/bin/git archive "$GITHUB_SHA" | /usr/bin/tar -x -C /tmp/shim-cli-evidence-source
+          python -c 'import os, pathlib, tomllib; root = pathlib.Path("/tmp/shim-cli-evidence-source"); version = tomllib.loads((root / "pyproject.toml").read_text())["project"]["version"]; assert os.environ["GITHUB_REF_NAME"] == f"v{version}"'
+          python -c 'from pathlib import Path; assert "PENDING_RELEASE_EVIDENCE" not in Path("/tmp/shim-cli-evidence-source/docs/compatibility.md").read_text()'
+      - run: uv export --project /tmp/shim-cli-evidence-source --locked --no-dev --no-emit-project --output-file dist/requirements.lock
       - name: Benchmark the clean tagged wheel
         run: |
-          uv venv --python 3.13 /tmp/shim-guard-benchmark
-          uv pip install --python /tmp/shim-guard-benchmark --require-hashes -r dist/requirements.lock
-          uv pip install --python /tmp/shim-guard-benchmark --no-deps "dist/packages/shim-${GITHUB_REF_NAME#v}-py3-none-any.whl"
-          python /tmp/shim-guard-evidence-source/scripts/benchmark_hook.py --self-check
-          python /tmp/shim-guard-evidence-source/scripts/benchmark_hook.py /tmp/shim-guard-benchmark/bin/python --samples-per-fixture 20 --output dist/benchmark-hook.json
+          uv venv --python 3.13 /tmp/shim-cli-benchmark
+          uv pip install --python /tmp/shim-cli-benchmark --require-hashes -r dist/requirements.lock
+          uv pip install --python /tmp/shim-cli-benchmark --no-deps "dist/packages/shim-${GITHUB_REF_NAME#v}-py3-none-any.whl"
+          python /tmp/shim-cli-evidence-source/scripts/benchmark_hook.py --self-check
+          python /tmp/shim-cli-evidence-source/scripts/benchmark_hook.py /tmp/shim-cli-benchmark/bin/python --samples-per-fixture 20 --output dist/benchmark-hook.json
       - run: |
-          cp /tmp/shim-guard-evidence-source/docs/compatibility.md dist/COMPATIBILITY.md
-          /tmp/shim-guard-build-source/.venv/bin/python /tmp/shim-guard-evidence-source/scripts/build_zipapp.py \
-            --output /tmp/shim-guard-evidence-source/plugins/shim-guard/bin/shim.pyz
-          cp /tmp/shim-guard-evidence-source/plugins/shim-guard/bin/shim.pyz dist/shim.pyz
-          cp /tmp/shim-guard-evidence-source/tests/corpus/guard-v2.json dist/guard-v2.json
-          cp /tmp/shim-guard-evidence-source/tests/corpus/guard-v2-metrics.json dist/guard-v2-metrics.json
-          cp /tmp/shim-guard-evidence-source/tests/corpus/guard-tools-v1.json dist/guard-tools-v1.json
+          cp /tmp/shim-cli-evidence-source/docs/compatibility.md dist/COMPATIBILITY.md
+          /tmp/shim-cli-build-source/.venv/bin/python /tmp/shim-cli-evidence-source/scripts/build_zipapp.py \
+            --output /tmp/shim-cli-evidence-source/plugins/shim-cli/bin/shim.pyz
+          cp /tmp/shim-cli-evidence-source/plugins/shim-cli/bin/shim.pyz dist/shim.pyz
+          cp /tmp/shim-cli-evidence-source/tests/corpus/guard-v2.json dist/guard-v2.json
+          cp /tmp/shim-cli-evidence-source/tests/corpus/guard-v2-metrics.json dist/guard-v2-metrics.json
+          cp /tmp/shim-cli-evidence-source/tests/corpus/guard-tools-v1.json dist/guard-tools-v1.json
       - uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
         with:
           path: dist/packages
           format: cyclonedx-json
-          output-file: dist/shim-guard.sbom.cdx.json
+          output-file: dist/shim-cli.sbom.cdx.json
           upload-artifact: false
           upload-release-assets: false
       - name: Recheck the package artifact allowlist
@@ -148,12 +148,12 @@ jobs:
             cd dist/packages
             sha256sum "shim-${GITHUB_REF_NAME#v}-py3-none-any.whl" "shim-${GITHUB_REF_NAME#v}.tar.gz"
             cd ..
-            sha256sum COMPATIBILITY.md shim.pyz guard-v2.json guard-v2-metrics.json guard-tools-v1.json benchmark-hook.json requirements.lock shim-guard.sbom.cdx.json
+            sha256sum COMPATIBILITY.md shim.pyz guard-v2.json guard-v2-metrics.json guard-tools-v1.json benchmark-hook.json requirements.lock shim-cli.sbom.cdx.json
           ) > dist/SHA256SUMS
       - name: Verify checksums from a flat download directory
         run: |
           mkdir dist/download
-          cp "dist/packages/shim-${GITHUB_REF_NAME#v}-py3-none-any.whl" "dist/packages/shim-${GITHUB_REF_NAME#v}.tar.gz" dist/COMPATIBILITY.md dist/shim.pyz dist/guard-v2.json dist/guard-v2-metrics.json dist/guard-tools-v1.json dist/benchmark-hook.json dist/requirements.lock dist/shim-guard.sbom.cdx.json dist/SHA256SUMS dist/download/
+          cp "dist/packages/shim-${GITHUB_REF_NAME#v}-py3-none-any.whl" "dist/packages/shim-${GITHUB_REF_NAME#v}.tar.gz" dist/COMPATIBILITY.md dist/shim.pyz dist/guard-v2.json dist/guard-v2-metrics.json dist/guard-tools-v1.json dist/benchmark-hook.json dist/requirements.lock dist/shim-cli.sbom.cdx.json dist/SHA256SUMS dist/download/
           cd dist/download
           sha256sum -c SHA256SUMS
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -169,7 +169,7 @@ jobs:
             dist/benchmark-hook.json
             dist/requirements.lock
             dist/SHA256SUMS
-            dist/shim-guard.sbom.cdx.json
+            dist/shim-cli.sbom.cdx.json
           if-no-files-found: error
 
   attest:
@@ -192,7 +192,7 @@ jobs:
       - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
         with:
           subject-path: dist/packages/*
-          sbom-path: dist/shim-guard.sbom.cdx.json
+          sbom-path: dist/shim-cli.sbom.cdx.json
 
   release:
     needs: [build, attest]
@@ -207,7 +207,7 @@ jobs:
           ref: ${{ github.sha }}
       - name: Require committed plugin archive and release notes
         run: |
-          test -x plugins/shim-guard/bin/shim.pyz
+          test -x plugins/shim-cli/bin/shim.pyz
           test -f "docs/releases/${GITHUB_REF_NAME#v}.md"
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
@@ -217,7 +217,7 @@ jobs:
         run: python -c 'import os; from pathlib import Path; version = os.environ["GITHUB_REF_NAME"].removeprefix("v"); expected = {f"shim-{version}-py3-none-any.whl", f"shim-{version}.tar.gz"}; assert {path.name for path in Path("dist/packages").iterdir()} == expected'
       - env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" "dist/packages/shim-${GITHUB_REF_NAME#v}-py3-none-any.whl" "dist/packages/shim-${GITHUB_REF_NAME#v}.tar.gz" dist/COMPATIBILITY.md dist/shim.pyz dist/guard-v2.json dist/guard-v2-metrics.json dist/guard-tools-v1.json dist/benchmark-hook.json dist/requirements.lock dist/SHA256SUMS dist/shim-guard.sbom.cdx.json --notes-file "docs/releases/${GITHUB_REF_NAME#v}.md" --repo "$GITHUB_REPOSITORY"
+        run: gh release create "$GITHUB_REF_NAME" "dist/packages/shim-${GITHUB_REF_NAME#v}-py3-none-any.whl" "dist/packages/shim-${GITHUB_REF_NAME#v}.tar.gz" dist/COMPATIBILITY.md dist/shim.pyz dist/guard-v2.json dist/guard-v2-metrics.json dist/guard-tools-v1.json dist/benchmark-hook.json dist/requirements.lock dist/SHA256SUMS dist/shim-cli.sbom.cdx.json --notes-file "docs/releases/${GITHUB_REF_NAME#v}.md" --repo "$GITHUB_REPOSITORY"
 
   publish:
     needs: [build, attest, release]

@@ -65,31 +65,31 @@ jobs:
           PY
       - name: Verify packaged wheel contracts and record benchmark
         run: |
-          uv venv --python ${{ matrix.python-version }} /tmp/shim-guard-wheel
-          uv pip install --python /tmp/shim-guard-wheel --require-hashes -r /tmp/shim-runtime.lock -r /tmp/shim-dev.lock
-          uv pip install --python /tmp/shim-guard-wheel --no-deps dist/*.whl
-          /tmp/shim-guard-wheel/bin/shim --help
-          test -x /tmp/shim-guard-wheel/bin/shim-hook
-          test -x /tmp/shim-guard-wheel/bin/shim-guard-hook
-          test -z "$(printf '%s' '{"hook_event_name":"UserPromptSubmit","prompt":"Synthetic safe prompt"}' | /tmp/shim-guard-wheel/bin/shim-guard-hook codex 2>&1)"
-          /tmp/shim-guard-wheel/bin/shim demo codex --json
-          /tmp/shim-guard-wheel/bin/python -I -B -m pytest tests/contracts/codex/test_hook.py
-          /tmp/shim-guard-wheel/bin/python -I -B -m pytest tests/contracts/claude/test_claude_hook.py
-          /tmp/shim-guard-wheel/bin/python -I -B -m pytest tests/contracts/test_import_hygiene.py
+          uv venv --python ${{ matrix.python-version }} /tmp/shim-cli-wheel
+          uv pip install --python /tmp/shim-cli-wheel --require-hashes -r /tmp/shim-runtime.lock -r /tmp/shim-dev.lock
+          uv pip install --python /tmp/shim-cli-wheel --no-deps dist/*.whl
+          /tmp/shim-cli-wheel/bin/shim --help
+          test -x /tmp/shim-cli-wheel/bin/shim-hook
+          test -x /tmp/shim-cli-wheel/bin/shim-guard-hook
+          test -z "$(printf '%s' '{"hook_event_name":"UserPromptSubmit","prompt":"Synthetic safe prompt"}' | /tmp/shim-cli-wheel/bin/shim-guard-hook codex 2>&1)"
+          /tmp/shim-cli-wheel/bin/shim demo codex --json
+          /tmp/shim-cli-wheel/bin/python -I -B -m pytest tests/contracts/codex/test_hook.py
+          /tmp/shim-cli-wheel/bin/python -I -B -m pytest tests/contracts/claude/test_claude_hook.py
+          /tmp/shim-cli-wheel/bin/python -I -B -m pytest tests/contracts/test_import_hygiene.py
           python scripts/benchmark_hook.py --self-check
-          python scripts/benchmark_hook.py /tmp/shim-guard-wheel/bin/python --samples-per-fixture 20 --output /tmp/shim-benchmark.json
+          python scripts/benchmark_hook.py /tmp/shim-cli-wheel/bin/python --samples-per-fixture 20 --output /tmp/shim-benchmark.json
           cat /tmp/shim-benchmark.json
       - name: Verify packaged source distribution contracts
         run: |
-          uv venv --python ${{ matrix.python-version }} /tmp/shim-guard-sdist
-          uv pip install --python /tmp/shim-guard-sdist --require-hashes -r /tmp/shim-runtime.lock -r /tmp/shim-dev.lock
-          uv pip install --python /tmp/shim-guard-sdist --no-deps --no-build-isolation dist/*.tar.gz
-          test -x /tmp/shim-guard-sdist/bin/shim-hook
-          test -x /tmp/shim-guard-sdist/bin/shim-guard-hook
-          test -z "$(printf '%s' '{"hook_event_name":"UserPromptSubmit","prompt":"Synthetic safe prompt"}' | /tmp/shim-guard-sdist/bin/shim-guard-hook codex 2>&1)"
-          /tmp/shim-guard-sdist/bin/shim demo codex --json
-          /tmp/shim-guard-sdist/bin/python -I -B -m pytest tests/contracts/codex/test_hook.py
-          /tmp/shim-guard-sdist/bin/python -I -B -m pytest tests/contracts/claude/test_claude_hook.py
+          uv venv --python ${{ matrix.python-version }} /tmp/shim-cli-sdist
+          uv pip install --python /tmp/shim-cli-sdist --require-hashes -r /tmp/shim-runtime.lock -r /tmp/shim-dev.lock
+          uv pip install --python /tmp/shim-cli-sdist --no-deps --no-build-isolation dist/*.tar.gz
+          test -x /tmp/shim-cli-sdist/bin/shim-hook
+          test -x /tmp/shim-cli-sdist/bin/shim-guard-hook
+          test -z "$(printf '%s' '{"hook_event_name":"UserPromptSubmit","prompt":"Synthetic safe prompt"}' | /tmp/shim-cli-sdist/bin/shim-guard-hook codex 2>&1)"
+          /tmp/shim-cli-sdist/bin/shim demo codex --json
+          /tmp/shim-cli-sdist/bin/python -I -B -m pytest tests/contracts/codex/test_hook.py
+          /tmp/shim-cli-sdist/bin/python -I -B -m pytest tests/contracts/claude/test_claude_hook.py
 
   archive-on-3-9:
     runs-on: ubuntu-latest

@@ -4,7 +4,7 @@
 
 | Area | Status |
 | --- | --- |
-| Python | CPython 3.10 through 3.13 |
+| Python | CPython 3.10 through 3.13 for the package; the plugin archive runs on 3.9 through 3.13 |
 | Operating systems | macOS and Linux target |
 | Prompt hooks | Codex CLI, Claude Code, and GitHub Copilot CLI |
 | Tool hooks | Claude Code `PreToolUse` and `PostToolUse` only |
@@ -21,6 +21,7 @@ removed in **0.5.0**, the second minor release after 0.3.0:
 | the importable `shim_guard` package, including `python -m shim_guard.hook` | `shim_cli`, `python -m shim_cli.hook` |
 | the `shim-guard-hook` console script | `shim-hook` |
 | the `SHIM_GUARD_CONFIG` variable | `SHIM_CONFIG`, which outranks it |
+| the `shim-guard` marketplace entry in both plugin manifests | the `shim-cli` entry |
 
 The compatibility package re-exports and does nothing else. It emits no
 deprecation warning: the hook is a cold-start subprocess whose stderr the
@@ -61,6 +62,10 @@ Codex leaves inline `config.toml` hooks untouched. Claude uses shell-free
 arguments and native structured tool responses. Copilot uses
 `userPromptTransformed` to replace the model-facing prompt; the original can
 remain visible in its timeline.
+
+## 0.3.0 release evidence
+
+PENDING_RELEASE_EVIDENCE
 
 ## Dated development evidence
 

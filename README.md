@@ -4,7 +4,7 @@
   </a>
 </p>
 
-<h1 align="center">shim Guard</h1>
+<h1 align="center">shim-cli</h1>
 
 <p align="center">
   <strong>Local traffic visibility and privacy controls for coding agents.</strong><br>
@@ -19,7 +19,7 @@
   <a href="https://github.com/GetSHIM/shim-cli/stargazers"><img src="https://img.shields.io/github/stars/GetSHIM/shim-cli.svg?style=flat&amp;logo=github" alt="GitHub stars"></a>
 </p>
 
-shim Guard shows you what your coding agent actually sends to the model — how
+shim-cli shows you what your coding agent actually sends to the model — how
 many tokens went where, what the turn cost, and which secrets and personal data
 were in it — and masks what it can before the model sees it. The hook and
 detector add no network destination, account, API key, or telemetry. The opt-in
@@ -33,7 +33,7 @@ Two commands, two different questions:
 | `shim install claude` | Mask secrets and personal data in eligible tool results, every session, automatically. |
 
 > [!WARNING]
-> shim Guard is alpha software and a best-effort guard, not a data-loss
+> shim-cli is alpha software and a best-effort guard, not a data-loss
 > prevention boundary. Read the [privacy limitations](https://github.com/GetSHIM/shim-cli/blob/main/docs/privacy.md) before
 > using it with sensitive data.
 
@@ -114,7 +114,7 @@ Tool coverage is verified against a running client, not derived from
 documentation. `shim doctor <client>` prints exactly which events are installed
 and what shim can and cannot change at each one.
 
-shim Guard detects email addresses, phone numbers, credit cards, IBANs, IP and
+shim-cli detects email addresses, phone numbers, credit cards, IBANs, IP and
 MAC addresses, US SSNs, Turkish national and tax IDs, secrets, and database
 URIs. Checksums are verified where they exist, so a mistyped IBAN or national
 ID is not reported.
@@ -132,17 +132,15 @@ telemetry, or prompt history.
 
 ## Install
 
-shim Guard supports CPython 3.10 through 3.13 on macOS and Linux. Choose one
-package manager:
+The `shim` package supports CPython 3.10 through 3.13 on macOS and Linux. The
+plugin's bundled hook also runs on 3.9, which is what a stock macOS provides.
+Choose one package manager:
 
 ```console
 uv tool install --compile-bytecode shim
 # or
 pipx install shim
 ```
-
-If you installed the previous `shim-guard` distribution, uninstall it before
-installing `shim`; both distributions provide the same commands.
 
 Preview and install the hook for your client:
 
@@ -159,21 +157,37 @@ commands.
 
 Codex and Claude Code users can install the repository's marketplace plugin:
 
-```console
-codex plugin marketplace add GetSHIM/shim-cli
-codex plugin add shim-guard@shim-guard
-```
-
 ```text
 /plugin marketplace add GetSHIM/shim-cli
-/plugin install shim-guard@shim-guard
+/plugin install shim-cli@shim-cli
+```
+
+```console
+codex plugin marketplace add GetSHIM/shim-cli
+codex plugin add shim-cli@shim-cli
 ```
 
 The marketplace plugin and `shim install` are alternative hook-registration
-methods. Do not use both for the same client. Release-tag Claude plugins bundle
-the hook archive and need only Python 3.10 or newer; the Codex plugin currently
-uses `shim-guard-hook` from the installed CLI package. A development checkout
-may not contain the release archive.
+methods. Do not use both for the same client; `shim doctor` fails when it finds
+two. Release-tag plugins bundle the hook archive, which needs only Python 3.9 or
+newer and nothing else installed, on both clients. A development checkout may not
+contain the release archive.
+
+### Upgrading from 0.2.0
+
+Nothing breaks and nothing is required of you. The hook command your client
+already runs keeps working, byte for byte, through a compatibility package.
+
+When convenient, run `shim install <client>` once. That rewrites the hook line
+to the new module name and, on Copilot, replaces the old hook file. Your
+settings and ledger move to `shim/` on the next `shim` command that touches
+them, and each move is reported once. The Claude Code plugin keeps loading and
+updating: `shim-guard@shim-guard` still resolves through a marketplace alias,
+which is removed in 0.5.0 along with the `shim-guard-hook` script, the
+`shim_guard` package and the `SHIM_GUARD_CONFIG` variable.
+
+Codex plugin users are the one exception and need four commands; see
+[docs/compatibility.md](docs/compatibility.md).
 
 ## Use
 
@@ -189,7 +203,7 @@ Both commands read standard input. Do not pass real prompts as command-line
 arguments, where they may be recorded in shell history or process listings.
 
 > [!IMPORTANT]
-> **With the default configuration, shim Guard does not prevent a secret you
+> **With the default configuration, shim-cli does not prevent a secret you
 > type into a prompt from reaching the model. It tells you afterwards.**
 > Codex and Claude Code offer no field for rewriting a submitted prompt, so the
 > only way to stop one is to refuse the sentence you just typed — which is
@@ -330,7 +344,7 @@ See [Privacy](https://github.com/GetSHIM/shim-cli/blob/main/docs/privacy.md) for
 
 ## Uninstall
 
-Remove shim Guard's hook before uninstalling the package:
+Remove shim's hook before uninstalling the package:
 
 ```console
 shim revert codex

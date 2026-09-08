@@ -1,6 +1,6 @@
 # Architecture
 
-shim Guard is one Python distribution and one domain-sliced modular monolith.
+shim-cli is one Python distribution and one domain-sliced modular monolith.
 It has two independent paths between a coding agent and its model:
 
 - The synchronous **hook** receives native client events, applies local policy,
@@ -94,7 +94,7 @@ and a verified mutation or report channel; it is not enabled by a flag.
 
 Codex installation leaves inline `config.toml` hooks untouched. Claude
 installation changes only shim's exact groups in user `settings.json`.
-Copilot owns its dedicated `hooks/shim-guard.json` and retains an empty
+Copilot owns its dedicated `hooks/shim.json` and retains an empty
 versioned document on revert. All clients preserve unrelated settings;
 malformed, ambiguous, unsafe, or concurrently changed files require manual
 action.

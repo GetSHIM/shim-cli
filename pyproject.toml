@@ -1,7 +1,7 @@
 [project]
 name = "shim"
-version = "0.2.0"
-description = "Local sensitive-data detection, prompt reporting, opt-in prompt blocking, verified Claude tool-event masking, and API-traffic watching"
+version = "0.3.0"
+description = "shim-cli: local sensitive-data detection, prompt reporting, opt-in prompt blocking, verified Claude tool-event masking, and API-traffic watching"
 readme = "README.md"
 requires-python = ">=3.10,<3.14"
 license = "Apache-2.0"

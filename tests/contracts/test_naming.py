@@ -67,3 +67,54 @@ def test_the_compatibility_package_holds_only_re_exports() -> None:
         body = (ROOT / relative).read_text(encoding="utf-8")
         assert "def " not in body
         assert "shim_cli" in body
+
+
+# R1: the prose allowlist. Each entry is a file whose old-name mentions are the
+# migration itself; everything else must be clean.
+PROSE_ALLOWED = {
+    "docs/releases/0.2.0.md",  # history, unchanged
+    "docs/releases/0.3.0.md",
+    "docs/compatibility.md",
+    "README.md",
+    "docs/privacy.md",
+    "plugins/shim-cli/README.md",
+}
+PROSE_NAMES = ("SHIM Guard", "shim Guard")
+
+
+def test_no_prose_file_still_calls_the_product_by_its_old_name() -> None:
+    offenders = []
+    for relative in _tracked("."):
+        if not relative.endswith(".md") or relative in PROSE_ALLOWED:
+            continue
+        try:
+            text = (ROOT / relative).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        offenders += [f"{relative}: {name}" for name in PROSE_NAMES if name in text]
+
+    assert not offenders, "\n".join(sorted(offenders))
+
+
+def test_the_allowlisted_prose_only_mentions_the_old_name_as_a_migration() -> None:
+    """An allowlist that stops being needed is an allowlist that rots."""
+    unused = [
+        relative
+        for relative in sorted(PROSE_ALLOWED)
+        if relative != "docs/releases/0.2.0.md"
+        and "shim-guard" not in (ROOT / relative).read_text(encoding="utf-8")
+        and "shim_guard" not in (ROOT / relative).read_text(encoding="utf-8")
+        and "SHIM_GUARD" not in (ROOT / relative).read_text(encoding="utf-8")
+    ]
+
+    assert not unused, f"remove from PROSE_ALLOWED: {unused}"
+
+
+def test_the_release_notes_exist_for_the_declared_version() -> None:
+    import tomllib
+
+    version = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["version"]
+    notes = ROOT / "docs" / "releases" / f"{version}.md"
+
+    assert notes.is_file(), f"release.yml expects {notes.relative_to(ROOT)}"
+    assert notes.read_text(encoding="utf-8").startswith(f"# shim-cli {version}\n")

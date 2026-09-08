@@ -1,4 +1,4 @@
-# SHIM Guard agent guidance
+# shim-cli agent guidance
 
 Read `README.md`, `docs/architecture.md`, `docs/privacy.md`, and `docs/compatibility.md` before changing the detector, hook protocol, installer, or `shim watch`.
 
