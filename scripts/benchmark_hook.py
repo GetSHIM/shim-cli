@@ -128,7 +128,10 @@ def benchmark(python: Path, samples_per_fixture: int) -> dict[str, object]:
         config.write_text('[mode]\nuser-prompt = "enforce"\n', encoding="utf-8")
         config.chmod(0o600)
         environment = os.environ.copy()
-        environment["SHIM_GUARD_CONFIG"] = str(config)
+        # SHIM_CONFIG outranks the 0.2.0 name; leaving it set would measure
+        # whatever settings the developer happens to have.
+        environment.pop("SHIM_GUARD_CONFIG", None)
+        environment["SHIM_CONFIG"] = str(config)
         environment["TMPDIR"] = str(temporary)
         # The configured ceiling of user patterns, on the same safe prompt.
         patterns = temporary / "custom.toml"
@@ -142,7 +145,7 @@ def benchmark(python: Path, samples_per_fixture: int) -> dict[str, object]:
             encoding="utf-8",
         )
         patterns.chmod(0o600)
-        with_patterns = dict(environment, SHIM_GUARD_CONFIG=str(patterns))
+        with_patterns = dict(environment, SHIM_CONFIG=str(patterns))
         for _ in range(samples_per_fixture):
             safe_samples.append(run_hook(python, SAFE_INPUT, b"", b"", environment))
             block_samples.append(

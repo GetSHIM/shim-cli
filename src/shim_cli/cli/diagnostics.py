@@ -303,9 +303,10 @@ def _runner_check(client: str) -> Check:
     try:
         with tempfile.TemporaryDirectory(prefix="shim-doctor-") as directory:
             environment = os.environ.copy()
-            environment["SHIM_GUARD_CONFIG"] = str(
-                Path(directory).resolve() / "config.toml"
-            )
+            # SHIM_CONFIG outranks the 0.2.0 name; set both or the fixture
+            # runs under the user's own settings and reports a false failure.
+            environment["SHIM_CONFIG"] = str(Path(directory).resolve() / "config.toml")
+            environment.pop("SHIM_GUARD_CONFIG", None)
             environment["TMPDIR"] = directory
             safe_result = _run_hook(command, safe, environment, timeout)
             block_result = _run_hook(command, blocked, environment, timeout)

@@ -1000,3 +1000,19 @@ def test_a_reveal_that_is_not_allowed_is_refused(
 
     assert result.exit_code == 2
     assert (target.read_bytes() if target.exists() else None) == before
+
+
+def test_the_doctor_fixture_ignores_the_user_s_own_settings(
+    monkeypatch, tmp_path
+) -> None:
+    """SHIM_CONFIG outranks the 0.2.0 name; the self-test must still be isolated."""
+    from shim_cli.cli.diagnostics import _runner_check
+
+    target = tmp_path / "settings" / "config.toml"
+    target.parent.mkdir(mode=0o700, parents=True)
+    target.write_text('[mode]\nuser-prompt = "enforce"\n', encoding="utf-8")
+    target.chmod(0o600)
+    monkeypatch.setenv("SHIM_CONFIG", str(target))
+    monkeypatch.delenv("SHIM_GUARD_CONFIG", raising=False)
+
+    assert _runner_check("claude").status == "PASS"
