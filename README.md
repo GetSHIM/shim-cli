@@ -259,6 +259,16 @@ independently of the hook — reported two email addresses in the whole session,
 both from the client's own system messages. None of the sixty reached the
 model.
 
+Two more lines appear when they have something to say. A session with your own
+patterns names which one matched, and a scanned model reply is counted apart
+from everything else, because the model wrote it:
+
+```text
+  masked    3 CUSTOM  (Read config/settings.py)
+  custom    2 PROJECT_CODENAME, 1 INTERNAL_HOST
+  model     1 EMAIL in its replies (model-generated content, not leaks)
+```
+
 `shim report` prints the same summary on demand, and `--json` makes it
 scriptable. It reads the newest temporary spool first; if none remains, it
 falls back to the retained ledger, if you turned that on.
@@ -440,7 +450,7 @@ Every figure here was measured on the released build, not estimated.
 
 | | |
 | --- | --- |
-| Tests | **1,799**, one command: `python scripts/check.py` — lock, lint, format, types, suite, wheel, sdist |
+| Tests | **1,800+**, one command: `python scripts/check.py` — lock, lint, format, types, suite, wheel, sdist |
 | Hook cost | **67 ms** median end to end, interpreter start included; **41 ms** for a session summary |
 | With 32 custom patterns | **+0.8 ms** median against the same prompt with none |
 | Detector corpus | **570 cases**, graded on exact redacted output rather than category presence |
