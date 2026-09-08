@@ -432,6 +432,43 @@ reported.
 See [Privacy](https://github.com/GetSHIM/shim-cli/blob/main/docs/privacy.md) for the full trust boundary and
 [Compatibility](https://github.com/GetSHIM/shim-cli/blob/main/docs/compatibility.md) for tested versions and evidence.
 
+## How this is verified
+
+Every figure here was measured on the released build, not estimated.
+
+| | |
+| --- | --- |
+| Tests | **1,799**, one command: `python scripts/check.py` — lock, lint, format, types, suite, wheel, sdist |
+| Hook cost | **67 ms** median end to end, interpreter start included; **41 ms** for a session summary |
+| With 32 custom patterns | **+0.8 ms** median against the same prompt with none |
+| Detector corpus | **570 cases**, graded on exact redacted output rather than category presence |
+
+Hook output is asserted byte for byte, not by shape: a safe event must produce
+exactly zero bytes on stdout and stderr. 312 contract tests hold that, plus the
+import boundaries, the rule that no committed file carries the machine it was
+written on, and a byte-identical rebuild of the shipped plugin archive.
+
+The detector scores 1.0 precision and recall on that corpus, and the metrics
+file states in the same breath why that is a weaker claim than it looks:
+*synthetic fixture-bound evidence only; not a real-world statistical claim.* A
+perfect score on a corpus you wrote is a regression guard, not a measurement of
+the world.
+
+Three things were learned by running the tool against a live client rather than
+reasoning about it, and each one changed the code:
+
+- One working request carried **4,402 text fields across 35 levels of nesting**,
+  the depth coming from an MCP tool's recursive JSON schema. The hook's own
+  traversal stops at 24, so `shim watch` carries its own budget.
+- The **tools array was 88% of the input tokens** on a real session, before a
+  single line of the user's own code.
+- Claude Code's `Stop` event hands the hook **only the turn's last text block**,
+  so anything the model said before a tool call in the same turn is not counted
+  there. `shim watch` sees all of it.
+
+Tested client versions, captured fixtures and the full evidence table are in
+[Compatibility](https://github.com/GetSHIM/shim-cli/blob/main/docs/compatibility.md).
+
 ## Uninstall
 
 Remove shim's hook before uninstalling the package:
