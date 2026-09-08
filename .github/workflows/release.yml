@@ -130,7 +130,7 @@ jobs:
           cp /tmp/shim-cli-evidence-source/tests/corpus/guard-v2.json dist/guard-v2.json
           cp /tmp/shim-cli-evidence-source/tests/corpus/guard-v2-metrics.json dist/guard-v2-metrics.json
           cp /tmp/shim-cli-evidence-source/tests/corpus/guard-tools-v1.json dist/guard-tools-v1.json
-      - uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
+      - uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
         with:
           path: dist/packages
           format: cyclonedx-json
