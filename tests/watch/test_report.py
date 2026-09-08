@@ -336,5 +336,14 @@ def test_the_json_report_carries_both_directions_and_each_request() -> None:
             "response_entities": {"text": {"EMAIL": 2}, "thinking": {"IBAN": 1}},
             "response_scan_status": "known",
             "stop_reason": "",
+            "model": "claude-sonnet-5",
+            "request_bytes": 194_236,
+            "usage_status": "unavailable",
+            "usage": {
+                "input_tokens": 2,
+                "output_tokens": 214,
+                "cache_read_input_tokens": 91_562,
+                "cache_creation_input_tokens": 18_093,
+            },
         }
     ]

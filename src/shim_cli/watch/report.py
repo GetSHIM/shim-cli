@@ -358,6 +358,20 @@ def as_json(session, seconds: float) -> dict:
                 "response_entities": exchange.response_entities,
                 "response_scan_status": exchange.response_scan_status,
                 "stop_reason": exchange.stop_reason,
+                # Per request, not just the session total: whether a change to
+                # the transcript breaks the provider's cache prefix is visible
+                # only in which requests read from it and which rewrite it.
+                "model": exchange.model,
+                "request_bytes": exchange.request_bytes,
+                "usage_status": exchange.usage_status,
+                "usage": {
+                    "input_tokens": exchange.usage.input_tokens,
+                    "output_tokens": exchange.usage.output_tokens,
+                    "cache_read_input_tokens": exchange.usage.cache_read_input_tokens,
+                    "cache_creation_input_tokens": (
+                        exchange.usage.cache_creation_input_tokens
+                    ),
+                },
             }
             for exchange in exchanges
         ],
