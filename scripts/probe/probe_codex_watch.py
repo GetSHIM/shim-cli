@@ -178,11 +178,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if name.lower() in HOP_BY_HOP or name.lower() == "content-length":
                     continue
                 # An upstream header carrying CR or LF would split the response
-                # we write back. Nothing upstream should send one; drop it if it
-                # does rather than forward it.
-                if any(character in f"{name}{value}" for character in "\r\n"):
-                    continue
-                self.send_header(name, value)
+                # this probe writes back. Strip them rather than skip the
+                # header: removing the characters is both the real fix and the
+                # form CodeQL recognises as a barrier — an `if ... : continue`
+                # guard here left py/http-response-splitting open.
+                self.send_header(
+                    name.replace("\r", "").replace("\n", ""),
+                    value.replace("\r", "").replace("\n", ""),
+                )
             self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
             self.wfile.write(payload)
