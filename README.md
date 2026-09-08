@@ -175,6 +175,12 @@ shim doctor codex
 Replace `codex` with `claude` or `copilot` as needed. Run `shim help` for all
 commands.
 
+One more step in Codex: **a hook does not run until you trust it.** Codex keeps
+a trust record per hook and skips any hook without one — no warning, and your
+prompts reach the model uninspected. Open `/hooks` in Codex, review the shim
+entry, and enable it. `shim doctor codex` ends by reminding you, because that
+record lives in Codex and shim cannot read it.
+
 ### Marketplace plugins
 
 Codex and Claude Code users can install the repository's marketplace plugin:

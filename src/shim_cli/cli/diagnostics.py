@@ -21,6 +21,7 @@ from shim_cli.clients.claude import settings as claude_settings
 from shim_cli.clients.claude.tool_events import coverage as claude_coverage
 from shim_cli.clients.codex import settings as codex_settings
 from shim_cli.clients.copilot import settings as copilot_settings
+from shim_cli.clients.hook_settings import interpreter_path
 
 
 @dataclass(frozen=True)
@@ -367,7 +368,10 @@ def _resolution_check(client: str) -> Check:
                 "hook_resolution",
                 "PASS",
                 f"The installed {client_name(client)} hook runs this package "
-                f"directly ({sys.executable}); nothing is needed on PATH.",
+                # The name in the fragment, not the alias this process started
+                # under, so the reader can match it against the file.
+                f"directly ({interpreter_path(sys.executable)}); nothing is "
+                "needed on PATH.",
             )
         return Check("hook_resolution", "FAIL", resolution.detail)
     if resolution.skewed:

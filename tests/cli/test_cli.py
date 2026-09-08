@@ -570,24 +570,31 @@ def test_install_refuses_when_detector_warmup_fails(
 
 
 def test_doctor_version_states(monkeypatch, tmp_path: Path) -> None:
+    """Read the boundaries from the constants; a bump must not edit this test."""
+    from shim_cli.clients.codex.settings import (
+        MINIMUM_CODEX_VERSION,
+        TESTED_CODEX_VERSION,
+    )
+
     _codex_home(monkeypatch, tmp_path)
 
-    monkeypatch.setenv("PATH", "")
-    missing = runner.invoke(app, ["doctor", "codex", "--json"])
-    _codex(monkeypatch, tmp_path, "0.148.0")
-    older = runner.invoke(app, ["doctor", "codex", "--json"])
-    _codex(monkeypatch, tmp_path, "0.150.0")
-    future = runner.invoke(app, ["doctor", "codex", "--json"])
-    _codex(monkeypatch, tmp_path, "0.149.0")
-    current = runner.invoke(app, ["doctor", "codex", "--json"])
-
-    def codex_status(result) -> str:
+    def status(version: str | None) -> str:
+        if version is None:
+            monkeypatch.setenv("PATH", "")
+        else:
+            _codex(monkeypatch, tmp_path, version)
+        result = runner.invoke(app, ["doctor", "codex", "--json"])
         return json.loads(result.output)["checks"][0]["status"]
 
-    assert codex_status(missing) == "FAIL"
-    assert codex_status(older) == "FAIL"
-    assert codex_status(future) == "WARN"
-    assert codex_status(current) == "PASS"
+    major, minor, patch = (int(part) for part in MINIMUM_CODEX_VERSION.split("."))
+    below = f"{major}.{minor}.{patch - 1}"
+    beyond = f"{major}.{minor + 100}.0"
+
+    assert status(None) == "FAIL"
+    assert status(below) == "FAIL"
+    assert status(MINIMUM_CODEX_VERSION) == "PASS"
+    assert status(TESTED_CODEX_VERSION) == "PASS"
+    assert status(beyond) == "WARN"
 
 
 def test_config_preserves_the_sections_it_does_not_change(monkeypatch, tmp_path: Path):

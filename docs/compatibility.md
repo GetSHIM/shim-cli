@@ -63,6 +63,16 @@ arguments and native structured tool responses. Copilot uses
 `userPromptTransformed` to replace the model-facing prompt; the original can
 remain visible in its timeline.
 
+**A Codex hook does not run until it is trusted.** From 0.151.0 Codex holds a
+persisted trust record per hook and silently skips any hook it does not have
+one for: no warning, no line in the transcript, and prompts reach the model
+uninspected. Writing the fragment is therefore only half of `shim install
+codex` — review and trust it in Codex, which is why `shim doctor codex` ends
+on `Codex hook activation is client UI state; verify SHIM with /hooks`. shim
+cannot read that record and does not write it; a diagnosis that claimed to
+would be guessing. `codex exec --dangerously-bypass-hook-trust` runs enabled
+hooks without it, which is useful to confirm an install and wrong as a habit.
+
 ## 0.3.0 release evidence
 
 PENDING_RELEASE_EVIDENCE
@@ -82,6 +92,7 @@ must not be copied into its release record without a fresh run.
 | `shim watch` scan scope | Claude Code 2.1.263 on 8 September 2026. One minimal request measured 191,599 bytes, 921 text leaves and 169,134 characters; a working request measured 4,402 leaves, 256,517 characters and 35 levels of nesting, the depth coming from an MCP tool's recursive JSON schema. The hook's own limits (2,000 leaves, 200,000 characters, depth 24) would report almost every real request as unmeasured, so the proxy carries its own. |
 | `shim watch` both directions | Claude Code 2.1.263 on 8 September 2026. A synthetic three-IBAN file read through the Read tool and echoed back reported `request 3 IBAN in messages`, `response 3 IBAN in model text`, `compare IBAN 3 in request, 3 in response`. |
 | `Stop` model output | Claude Code 2.1.263 on 8 September 2026. `last_assistant_message` is present and carries **only the turn's last text block**: a turn that said `CHECKING`, called `Read`, then answered held just the answer. Text the model produced before a tool call in the same turn is not counted. Capture: `tests/fixtures/probe/claude/Stop-none-model-reply-1.json`. |
+| Codex live prompt hook | Codex CLI 0.151.0 on 8 September 2026, ChatGPT sign-in, macOS 26.4.0 arm64. With the hook trusted, a prompt carrying a synthetic address reported `hook: UserPromptSubmit Completed` under `observe` and `hook: UserPromptSubmit Blocked` under `enforce`, the blocked prompt never reaching the model. The same prompt with the hook untrusted produced no hook line at all and was sent unchanged. |
 | `Stop` scan cost | 66 KB final assistant text, hook end to end: 41 ms median, 50 ms p95 on macOS 26.5.2 arm64, CPython 3.13.5. Text beyond the detector's 100,000-character limit is not scanned and the record says `truncated`. |
 
 The native Claude capture and the decisions made from it are preserved in the
