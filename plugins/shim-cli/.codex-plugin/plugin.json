@@ -1,5 +1,5 @@
 {
-  "name": "shim-guard",
+  "name": "shim-cli",
   "version": "0.2.0",
   "description": "Detect and report sensitive prompt data locally; prompt blocking is opt in.",
   "author": {
@@ -14,7 +14,7 @@
     "prompt-hook"
   ],
   "interface": {
-    "displayName": "shim Guard",
+    "displayName": "shim-cli",
     "shortDescription": "Local sensitive-data reporting",
     "longDescription": "Detects and reports sensitive prompt data locally. Blocking is available only when enforcement is explicitly enabled.",
     "developerName": "shim Engineering",
@@ -25,7 +25,7 @@
     "websiteURL": "https://github.com/GetSHIM/shim-cli",
     "privacyPolicyURL": "https://github.com/GetSHIM/shim-cli/blob/main/docs/privacy.md",
     "defaultPrompt": [
-      "Check whether shim Guard is installed and active."
+      "Check whether shim is installed and active."
     ]
   }
 }

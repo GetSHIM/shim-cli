@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 ARCHIVE_RELATIVE = Path("bin") / "shim.pyz"
-PLUGIN_NAME = "shim-guard"
+PLUGIN_NAMES = ("shim-cli", "shim-guard")
 MAX_MANIFEST_BYTES = 1_000_000
 _VERSION = re.compile(r'^__version__ = "(?P<version>[0-9][0-9A-Za-z.+-]*)"', re.M)
 
@@ -45,29 +45,31 @@ def archive_version(archive: Path) -> str | None:
     return found.group("version") if found else None
 
 
-def installed_plugin(home: Path | None = None) -> dict | None:
+def installed_plugins(home: Path | None = None) -> list[dict]:
     root = Path(home) if home is not None else Path.home()
     manifest = root / ".claude" / "plugins" / "installed_plugins.json"
     try:
         if manifest.stat().st_size > MAX_MANIFEST_BYTES:
-            return None
+            return []
         document = json.loads(manifest.read_text(encoding="utf-8"))
     except (OSError, ValueError, UnicodeDecodeError):
-        return None
+        return []
     plugins = document.get("plugins")
     if not isinstance(plugins, dict):
-        return None
+        return []
+    found = []
     for key, entries in plugins.items():
-        if key.split("@", 1)[0] != PLUGIN_NAME or not isinstance(entries, list):
+        if key.split("@", 1)[0] not in PLUGIN_NAMES or not isinstance(entries, list):
             continue
         for entry in entries:
             if isinstance(entry, dict):
-                return {"key": key, **entry}
-    return None
+                found.append({"key": key, **entry})
+                break
+    return found
 
 
 def resolve(plugin_root: Path | None = None, which=shutil.which) -> Resolution:
-    on_path = which("shim-guard-hook")
+    on_path = which("shim-hook") or which("shim-guard-hook")
     root = plugin_root
     if root is None:
         configured = os.environ.get("CLAUDE_PLUGIN_ROOT")

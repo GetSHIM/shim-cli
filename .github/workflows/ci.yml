@@ -33,13 +33,13 @@ jobs:
       - name: Build and verify the plugin archive
         run: |
           uv run --locked python scripts/build_zipapp.py \
-            --output plugins/shim-guard/bin/shim.pyz
-          test -x plugins/shim-guard/bin/shim.pyz
+            --output plugins/shim-cli/bin/shim.pyz
+          test -x plugins/shim-cli/bin/shim.pyz
           test -z "$(printf '%s' '{"hook_event_name":"UserPromptSubmit","prompt":"Contact alice@example.com"}' \
-            | env -i PATH=/nonexistent plugins/shim-guard/hooks/run-shim-guard claude 2>/dev/null)"
+            | env -i PATH=/nonexistent plugins/shim-cli/hooks/run-shim claude 2>/dev/null)"
           test "$(env -i PATH="$(dirname "$(command -v python)"):/usr/bin:/bin" HOME="$HOME" \
-            CLAUDE_PLUGIN_ROOT="$PWD/plugins/shim-guard" \
-            plugins/shim-guard/hooks/run-shim-guard claude \
+            CLAUDE_PLUGIN_ROOT="$PWD/plugins/shim-cli" \
+            plugins/shim-cli/hooks/run-shim claude \
             <<< '{"hook_event_name":"UserPromptSubmit","prompt":"Contact alice@example.com"}')" \
             = '{"systemMessage":"shim: found EMAIL (1) in your prompt. Not modified."}'
       - run: uv build --no-build-isolation
@@ -90,3 +90,39 @@ jobs:
           /tmp/shim-guard-sdist/bin/shim demo codex --json
           /tmp/shim-guard-sdist/bin/python -I -B -m pytest tests/contracts/codex/test_hook.py
           /tmp/shim-guard-sdist/bin/python -I -B -m pytest tests/contracts/claude/test_claude_hook.py
+
+  archive-on-3-9:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - id: current
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.13'
+      - id: floor
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.9'
+      - name: The committed archive answers identically on 3.9 and 3.13
+        run: |
+          set -eu
+          config="$(mktemp -d)/config.toml"
+          printf 'enabled_entities = ["EMAIL"]\n\n[mode]\nuser-prompt = "enforce"\n' > "$config"
+          answer() {
+            home="$(mktemp -d)"
+            printf '%s' "$2" \
+              | env TMPDIR="$home" SHIM_CONFIG="$config" \
+                "$1" plugins/shim-cli/bin/shim.pyz claude 2>&1 \
+              | sed -E "s|$home/shim-redacted-[A-Za-z0-9_]+\.txt|<REDACTED>|g"
+          }
+          for fixture in \
+            '{"hook_event_name":"UserPromptSubmit","prompt":"Contact alice@example.com"}' \
+            '{"hook_event_name":"PostToolUse","tool_name":"Read","tool_response":{"content":"key=alice@example.com"}}' \
+            '{"hook_event_name":"Stop","session_id":"s1"}'
+          do
+            diff \
+              <(answer '${{ steps.floor.outputs.python-path }}' "$fixture") \
+              <(answer '${{ steps.current.outputs.python-path }}' "$fixture")
+          done

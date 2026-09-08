@@ -26,6 +26,27 @@ The compatibility package re-exports and does nothing else. It emits no
 deprecation warning: the hook is a cold-start subprocess whose stderr the
 client shows to the user, and a warning on every event is noise.
 
+The plugin marketplaces carry a second `shim-guard` entry pointing at the same
+directory, also removed in 0.5.0. On Claude Code that entry is enough: the
+marketplace key is whatever the user typed when they added it, so a plugin
+installed as `shim-guard@shim-guard` keeps loading and updating with no action.
+
+**Codex needs one migration.** There the marketplace name in the manifest *is*
+the identity, so renaming it to `shim-cli` orphans an install made under the old
+name — `config.toml` still says the plugin is enabled while `codex plugin list`
+reports nothing installed. A Codex user who installed the 0.2.0 plugin runs:
+
+```
+codex plugin remove shim-guard
+codex plugin marketplace remove shim-guard
+codex plugin marketplace add https://github.com/GetSHIM/shim-cli
+codex plugin add shim-cli@shim-cli
+```
+
+This affects the plugin only. A Codex user who installed the PyPI package is
+unaffected, and the zero-install plugin path could not reach the archive under
+Codex before 0.3.0, so no working Codex plugin install is being broken.
+
 Codex and Copilot install prompt hooks only. The repository contains no
 Codex, Copilot, `PostToolUseFailure`, or `PostToolBatch` tool adapter. Tool
 coverage is based on live protocol evidence rather than documentation and is

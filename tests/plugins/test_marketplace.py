@@ -77,4 +77,39 @@ def test_both_listings_name_the_same_plugin() -> None:
     claude = {plugin["name"] for plugin in json.loads(CLAUDE.read_text())["plugins"]}
     codex = {plugin["name"] for plugin in json.loads(CODEX.read_text())["plugins"]}
 
-    assert claude == codex == {"shim-guard"}
+    assert claude == codex == {"shim-cli", "shim-guard"}
+
+
+ALIAS_DESCRIPTION = (
+    "Former name of shim-cli. Existing installs keep updating; "
+    "new installs should use shim-cli."
+)
+
+
+@pytest.mark.parametrize("path", (CLAUDE, CODEX), ids=("claude", "codex"))
+def test_a_listing_is_named_for_the_product(path: Path) -> None:
+    assert json.loads(path.read_text())["name"] == "shim-cli"
+
+
+@pytest.mark.parametrize("path", (CLAUDE, CODEX), ids=("claude", "codex"))
+def test_the_alias_entry_keeps_a_020_install_resolvable(path: Path) -> None:
+    plugins = json.loads(path.read_text())["plugins"]
+    names = [plugin["name"] for plugin in plugins]
+
+    assert names == ["shim-cli", "shim-guard"]
+    alias, current = plugins[1], plugins[0]
+    assert alias["description"] == ALIAS_DESCRIPTION
+    assert alias["source"] == current["source"], "the alias must not fork the source"
+    assert alias["category"] == current["category"]
+
+
+def test_both_listings_point_at_the_same_directory() -> None:
+    def directory(path: Path) -> set[str]:
+        return {
+            plugin["source"]
+            if isinstance(plugin["source"], str)
+            else plugin["source"]["path"]
+            for plugin in json.loads(path.read_text())["plugins"]
+        }
+
+    assert directory(CLAUDE) == directory(CODEX) == {"./plugins/shim-cli"}

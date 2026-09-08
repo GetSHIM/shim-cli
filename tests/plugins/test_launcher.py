@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import shutil
 import subprocess
 import sys
 import zipfile
@@ -11,8 +13,8 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-PLUGIN = ROOT / "plugins" / "shim-guard"
-LAUNCHER = PLUGIN / "hooks" / "run-shim-guard"
+PLUGIN = ROOT / "plugins" / "shim-cli"
+LAUNCHER = PLUGIN / "hooks" / "run-shim"
 BUILDER = ROOT / "scripts" / "build_zipapp.py"
 COMMITTED = PLUGIN / "bin" / "shim.pyz"
 MAX_ARCHIVE_BYTES = 500_000
@@ -187,9 +189,69 @@ def test_archive_refuses_an_unsupported_interpreter_without_blocking(
 ) -> None:
     source = zipfile.ZipFile(archive).read("__main__.py").decode()
 
-    assert "MINIMUM = (3, 10)" in source
+    assert "MINIMUM = (3, 9)" in source
     assert "sys.exit(0)" in source
     assert 'f"' not in source, "must parse on interpreters without f-strings"
+
+    older = shutil.which("python3.8")
+    if older is None:
+        pytest.skip("python3.8 is not installed")
+    result = subprocess.run(
+        (older, str(archive), "claude"),
+        input=_payload("claude"),
+        capture_output=True,
+        check=False,
+        timeout=120,
+    )
+
+    assert result.returncode == 0
+    assert result.stdout == b""
+    assert result.stderr.startswith(b"shim: needs Python 3.9 or newer; found 3.8.")
+
+
+FIXTURES = {
+    "prompt": b'{"hook_event_name":"UserPromptSubmit","prompt":"Contact alice@example.com"}',
+    "tool": (
+        b'{"hook_event_name":"PostToolUse","tool_name":"Read",'
+        b'"tool_response":{"content":"key=alice@example.com"}}'
+    ),
+    "stop": b'{"hook_event_name":"Stop","session_id":"s1"}',
+}
+
+
+def test_the_archive_answers_identically_on_39_and_the_current_interpreter(
+    archive: Path, tmp_path: Path
+) -> None:
+    """The zero-install path targets a stock macOS, whose python3 is 3.9."""
+    old = shutil.which("python3.9")
+    if old is None:
+        pytest.skip("python3.9 is not installed")
+    config = tmp_path / "c.toml"
+    config.write_text(
+        'enabled_entities = ["EMAIL"]\n\n[mode]\nuser-prompt = "enforce"\n',
+        encoding="utf-8",
+    )
+
+    def answer(interpreter: str, raw: bytes) -> tuple[int, bytes, bytes]:
+        home = tmp_path / Path(interpreter).name
+        home.mkdir(exist_ok=True)
+        result = subprocess.run(
+            (interpreter, str(archive), "claude"),
+            input=raw,
+            capture_output=True,
+            check=False,
+            env=os.environ | {"TMPDIR": str(home), "SHIM_CONFIG": str(config)},
+            timeout=120,
+        )
+        scrub = re.compile(rb"shim-redacted-[^\"]+")
+        return (
+            result.returncode,
+            scrub.sub(b"X", result.stdout.replace(str(home).encode(), b"<tmp>")),
+            result.stderr,
+        )
+
+    for name, raw in FIXTURES.items():
+        assert answer(old, raw) == answer(sys.executable, raw), name
 
 
 def _archive_members(path: Path) -> dict[str, bytes]:
@@ -223,11 +285,11 @@ def test_archive_version_reads_the_new_layout_and_the_old_one(tmp_path: Path) ->
 
 
 def test_committed_archive_matches_a_fresh_build(archive: Path) -> None:
-    assert COMMITTED.is_file(), "build plugins/shim-guard/bin/shim.pyz"
+    assert COMMITTED.is_file(), "build plugins/shim-cli/bin/shim.pyz"
     assert os.access(COMMITTED, os.X_OK)
     assert COMMITTED.stat().st_size < MAX_ARCHIVE_BYTES
     assert _archive_members(COMMITTED) == _archive_members(archive), (
-        "rebuild plugins/shim-guard/bin/shim.pyz"
+        "rebuild plugins/shim-cli/bin/shim.pyz"
     )
 
 

@@ -60,12 +60,12 @@ VENDORED_EXCLUDES = (
     *COMPILED,
 )
 VENDORED_PRUNE = ("shortdata/region_*.py",)
-MAIN = """# Must parse before Python 3.10 so unsupported interpreters fail open.
+MAIN = """# Must parse before Python 3.9 so unsupported interpreters fail open.
 import sys
 
-MINIMUM = (3, 10)
+MINIMUM = (3, 9)
 NOTICE = (
-    "shim-guard: needs Python %d.%d or newer; found %s. "
+    "shim: needs Python %d.%d or newer; found %s. "
     "The prompt was not inspected.\\n"
 )
 

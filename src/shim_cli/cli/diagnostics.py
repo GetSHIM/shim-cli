@@ -16,7 +16,7 @@ from rich.table import Table
 
 from shim_cli.cli.integrations import client_name, client_plan, plan_status
 from shim_cli.cli.output import console, emit, emit_json
-from shim_cli.cli.resolution import installed_plugin, resolve
+from shim_cli.cli.resolution import installed_plugins, resolve
 from shim_cli.clients.claude import settings as claude_settings
 from shim_cli.clients.claude.tool_events import coverage as claude_coverage
 from shim_cli.clients.codex import settings as codex_settings
@@ -342,18 +342,27 @@ def _duplicate_check(client: str) -> Check:
             "Plugin installs are not discoverable for this client; if you "
             "installed both the plugin and `shim install`, remove one.",
         )
-    plugin = installed_plugin()
+    plugins = installed_plugins()
     try:
         _label, state = plan_status(client_plan(client, "install"))
     except (OSError, ValueError):
         return Check(
             "duplicate_hooks", "WARN", "The client hook settings could not be read."
         )
-    if plugin is not None and state == "installed":
+    if len(plugins) > 1:
+        alias = next(p for p in plugins if p["key"].startswith("shim-guard@"))
         return Check(
             "duplicate_hooks",
             "FAIL",
-            f"Both the {plugin['key']} plugin and a settings hook are installed; "
+            f"Both the {plugins[0]['key']} and {plugins[1]['key']} plugins are "
+            "installed; every event is inspected twice. Run "
+            f"`claude plugin uninstall {alias['key']}`.",
+        )
+    if plugins and state == "installed":
+        return Check(
+            "duplicate_hooks",
+            "FAIL",
+            f"Both the {plugins[0]['key']} plugin and a settings hook are installed; "
             "every prompt is inspected twice. Run `shim revert claude` or "
             "uninstall the plugin.",
         )

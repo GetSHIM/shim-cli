@@ -14,7 +14,7 @@ try:
 except ModuleNotFoundError:
     import tomli as tomllib
 
-PLUGIN_ROOT = Path(__file__).parents[2] / "plugins" / "shim-guard"
+PLUGIN_ROOT = Path(__file__).parents[2] / "plugins" / "shim-cli"
 REPOSITORY_ROOT = PLUGIN_ROOT.parents[1]
 
 
@@ -50,3 +50,43 @@ def test_the_plugin_and_the_installer_register_the_same_events(
     expected = {event for event, _group in settings.hook_groups()}
 
     assert set(document["hooks"]) == expected
+
+
+def _manifest(home, *keys: str) -> None:
+    import json as _json
+
+    target = home / ".claude" / "plugins"
+    target.mkdir(parents=True, exist_ok=True)
+    (target / "installed_plugins.json").write_text(
+        _json.dumps({"plugins": {key: [{"version": "0.3.0"}] for key in keys}}),
+        encoding="utf-8",
+    )
+
+
+def test_both_plugin_names_are_discovered(tmp_path) -> None:
+    from shim_cli.cli.resolution import installed_plugins
+
+    _manifest(tmp_path, "shim-guard@shim-guard")
+    assert [p["key"] for p in installed_plugins(tmp_path)] == ["shim-guard@shim-guard"]
+
+    _manifest(tmp_path, "shim-cli@shim-cli", "shim-guard@shim-guard", "other@market")
+    assert sorted(p["key"] for p in installed_plugins(tmp_path)) == [
+        "shim-cli@shim-cli",
+        "shim-guard@shim-guard",
+    ]
+
+
+def test_a_double_install_is_reported_with_the_uninstall_command(
+    tmp_path, monkeypatch
+) -> None:
+    from shim_cli.cli import diagnostics
+
+    _manifest(tmp_path, "shim-cli@shim-cli", "shim-guard@shim-guard")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / ".claude"))
+
+    check = diagnostics._duplicate_check("claude")
+
+    assert check.status == "FAIL"
+    assert "inspected twice" in check.detail
+    assert "claude plugin uninstall shim-guard@shim-guard" in check.detail
