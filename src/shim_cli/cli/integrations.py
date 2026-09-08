@@ -109,6 +109,38 @@ def plan_status(plan: Plan) -> tuple[str, str]:
     return "FAIL", "unsafe" if plan.action is Action.REFUSE else "conflict"
 
 
+def existing_hooks(client: str) -> tuple[bool, bool]:
+    """(a 0.2.0 fragment is on disk, hooks that are not shim's are on disk).
+
+    `add_hook` already removes the old fragment before appending the new one.
+    Only the messages ever said otherwise: an upgrade printed "existing hooks
+    will be preserved" over a file whose only hook was the one being replaced.
+    """
+    from shim_cli.clients.hook_settings import remove_groups
+
+    module = {"claude": claude_settings, "codex": codex_settings}.get(client)
+    if module is None:
+        return (False, False)
+    try:
+        state = inspect_file(module.target_path(), module.MAX_CONFIG_BYTES)
+    except (OSError, ValueError):
+        return (False, False)
+    if state.kind is not StateKind.FILE or state.content is None:
+        return (False, False)
+    try:
+        without_legacy = remove_groups(state.content, module.legacy_hook_groups())
+        stripped = remove_groups(without_legacy, module.hook_groups())
+    except ValueError:
+        return (False, False)
+    legacy = without_legacy != state.content
+    try:
+        document = json.loads(stripped.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        return (legacy, False)
+    hooks = document.get("hooks") if isinstance(document, dict) else None
+    return (legacy, bool(hooks))
+
+
 def _plan_error(client: str, command: str, as_json: bool = False) -> NoReturn:
     name = client_name(client)
     if as_json:
@@ -175,11 +207,17 @@ def install(*, client: str, dry_run: bool, yes: bool) -> None:
     if action is Action.NOOP:
         emit("PASS", f"shim is already installed for {name}.")
         return
+    # Read before apply() rewrites the file; both messages below describe it.
+    legacy_hook, foreign_hooks = existing_hooks(client)
     if action is Action.UPDATE:
-        emit(
-            "WARN",
-            f"Existing {name} hooks will be preserved; shim will be appended last.",
-        )
+        legacy, foreign = legacy_hook, foreign_hooks
+        if legacy:
+            emit("PASS", "Replaced the 0.2.0 hook line with the current one.")
+        if foreign or not legacy:
+            emit(
+                "WARN",
+                f"Existing {name} hooks will be preserved; shim will be appended last.",
+            )
     _inline_hooks_notice(client)
     if dry_run:
         verb = "create" if action is Action.CREATE else "append to"
@@ -226,7 +264,7 @@ def install(*, client: str, dry_run: bool, yes: bool) -> None:
     emit(
         "PASS",
         f"Appended shim after existing {name} hooks."
-        if action is Action.UPDATE
+        if action is Action.UPDATE and foreign_hooks
         else f"Installed shim for {name}.",
     )
 

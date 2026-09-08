@@ -209,13 +209,21 @@ def test_archive_refuses_an_unsupported_interpreter_without_blocking(
     assert result.stderr.startswith(b"shim: needs Python 3.9 or newer; found 3.8.")
 
 
+# Every fixture leaves the ASCII fast path in `normalize()`. An ASCII-only set
+# passed on 3.9 for a year while `zip(strict=True)` made non-ASCII text raise.
 FIXTURES = {
-    "prompt": b'{"hook_event_name":"UserPromptSubmit","prompt":"Contact alice@example.com"}',
+    "prompt": (
+        '{"hook_event_name":"UserPromptSubmit",'
+        '"prompt":"Hesap \u0131\u015fl\u011fi: TR330006100519786457841326"}'
+    ).encode("utf-8"),
     "tool": (
-        b'{"hook_event_name":"PostToolUse","tool_name":"Read",'
-        b'"tool_response":{"content":"key=alice@example.com"}}'
-    ),
-    "stop": b'{"hook_event_name":"Stop","session_id":"s1"}',
+        '{"hook_event_name":"PostToolUse","tool_name":"Read",'
+        '"tool_response":{"content":"kanit \u2014 AKIAIOSFODNN7EXAMPLE"}}'
+    ).encode("utf-8"),
+    "stop": (
+        '{"hook_event_name":"Stop","session_id":"s1",'
+        '"last_assistant_message":"bitti \u2014 alice@example.com"}'
+    ).encode("utf-8"),
 }
 
 
@@ -228,7 +236,8 @@ def test_the_archive_answers_identically_on_39_and_the_current_interpreter(
         pytest.skip("python3.9 is not installed")
     config = tmp_path / "c.toml"
     config.write_text(
-        'enabled_entities = ["EMAIL"]\n\n[mode]\nuser-prompt = "enforce"\n',
+        'enabled_entities = ["EMAIL", "IBAN", "SECRET"]\n\n'
+        '[mode]\nuser-prompt = "enforce"\n',
         encoding="utf-8",
     )
 
@@ -240,13 +249,26 @@ def test_the_archive_answers_identically_on_39_and_the_current_interpreter(
             input=raw,
             capture_output=True,
             check=False,
-            env=os.environ | {"TMPDIR": str(home), "SHIM_CONFIG": str(config)},
+            # Each interpreter needs its own spool: conftest sets one session
+            # directory for the whole test, so without this the second run
+            # summarises the first run's records too.
+            env=os.environ
+            | {
+                "TMPDIR": str(home),
+                "SHIM_CONFIG": str(config),
+                "SHIM_GUARD_SESSION_DIR": str(home / "session"),
+                "XDG_STATE_HOME": str(home / "state"),
+            },
             timeout=120,
         )
         scrub = re.compile(rb"shim-redacted-[^\"]+")
+        timing = re.compile(rb"\d+ ms")
         return (
             result.returncode,
-            scrub.sub(b"X", result.stdout.replace(str(home).encode(), b"<tmp>")),
+            timing.sub(
+                b"N ms",
+                scrub.sub(b"X", result.stdout.replace(str(home).encode(), b"<tmp>")),
+            ),
             result.stderr,
         )
 

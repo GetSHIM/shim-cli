@@ -138,6 +138,10 @@ def entries(since: datetime.datetime | None = None) -> list:
             if boundary and str(entry.get("ts", "")) < boundary:
                 continue
             found.append(entry)
+    # A migrated month holds the old file's lines after the new file's, because
+    # the merge is an append. Chronology comes from the timestamps; the sort is
+    # stable, so entries without one keep their position.
+    found.sort(key=lambda entry: str(entry.get("ts", "")))
     return found
 
 

@@ -247,3 +247,59 @@ def test_a_named_pattern_survives_the_ledger() -> None:
     )
 
     assert ledger.entries()[0]["custom"] == {"PROJECT_CODENAME": 1}
+
+
+def _write_ledger(directory: Path, name: str, lines: list[dict]) -> Path:
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    path = directory / name
+    path.write_text(
+        "".join(json.dumps(line, sort_keys=True) + "\n" for line in lines),
+        encoding="utf-8",
+    )
+    path.chmod(0o600)
+    return path
+
+
+def test_a_month_present_on_both_sides_of_the_rename_is_merged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The hook writes the new file before any CLI command runs, so the plain
+    move never applies to the current month. 0.3.0 skipped on collision, which
+    stranded the old file and made doctor warn about it forever.
+    """
+    from shim_cli.cli import migration
+
+    monkeypatch.delenv("SHIM_GUARD_STATE_DIR", raising=False)
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    legacy = tmp_path / "state" / "shim-guard"
+    current = tmp_path / "state" / "shim"
+    name = "ledger-2026-01.jsonl"
+    _write_ledger(legacy, name, [_entry(ts="2026-01-01T00:00:00Z", tool_name="Old")])
+    _write_ledger(current, name, [_entry(ts="2026-01-20T00:00:00Z", tool_name="New")])
+
+    assert migration.ledger_files() == (f"moved 1 ledger file to {current}",)
+
+    merged = [entry["tool_name"] for entry in ledger.entries()]
+    assert merged == ["Old", "New"], "timestamps order the merged month"
+    assert not (legacy / name).exists()
+    assert not legacy.exists(), "the empty 0.2.0 directory goes too"
+
+    assert migration.ledger_files() == (), "the absence of the old path is the state"
+
+
+def test_a_merge_that_would_cross_the_size_cap_leaves_the_old_file_alone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from shim_cli.cli import migration
+
+    monkeypatch.delenv("SHIM_GUARD_STATE_DIR", raising=False)
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    monkeypatch.setattr(ledger, "MAX_LEDGER_BYTES", 200)
+    legacy = tmp_path / "state" / "shim-guard"
+    current = tmp_path / "state" / "shim"
+    name = "ledger-2026-01.jsonl"
+    _write_ledger(legacy, name, [_entry(tool_name="Old")] * 3)
+    _write_ledger(current, name, [_entry(tool_name="New")] * 3)
+
+    assert migration.ledger_files() == ()
+    assert (legacy / name).exists(), "dropping the old file would lose entries"

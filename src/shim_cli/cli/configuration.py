@@ -11,6 +11,7 @@ from shim_cli.cli.output import console, emit, emit_json
 from shim_cli.config import (
     MAX_CONFIG_BYTES,
     config_path,
+    describe_settings_error,
     policy_from_state,
     render_settings,
 )
@@ -200,15 +201,14 @@ def configure(
         _fail(as_json, "Entity settings path is unsafe; nothing was saved.")
     state = inspect_file(target, MAX_CONFIG_BYTES)
     # Parse and plan from the same snapshot, before confirmation.
+    problem = ""
     try:
         policy = policy_from_state(state)
-    except ValueError:
+    except ValueError as error:
         policy = None
+        problem = describe_settings_error(error)
     if policy is None and not (reset or only):
-        _fail(
-            as_json,
-            "Entity settings are invalid or unsafe. Reset malformed contents; review unsafe paths manually.",
-        )
+        _fail(as_json, problem)
 
     try:
         if reset:

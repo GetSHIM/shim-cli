@@ -196,6 +196,20 @@ Commands and local writes are never rewritten. If no inspection is possible,
 the event passes through unchanged and unmasked with a visible warning; prompt
 errors still fail closed.
 
+**A large field is scanned in pieces, and the seams are the residual risk.**
+The detector works on at most 100,000 characters at a time. A longer field is
+cut at the last newline before each boundary and each piece scanned separately,
+with placeholder numbering continuing across them, so a 400 KB file read comes
+back masked rather than passing through whole. The pieces do not overlap, so a
+value written across a line break — a PEM block, a wrapped key — can fall in a
+seam and go unreported. Values that live on one line, which is every type shim
+detects, are unaffected. If one piece fails, the others are still masked and
+the summary counts the event as partially inspected.
+
+A field so large that the whole event exceeds shim's 1 MB input bound is not
+scanned at all. It passes through unchanged and is now counted in the session
+summary by tool and file, so a skipped read is visible rather than absent.
+
 ## What is changed on the way in
 
 At Claude's verified result event, shim can also compact tool results so they

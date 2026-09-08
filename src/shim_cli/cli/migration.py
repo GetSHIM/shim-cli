@@ -16,7 +16,7 @@ from pathlib import Path
 
 from shim_cli import config
 from shim_cli.cli.output import emit
-from shim_cli.session import ledger
+from shim_cli.session import _files, ledger
 
 
 def _move(source: Path, target: Path) -> None:
@@ -28,6 +28,45 @@ def _move(source: Path, target: Path) -> None:
         # A separate mount for the state or config home defeats os.replace.
         shutil.copy2(source, target)
         source.unlink()
+
+
+def _merge_ledger(source: Path, destination: Path) -> bool:
+    """Same month on both sides of the rename: keep both files' lines.
+
+    The hook writes the new file as soon as it runs, so an upgrade usually
+    reaches this rather than the plain move. Skipping on collision, as 0.3.0
+    did, left the old file on disk and doctor warning about it forever.
+
+    One locked append of the whole blob, not a line at a time: the file is
+    append-only JSONL, so a single `O_APPEND` write under the same lock the
+    hook takes cannot interleave with it.
+    """
+    try:
+        blob = source.read_bytes()[: ledger.MAX_LEDGER_BYTES]
+    except OSError:
+        return False
+    if blob and not blob.endswith(b"\n"):
+        blob += b"\n"
+    if not blob.strip():
+        with contextlib.suppress(OSError):
+            source.unlink()
+        return True
+    try:
+        root = _files.open_root(destination.parent)
+    except OSError:
+        return False
+    try:
+        # False means the merge would cross the size cap; leaving the old file
+        # in place loses nothing and doctor keeps pointing at it.
+        if not _files.append(root, destination.name, blob, ledger.MAX_LEDGER_BYTES):
+            return False
+    except OSError:
+        return False
+    finally:
+        os.close(root)
+    with contextlib.suppress(OSError):
+        source.unlink()
+    return True
 
 
 def settings() -> tuple[str, ...]:
@@ -56,10 +95,12 @@ def ledger_files() -> tuple[str, ...]:
     moved = 0
     for path in sorted(legacy.glob(f"{ledger.FILE_PREFIX}*{ledger.FILE_SUFFIX}")):
         destination = target / path.name
-        if destination.exists():
-            continue
         target.mkdir(mode=0o700, parents=True, exist_ok=True)
-        _move(path, destination)
+        if destination.exists():
+            if not _merge_ledger(path, destination):
+                continue
+        else:
+            _move(path, destination)
         moved += 1
     with contextlib.suppress(OSError):
         legacy.rmdir()

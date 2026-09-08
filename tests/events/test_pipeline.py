@@ -156,11 +156,10 @@ def _deep(levels: int):
 @pytest.mark.parametrize(
     ("name", "body"),
     (
-        ("characters", "x" * (payload.MAX_TEXT_CHARACTERS + 1)),
         ("leaves", ["leaf"] * (payload.MAX_LEAVES + 1)),
         ("depth", _deep(payload.MAX_DEPTH + 2)),
     ),
-    ids=("characters", "leaves", "depth"),
+    ids=("leaves", "depth"),
 )
 def test_a_payload_past_a_bound_is_observed_and_says_why(name: str, body) -> None:
     outcome = _process(_fetched(body), ENFORCE)
@@ -588,9 +587,10 @@ def test_a_per_tool_entity_scope_narrows_only_that_tool() -> None:
     assert wide.record.entities == (("EMAIL", 1),)
 
 
-@pytest.mark.parametrize(
-    "bad", ["%ff", "x" * 100_001], ids=["invalid-encoding", "detector-limit"]
-)
+# "x" * 100_001 used to belong here: past the detector's single-pass limit,
+# so the sibling was left whole. It is now scanned in pieces, and the test
+# below asserts that instead.
+@pytest.mark.parametrize("bad", ["%ff"], ids=["invalid-encoding"])
 def test_uninspectable_sibling_preserves_redaction_and_reports_partial(bad):
     outcome = _process(
         _fetched({"credential": "AKIAIOSFODNN7EXAMPLE", "bad": bad}), ENFORCE
@@ -613,3 +613,66 @@ def test_partial_inspection_respects_non_rewriting_modes(mode):
     output = json.loads(outcome.output)
     assert "hookSpecificOutput" not in output
     assert "inspection incomplete" in output["systemMessage"]
+
+
+def test_a_large_tool_result_is_masked_rather_than_skipped_whole() -> None:
+    """Two limits used to stop this, not one. Above 100,000 characters the
+    detector refused the leaf; above 200,000 `walk` skipped it before the
+    detector ever saw it. A 400 KB `Read` hit the second and reached the model
+    with every address in it, under a line saying inspection was incomplete."""
+    from shim_cli.events.payload import inspect
+    from shim_cli.guard import evaluate
+
+    text = "".join(f"row {i} contact user{i}@example.com\n" for i in range(12_000))
+    assert len(text) > 400_000
+
+    result = inspect({"tool_response": {"content": text}}, evaluate)
+
+    masked = result.value["tool_response"]["content"]
+    assert result.status == "complete"
+    assert "@example.com" not in masked
+    assert masked.count("<EMAIL_") == 12_000
+    assert result.skipped == 0
+
+
+def test_a_failed_piece_marks_the_leaf_partial_and_keeps_the_rest() -> None:
+    from shim_cli.events.payload import inspect
+    from shim_cli.guard.models import Finding, GuardDecision
+
+    def evaluate(text: str) -> GuardDecision:
+        found = (Finding("SECRET", 2, 8, 0.9, ""),)
+        return GuardDecision(found, text.replace("secret", "<SECRET_1>"), True)
+
+    result = inspect({"tool_response": "a secret here"}, evaluate)
+
+    assert result.status == "partial"
+    assert result.skipped == 1
+    assert "piece-failed" in result.reasons
+    assert result.value["tool_response"] == "a <SECRET_1> here"
+
+
+def test_the_walk_budget_still_reports_a_leaf_it_cannot_afford() -> None:
+    """Unreachable through the hook — a payload this large is refused by
+    MAX_INPUT_BYTES first — so the bound is asserted where it lives."""
+    from shim_cli.events.payload import MAX_TEXT_CHARACTERS, inspect
+    from shim_cli.guard import evaluate
+
+    result = inspect({"tool_response": "x" * (MAX_TEXT_CHARACTERS + 1)}, evaluate)
+
+    assert result.status == "not-inspected"
+    assert result.reasons == ("size-limit",)
+
+
+def test_a_sibling_past_the_detectors_single_pass_limit_is_now_masked() -> None:
+    """This is the case that used to make the whole event partial."""
+    body = "AKIAIOSFODNN7EXAMPLE\n" + "x" * 100_001
+    outcome = _process(
+        _fetched({"credential": "ghp_" + "a" * 36, "big": body}), ENFORCE
+    )
+    output = json.loads(outcome.output)
+    rewritten = output["hookSpecificOutput"]["updatedToolOutput"]["content"]
+
+    assert "AKIAIOSFODNN7EXAMPLE" not in rewritten["big"]
+    assert "<SECRET_" in rewritten["big"]
+    assert "inspection incomplete" not in output.get("systemMessage", "")
+    assert not outcome.record.note

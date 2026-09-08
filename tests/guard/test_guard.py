@@ -28,7 +28,9 @@ CORPUS = json.loads(
 def test_models_are_immutable_and_counts_follow_first_source_occurrence() -> None:
     later = Finding("EMAIL", 20, 30, 0.9, "")
     first = Finding("PHONE", 0, 10, 0.8, "")
-    decision = GuardDecision((later, first, Finding("EMAIL", 40, 50, 0.7, "")), "x")
+    decision = GuardDecision(
+        (later, first, Finding("EMAIL", 40, 50, 0.7, "")), "x", False
+    )
 
     assert decision.counts == (("PHONE", 1), ("EMAIL", 2))
     with pytest.raises((AttributeError, TypeError)):
@@ -359,3 +361,110 @@ def test_the_one_placeholder_pattern_matches_both_forms_and_nothing_else() -> No
     assert not PLACEHOLDER.fullmatch("<iban_1>")
     assert not PLACEHOLDER.fullmatch("<IBAN>")
     assert not PLACEHOLDER.fullmatch("<IBAN_1:abcd>")
+
+
+def test_normalize_handles_non_ascii_and_maps_spans_back_to_the_source() -> None:
+    """`zip(strict=True)` here made every non-ASCII prompt raise on Python 3.9.
+
+    The archive ships to a stock macOS, whose `python3` is 3.9, and the ASCII
+    fast path above meant no fixture reached this code. The pinned values below
+    assert the behaviour on any interpreter, so 3.9's absence cannot hide it.
+    """
+    plain = normalize("Hesap ışği: TR330006100519786457841326")
+    assert plain.text == "Hesap ışği: TR330006100519786457841326"
+    assert plain.source_spans[:3] == ((0, 1), (1, 2), (2, 3))
+    assert len(plain.source_spans) == len(plain.text)
+
+    # A ligature decomposes into two characters that both point at one source
+    # character; a percent escape does the reverse.
+    ligature = normalize("ﬁnans ışği")
+    assert ligature.text == "finans ışği"
+    assert ligature.source_spans[:2] == ((0, 1), (0, 1))
+
+    escaped = normalize("ışğı %41 arttı")
+    assert escaped.text == "ışğı A arttı"
+    assert escaped.source_spans[5] == (5, 8)
+
+
+def test_a_turkish_sentence_masks_only_the_iban() -> None:
+    """The spans above are what puts the placeholder over the right characters."""
+    decision = evaluate("Hesap ışği — TR330006100519786457841326 numaralı")
+
+    assert decision.redacted_text == "Hesap ışği — <IBAN_1> numaralı"
+    assert decision.counts == (("IBAN", 1),)
+
+
+def test_a_field_over_the_scan_limit_is_masked_in_pieces() -> None:
+    """A 150 KB tool result used to reach the model with every secret in it:
+    `normalize()` refuses more than MAX_SOURCE_CHARACTERS and the caller passed
+    the whole leaf, so nothing at all was masked."""
+    line = "row %d contact user%d@example.com\n"
+    text = "".join(line % (index, index) for index in range(14_000))
+    assert len(text) > MAX_SOURCE_CHARACTERS * 4
+
+    decision = evaluate(text, ("EMAIL",))
+
+    assert len(decision.findings) == 14_000
+    assert "@example.com" not in decision.redacted_text
+    assert decision.partial is False
+    # Numbering continues across the pieces rather than restarting at 1.
+    assert "<EMAIL_1>" in decision.redacted_text
+    assert "<EMAIL_14000>" in decision.redacted_text
+    assert decision.redacted_text.count("<EMAIL_1>") == 1
+
+
+def test_pieces_are_cut_on_newlines_so_no_line_is_split() -> None:
+    from shim_cli.guard.evaluate import _pieces
+
+    text = "".join(f"{index:06d} padding\n" for index in range(30_000))
+    cuts = list(_pieces(text))
+
+    assert len(cuts) > 1
+    assert "".join(piece for _offset, piece in cuts) == text
+    assert all(piece.endswith("\n") for _offset, piece in cuts[:-1])
+    assert [offset for offset, _piece in cuts] == [0] + [
+        sum(len(piece) for _o, piece in cuts[:index]) for index in range(1, len(cuts))
+    ]
+
+
+def test_a_line_longer_than_the_limit_still_makes_progress() -> None:
+    """No newline to cut on: the piece ends at the hard boundary instead of
+    looping forever on a zero-length slice."""
+    from shim_cli.guard.evaluate import _pieces
+
+    text = "x" * (MAX_SOURCE_CHARACTERS * 2 + 5)
+    cuts = list(_pieces(text))
+
+    assert [len(piece) for _offset, piece in cuts] == [
+        MAX_SOURCE_CHARACTERS,
+        MAX_SOURCE_CHARACTERS,
+        5,
+    ]
+
+
+def test_a_piece_that_fails_leaves_the_others_masked() -> None:
+    import sys
+
+    # `shim_cli.guard.evaluate` resolves to the re-exported function, not the
+    # module it lives in.
+    evaluate_module = sys.modules["shim_cli.guard.evaluate"]
+    real = evaluate_module.analyze
+    calls = {"n": 0}
+
+    def flaky(text, entities=(), custom=()):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise ValueError("Guard input contains malformed percent encoding.")
+        return real(text, entities, custom)
+
+    line = "row %d contact user%d@example.com\n"
+    text = "".join(line % (index, index) for index in range(14_000))
+    try:
+        evaluate_module.analyze = flaky
+        decision = evaluate(text, ("EMAIL",))
+    finally:
+        evaluate_module.analyze = real
+
+    assert decision.partial is True
+    assert decision.findings, "one bad piece must not cost every other piece"
+    assert "<EMAIL_1>" in decision.redacted_text

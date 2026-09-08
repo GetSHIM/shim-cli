@@ -304,6 +304,9 @@ def test_doctor_names_every_old_shape_and_changes_nothing(
         # Copilot's old shape is the file name, not a fragment inside it.
         assert _says(text, "hook file uses the old name")
     else:
-        assert _says(text, "the installed hook fragment names the old module")
+        # The 0.2.0 fragment is installed, in the old shape. Doctor used to say
+        # "not installed" two lines above this, which was false.
+        assert _says(text, "hook installed in the 0.2.0 shape")
+        assert not _says(text, "hook group is not installed")
     assert _says(text, f"run shim install {client}")
     assert _shim_state(home) == before

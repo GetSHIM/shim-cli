@@ -469,7 +469,9 @@ def test_a_session_sized_request_stays_within_the_proxy_budget() -> None:
     """
     from shim_cli.events.payload import MAX_TEXT_CHARACTERS, walk
 
-    filler = "the quick brown fox jumps over the lazy dog. " * 200
+    # Big enough to exceed the hook's character budget, which R3 raised to
+    # the hook's own input bound; the proxy's is larger still.
+    filler = "the quick brown fox jumps over the lazy dog. " * 600
     document = _request(
         tools=[
             {"name": f"tool-{index}", "description": filler, "input_schema": {}}
@@ -683,3 +685,29 @@ def test_the_accumulated_response_is_dropped_on_request() -> None:
     reader.forget()
 
     assert reader.response_texts() == []
+
+
+def test_one_oversized_leaf_no_longer_voids_the_whole_request() -> None:
+    """`evaluate` refused a leaf past its single-pass limit, the exception left
+    `_tally`, and the request came back `measured=False` — a session with one
+    large tool result measured as nothing at all."""
+    import json as _json
+
+    from shim_cli.guard import evaluate as _evaluate
+    from shim_cli.watch.measure import inspect_request
+
+    big = "".join(f"row {i} user{i}@example.com\n" for i in range(9_000))
+    assert len(big) > 250_000
+    body = _json.dumps(
+        {
+            "model": "claude-opus-5",
+            "messages": [
+                {"role": "user", "content": [{"type": "tool_result", "content": big}]}
+            ],
+        }
+    ).encode()
+
+    exchange = inspect_request(body, _evaluate)
+
+    assert exchange.measured is True
+    assert exchange.entities_by_section["messages"]["EMAIL"] == 9_000

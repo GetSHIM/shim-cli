@@ -120,3 +120,45 @@ def test_claude_code_runner_does_not_block_a_truncated_tool_event(
     assert result.stderr == b""
     assert "decision" not in document
     assert "could not be inspected" in document["systemMessage"]
+
+
+def test_an_oversized_tool_event_passes_through_and_still_reaches_the_summary(
+    tmp_path: Path,
+) -> None:
+    """Too large to inspect is still something that happened.
+
+    The event was refused before anything was recorded, so the turn left no
+    trace: the session summary under-counted, and the one thing the user needed
+    to know — which read went uninspected — was the thing that went missing.
+    """
+    session = tmp_path / "session"
+    session.mkdir(mode=0o700)
+    extra = {"SHIM_GUARD_SESSION_DIR": str(session)}
+    raw = json.dumps(
+        {
+            "session_id": "oversized",
+            "hook_event_name": "PostToolUse",
+            "tool_name": "Read",
+            "tool_input": {"file_path": "/work/big.txt"},
+            "tool_response": {"content": "x" * 1_200_000},
+        },
+        separators=(",", ":"),
+    ).encode()
+
+    result = _run(raw, tmp_path, extra)
+
+    assert result.returncode == 0
+    assert result.stderr == b""
+    assert "could not be inspected" in json.loads(result.stdout)["systemMessage"]
+
+    records = [
+        json.loads(line)
+        for path in session.rglob("*.jsonl")
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert len(records) == 1
+    assert records[0]["tool_name"] == "Read"
+    # The record keeps the path; the summary is what shortens it to a name.
+    assert records[0]["target"] == "/work/big.txt"
+    assert records[0]["note"].startswith("not inspected")

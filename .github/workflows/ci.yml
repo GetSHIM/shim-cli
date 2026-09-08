@@ -109,18 +109,23 @@ jobs:
         run: |
           set -eu
           config="$(mktemp -d)/config.toml"
-          printf 'enabled_entities = ["EMAIL"]\n\n[mode]\nuser-prompt = "enforce"\n' > "$config"
+          printf 'enabled_entities = ["EMAIL", "IBAN", "SECRET"]\n\n[mode]\nuser-prompt = "enforce"\n' > "$config"
           answer() {
             home="$(mktemp -d)"
             printf '%s' "$2" \
               | env TMPDIR="$home" SHIM_CONFIG="$config" \
+                SHIM_GUARD_SESSION_DIR="$home/session" XDG_STATE_HOME="$home/state" \
                 "$1" plugins/shim-cli/bin/shim.pyz claude 2>&1 \
-              | sed -E "s|$home/shim-redacted-[A-Za-z0-9_]+\.txt|<REDACTED>|g"
+              | sed -E "s|$home/shim-redacted-[A-Za-z0-9_]+\.txt|<REDACTED>|g" \
+              | sed -E "s|[0-9]+ ms|N ms|g"
           }
+          # Every fixture must leave the ASCII fast path in normalize(): an
+          # ASCII-only set passed here while zip(strict=True) made 3.9 raise on
+          # any Turkish letter or em dash.
           for fixture in \
-            '{"hook_event_name":"UserPromptSubmit","prompt":"Contact alice@example.com"}' \
-            '{"hook_event_name":"PostToolUse","tool_name":"Read","tool_response":{"content":"key=alice@example.com"}}' \
-            '{"hook_event_name":"Stop","session_id":"s1"}'
+            '{"hook_event_name":"UserPromptSubmit","prompt":"Hesap ışği: TR330006100519786457841326"}' \
+            '{"hook_event_name":"PostToolUse","tool_name":"Read","tool_response":{"content":"kanit — AKIAIOSFODNN7EXAMPLE"}}' \
+            '{"hook_event_name":"Stop","session_id":"s1","last_assistant_message":"bitti — alice@example.com"}'
           do
             diff \
               <(answer '${{ steps.floor.outputs.python-path }}' "$fixture") \

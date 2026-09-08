@@ -100,7 +100,9 @@ def _normalize_unicode(
     origins: list[int] = []
     if len(text) != len(spans):
         raise ValueError("Guard normalization failed safely.")
-    for origin, (character, span) in enumerate(zip(text, spans, strict=True)):
+    # No `strict=`: the zipapp runs on the 3.9 that ships with macOS, where
+    # the keyword is a TypeError. The length check above is the same guard.
+    for origin, (character, span) in enumerate(zip(text, spans)):  # noqa: B905
         decomposed = unicodedata.normalize("NFKD", character)
         if len(characters) + len(decomposed) > MAX_NORMALIZED_CHARACTERS:
             raise _too_large()
@@ -149,7 +151,8 @@ def normalize(text: str) -> NormalizedText:
     visible_spans: list[_SourceSpan] = []
     if len(decoded) != len(spans):
         raise ValueError("Guard normalization failed safely.")
-    for character, span in zip(decoded, spans, strict=True):
+    # No `strict=`; see _normalize_unicode. The check above is the guard.
+    for character, span in zip(decoded, spans):  # noqa: B905
         if not _INVISIBLE.fullmatch(character):
             visible_text.append(character)
             visible_spans.append(span)

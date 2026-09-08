@@ -139,8 +139,9 @@ def _legacy_state(client: str) -> Check:
         if state.kind is StateKind.FILE and state.content is not None:
             if copilot_settings.is_ours(state.content):
                 found.append(f"hook file uses the old name at {legacy}")
-    if _has_legacy_fragment(client):
-        found.append("the installed hook fragment names the old module")
+    legacy_fragment = _has_legacy_fragment(client)
+    if legacy_fragment:
+        found.append("hook installed in the 0.2.0 shape")
     settings_file = legacy_config_path()
     if settings_file is not None and settings_file.is_file():
         found.append(f"settings are still at {settings_file}")
@@ -154,10 +155,11 @@ def _legacy_state(client: str) -> Check:
         found.append(f"ledger files are still in {directory}")
     if not found:
         return Check("legacy_names", "PASS", "No 0.2.0 names are left on disk.")
+    move = " to move it" if legacy_fragment else ""
     return Check(
         "legacy_names",
         "WARN",
-        "; ".join(found) + f"; run shim install {client}",
+        "; ".join(found) + f"; run shim install {client}{move}",
     )
 
 
@@ -185,7 +187,13 @@ def _has_legacy_fragment(client: str) -> bool:
         return False
 
 
-def _hook_state(client: str) -> Check:
+def _hook_state(client: str, legacy_fragment: bool = False) -> Check | None:
+    """None when the only true thing to say is what the legacy check says.
+
+    A 0.2.0 fragment is not shim's current group, so the plan reads
+    `not_installed` — and doctor printed "not installed" two lines above
+    "the installed hook fragment ...". One of them had to go.
+    """
     name = client_name(client)
     try:
         label, state = plan_status(client_plan(client, "install"))
@@ -201,21 +209,19 @@ def _hook_state(client: str) -> Check:
         "conflict": f"{name} hook configuration needs manual review.",
         "unsafe": f"{name} hook configuration cannot be trusted safely.",
     }
+    if state == "not_installed" and legacy_fragment:
+        return None
     return Check("hook_configuration", label, messages[state])
 
 
 def _entity_settings() -> Check:
-    from shim_cli.config import load_entities
+    from shim_cli.config import describe_settings_error, load_entities
     from shim_cli.guard import ENTITY_TYPES
 
     try:
         enabled = load_entities()
-    except (OSError, ValueError):
-        return Check(
-            "entity_settings",
-            "FAIL",
-            "Entity settings are unsafe or invalid; reset malformed contents or review the path.",
-        )
+    except (OSError, ValueError) as error:
+        return Check("entity_settings", "FAIL", describe_settings_error(error))
     if not enabled:
         return Check(
             "entity_settings",
@@ -521,8 +527,9 @@ def doctor(*, client: str, as_json: bool) -> None:
     if client == "codex":
         checks.append(_codex_hooks_feature())
     checks.extend(
-        (
-            _hook_state(client),
+        check
+        for check in (
+            _hook_state(client, _has_legacy_fragment(client)),
             _legacy_state(client),
             _entity_settings(),
             _custom_patterns(),
@@ -533,6 +540,7 @@ def doctor(*, client: str, as_json: bool) -> None:
             _coverage_check(client),
             _activation_check(client),
         )
+        if check is not None
     )
     labels = {check.status for check in checks}
     if "FAIL" in labels:

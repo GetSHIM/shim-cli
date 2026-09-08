@@ -246,5 +246,29 @@ def policy_from_state(state: FileState) -> policy.Policy:
         raise ValueError("shim settings are invalid") from error
 
 
+def describe_settings_error(error: BaseException) -> str:
+    """What is wrong and where, for a user who has to fix the file by hand.
+
+    `shim settings are invalid` names neither the file, nor the line, nor the
+    command that clears it, so a malformed `config.toml` withheld every prompt
+    with nothing to act on. The parser's own message carries the line number
+    and is already on `__cause__`; it was just never read.
+    """
+    cause = error.__cause__
+    reason = (
+        str(cause)
+        if isinstance(cause, tomllib.TOMLDecodeError) and str(cause)
+        else "it is not readable as settings"
+    )
+    try:
+        where = str(config_path())
+    except ValueError:
+        where = "the settings file"
+    return (
+        f"Settings at {where} are invalid: {reason}. "
+        "Run shim config --reset to start over, or edit the line above."
+    )
+
+
 def load_entities(path: Path | None = None) -> tuple[str, ...]:
     return load_policy(path).entities

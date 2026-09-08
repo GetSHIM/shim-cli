@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import io
 import json
 import os
@@ -1069,3 +1070,139 @@ def test_no_hook_anywhere_is_still_a_failure(monkeypatch, tmp_path) -> None:
     )
 
     assert diagnostics._resolution_check("codex").status == "FAIL"
+
+
+def _legacy_claude_settings(home: Path, *, foreign: bool = False) -> Path:
+    from shim_cli.clients.claude.settings import legacy_hook_groups
+    from shim_cli.clients.hook_settings import add_groups
+
+    document = json.loads(add_groups(None, legacy_hook_groups()))
+    if foreign:
+        document["hooks"]["UserPromptSubmit"].append(
+            {"hooks": [{"type": "command", "command": "existing-hook"}]}
+        )
+    target = home / ".claude" / "settings.json"
+    target.write_text(json.dumps(document, indent=2))
+    return target
+
+
+def test_doctor_on_a_020_fragment_does_not_also_say_it_is_not_installed(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """The review found both lines two apart. The first one is false: the hook
+    is installed, in the shape 0.2.0 wrote."""
+    home = _claude_home(monkeypatch, tmp_path)
+    _claude(monkeypatch, tmp_path)
+    _legacy_claude_settings(home)
+
+    result = runner.invoke(app, ["doctor", "claude"])
+    text = " ".join(unstyle(result.output).split())
+
+    assert (
+        "hook installed in the 0.2.0 shape; run shim install claude to move it" in text
+    )
+    assert "hook group is not installed" not in text
+
+    payload = json.loads(runner.invoke(app, ["doctor", "claude", "--json"]).output)
+    names = {item["name"] for item in payload["checks"]}
+    assert "legacy_names" in names
+    assert "hook_configuration" not in names
+
+
+def test_install_over_a_020_fragment_says_it_replaced_the_line(
+    monkeypatch, tmp_path: Path
+) -> None:
+    home = _claude_home(monkeypatch, tmp_path)
+    _claude(monkeypatch, tmp_path)
+    _legacy_claude_settings(home)
+
+    result = runner.invoke(app, ["install", "claude", "--yes"])
+    text = " ".join(unstyle(result.output).split())
+
+    assert result.exit_code == 0
+    assert "Replaced the 0.2.0 hook line with the current one." in text
+    # Nothing was preserved and nothing was appended after anything.
+    assert "will be preserved" not in text
+    assert "Appended shim after existing" not in text
+
+
+def test_install_over_a_020_fragment_beside_a_foreign_hook_says_both(
+    monkeypatch, tmp_path: Path
+) -> None:
+    home = _claude_home(monkeypatch, tmp_path)
+    _claude(monkeypatch, tmp_path)
+    target = _legacy_claude_settings(home, foreign=True)
+
+    result = runner.invoke(app, ["install", "claude", "--yes"])
+    text = " ".join(unstyle(result.output).split())
+
+    assert "Replaced the 0.2.0 hook line with the current one." in text
+    assert "will be preserved" in text
+    assert "existing-hook" in target.read_text(encoding="utf-8")
+
+
+def _broken_config(tmp_path: Path) -> Path:
+    target = tmp_path / "shim-roots" / "config" / "shim" / "config.toml"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        'enabled_entities = ["EMAIL"]\nledger = true\nbroken line here\n',
+        encoding="utf-8",
+    )
+    return target
+
+
+@pytest.mark.parametrize(
+    "command",
+    [["doctor", "claude"], ["config", "--enable", "IBAN", "--yes"]],
+)
+def test_a_broken_settings_file_names_the_file_the_line_and_the_way_out(
+    command: list[str], monkeypatch, tmp_path: Path
+) -> None:
+    """`Entity settings are unsafe or invalid` named none of the three, and
+    every prompt was withheld until the user guessed which was wrong."""
+    _claude_home(monkeypatch, tmp_path)
+    _claude(monkeypatch, tmp_path)
+    target = _broken_config(tmp_path)
+
+    result = runner.invoke(app, command)
+    # Rich wraps long paths, so compare with the whitespace removed.
+    text = " ".join(unstyle(result.output).split())
+    dense = text.replace(" ", "")
+
+    assert str(target).replace(" ", "") in dense
+    assert "line3" in dense
+    assert "shimconfig--reset" in dense
+
+
+def test_the_hook_says_nothing_about_the_contents_of_a_broken_settings_file(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Doctor may quote the parser. The hook may not: its output reaches the
+    model, and a settings file is the user's, not the model's."""
+    from shim_cli.hook import main
+
+    target = _broken_config(tmp_path)
+    monkeypatch.setattr(
+        "sys.stdin",
+        SimpleNamespace(
+            buffer=io.BytesIO(
+                b'{"hook_event_name":"UserPromptSubmit","prompt":"hello"}'
+            )
+        ),
+    )
+    written: list[bytes] = []
+    monkeypatch.setattr(
+        "sys.stdout",
+        SimpleNamespace(
+            buffer=SimpleNamespace(write=written.append, flush=lambda: None)
+        ),
+    )
+
+    monkeypatch.setattr("sys.argv", ["shim-hook", "claude"])
+    with contextlib.suppress(SystemExit):
+        main()
+
+    output_text = b"".join(written).decode("utf-8")
+    assert "broken line here" not in output_text
+    assert str(target) not in output_text
+    assert "shim doctor claude" in output_text

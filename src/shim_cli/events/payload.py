@@ -4,7 +4,12 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-MAX_TEXT_CHARACTERS = 200_000
+# Matches the hook's own MAX_INPUT_BYTES: anything that got past that refusal
+# is worth scanning. Below this, a single large `Read` result was skipped here
+# before the detector ever saw it, and reached the model unmasked.
+# ponytail: the bound is size, not time. The per-call analysis deadline is the
+# backstop; a shared deadline across pieces is the upgrade if this ever bites.
+MAX_TEXT_CHARACTERS = 1_000_000
 MAX_DEPTH = 24
 MAX_LEAVES = 2_000
 
@@ -167,6 +172,10 @@ def inspect(
             found.reasons.add("analysis-failed")
             continue
         inspected += 1
+        if decision.partial:
+            # A piece of an oversized leaf failed; the rest is masked below.
+            found.skipped += 1
+            found.reasons.add("piece-failed")
         current = text
         if decision.findings:
             findings.append((path, decision))

@@ -63,6 +63,17 @@ arguments and native structured tool responses. Copilot uses
 `userPromptTransformed` to replace the model-facing prompt; the original can
 remain visible in its timeline.
 
+**The plugin ships two hook files, and Claude Code reads both.** `plugin.json`
+declares `hooks/claude.json`, but Claude Code 2.1.263 also loads
+`hooks/hooks.json` by convention — the file Codex finds the same way, because
+`.codex-plugin/plugin.json` has no field that names a hooks path. Claude Code
+does not expand Codex's `${PLUGIN_ROOT}`, so every prompt ran `/hooks/run-shim`
+and logged exit 127 beside the real hook's output. The Codex command therefore
+opens with `[ -n "$CLAUDE_PLUGIN_ROOT" ] && exit 0`: Claude Code sets that
+variable and the command stands down silently, while Codex does not set it and
+substitutes `${PLUGIN_ROOT}` as before. If a future Codex manifest accepts a
+hooks path, the file becomes `hooks/codex.json` and the guard is dropped.
+
 **A Codex hook does not run until it is trusted.** From 0.151.0 Codex holds a
 persisted trust record per hook and silently skips any hook it does not have
 one for: no warning, no line in the transcript, and prompts reach the model

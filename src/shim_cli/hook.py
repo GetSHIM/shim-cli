@@ -66,7 +66,20 @@ _TOOL_EVENT_NAMES = (
 )
 
 
-def _prefix_event(raw: bytes) -> str:
+_FILE_KEYS = ("file_path", "notebook_path", "path")
+
+
+def _prefix_fields(event: str, session: str, tool: str, target: str) -> dict[str, str]:
+    return {"event": event, "session_id": session, "tool_name": tool, "target": target}
+
+
+def _prefix_event(raw: bytes) -> dict[str, str]:
+    """Event name, session id, tool name and target from as much JSON as parses.
+
+    Used when the document is too large or too broken for the real parser. The
+    session id is what lets a refused event still reach the session summary,
+    instead of the turn simply going missing from it.
+    """
     import json
 
     text = raw.decode("utf-8", errors="replace")
@@ -78,49 +91,71 @@ def _prefix_event(raw: bytes) -> str:
         return start
 
     event_name = ""
+    session_id = ""
+    tool_name = ""
+    target = ""
+    settled = False
     index = skip_space(0)
     if index == len(text) or text[index] != "{":
-        return ""
+        return _prefix_fields("", "", "", "")
 
     index += 1
     while True:
         index = skip_space(index)
         if index == len(text) or text[index] == "}":
-            return event_name
+            return _prefix_fields(event_name, session_id, tool_name, target)
         try:
             key, index = decoder.raw_decode(text, index)
         except (RecursionError, ValueError):
-            return event_name
+            return _prefix_fields(event_name, session_id, tool_name, target)
         if not isinstance(key, str):
-            return event_name
+            return _prefix_fields(event_name, session_id, tool_name, target)
 
         index = skip_space(index)
         if index == len(text) or text[index] != ":":
-            return event_name
+            return _prefix_fields(event_name, session_id, tool_name, target)
         index = skip_space(index + 1)
         try:
             value, index = decoder.raw_decode(text, index)
         except (RecursionError, ValueError):
-            return event_name
+            return _prefix_fields(event_name, session_id, tool_name, target)
         if key == "hook_event_name" and isinstance(value, str):
+            # A prompt event name is decisive; a tool one only if nothing better
+            # turns up. Neither ends the scan any more, because `session_id`
+            # may still be ahead of us.
             if value in _PROMPT_EVENTS:
-                return value
-            if not event_name and value in _TOOL_EVENT_NAMES:
+                event_name, settled = value, True
+            elif not settled and not event_name and value in _TOOL_EVENT_NAMES:
                 event_name = value
+        elif key == "session_id" and isinstance(value, str):
+            session_id = value
+        elif key == "tool_name" and isinstance(value, str):
+            tool_name = value
+        elif key == "tool_input" and isinstance(value, dict):
+            for name in _FILE_KEYS:
+                if isinstance(value.get(name), str):
+                    target = value[name]
+                    break
 
         index = skip_space(index)
         if index == len(text) or text[index] == "}":
-            return event_name
+            return _prefix_fields(event_name, session_id, tool_name, target)
         if text[index] != ",":
-            return event_name
+            return _prefix_fields(event_name, session_id, tool_name, target)
         index += 1
 
 
-def _refusal_output(raw: bytes, client: str) -> bytes:
+def _refused_envelope(raw: bytes) -> tuple[str, str]:
     try:
-        event, _session, _stop = _envelope(raw)
+        event, session, _stop = _envelope(raw)
     except Exception:
-        event = _prefix_event(raw)
+        found = _prefix_event(raw)
+        return found["event"], found["session_id"]
+    return event, session
+
+
+def _refusal_output(raw: bytes, client: str) -> bytes:
+    event, _session = _refused_envelope(raw)
     if not event or event in _PROMPT_EVENTS:
         return _error_output(client)
     return _tool_error_output(client, event)
@@ -331,14 +366,27 @@ def _uninspected(raw: bytes, client: str, event: str, session_id: str) -> None:
         )
 
         tool = ""
+        target = ""
         try:
             document = json.loads(raw.decode("utf-8", "replace"))
-            if isinstance(document, dict) and isinstance(
-                document.get("tool_name"), str
-            ):
-                tool = document["tool_name"]
+            if isinstance(document, dict):
+                if isinstance(document.get("tool_name"), str):
+                    tool = document["tool_name"]
+                given = document.get("tool_input")
+                if isinstance(given, dict):
+                    for name in _FILE_KEYS:
+                        if isinstance(given.get(name), str):
+                            target = given[name]
+                            break
         except Exception:
             pass
+        if not tool:
+            # An oversized document arrives truncated at the read limit, so it
+            # does not parse; the prefix is still enough to name the tool and
+            # the file, which is what tells the user which read was skipped.
+            found = _prefix_event(raw)
+            tool = found["tool_name"]
+            target = target or found["target"]
         event_label = event if event in _TOOL_EVENT_NAMES else UNSUPPORTED_EVENT_LABEL
         tool_label = display_label(tool, UNKNOWN_TOOL_LABEL)
         if tool_label != UNKNOWN_TOOL_LABEL:
@@ -352,12 +400,21 @@ def _uninspected(raw: bytes, client: str, event: str, session_id: str) -> None:
                     )
             except Exception:
                 tool_label = UNKNOWN_TOOL_LABEL
+        if target:
+            # A path is user data and reaches the summary; scan it like any leaf.
+            try:
+                from shim_cli.guard import evaluate
+
+                target = evaluate(target).redacted_text
+            except Exception:
+                target = ""
         remember(
             session_id,
             Record(
                 client=client,
                 event=event_label,
                 tool_name=tool_label,
+                target=target,
                 direction="",
                 mode="",
                 action="report",
@@ -406,6 +463,11 @@ def _tool_output(
 
 def _output(raw: bytes, client: str = "codex") -> bytes:
     if len(raw) > MAX_INPUT_BYTES:
+        # Too large to inspect is still something that happened. Without this
+        # the event left no trace at all and the summary silently under-counted.
+        event, session_id = _refused_envelope(raw)
+        if session_id:
+            _uninspected(raw, client, event, session_id)
         return _refusal_output(raw, client)
 
     try:

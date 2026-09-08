@@ -44,10 +44,15 @@ class Finding:
 
 @dataclass(frozen=True)
 class GuardDecision:
-    __slots__ = ("findings", "redacted_text")
+    __slots__ = ("findings", "partial", "redacted_text")
 
     findings: tuple[Finding, ...]
     redacted_text: str
+    # A leaf too large for one pass is scanned in pieces; True means one of
+    # those pieces failed and its span of the text was never inspected. No
+    # default: `__slots__` and a class-level default collide on the 3.9 the
+    # zipapp runs, and `slots=True` is 3.10.
+    partial: bool
 
     def __post_init__(self) -> None:
         if not isinstance(self.findings, tuple) or not all(
@@ -56,6 +61,8 @@ class GuardDecision:
             raise ValueError("Invalid Guard findings.")
         if not isinstance(self.redacted_text, str):
             raise ValueError("Invalid Guard redacted text.")
+        if not isinstance(self.partial, bool):
+            raise ValueError("Invalid Guard partial flag.")
 
     @property
     def blocked(self) -> bool:
