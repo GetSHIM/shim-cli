@@ -228,6 +228,32 @@ def _entity_settings() -> Check:
     )
 
 
+def _custom_patterns() -> Check:
+    """A pattern that backtracks would overrun the hook's deadline in the client."""
+    from shim_cli.config import load_policy
+    from shim_cli.guard.entities import entry_source, unsafe_pattern
+
+    try:
+        patterns = load_policy().custom
+    except (OSError, ValueError):
+        return Check(
+            "custom_patterns",
+            "FAIL",
+            "Custom patterns cannot be read; run `shim config` to review them.",
+        )
+    if not patterns:
+        return Check("custom_patterns", "PASS", "No custom patterns are configured.")
+    reasons = [
+        reason
+        for pattern in patterns
+        if (reason := unsafe_pattern(pattern.name, entry_source(pattern.entry)))
+    ]
+    if reasons:
+        return Check("custom_patterns", "FAIL", " ".join(reasons))
+    named = ", ".join(pattern.name for pattern in patterns)
+    return Check("custom_patterns", "PASS", f"{len(patterns)} custom: {named}.")
+
+
 def _run_hook(
     command: list[str], payload: str, environment: dict[str, str], timeout: int
 ) -> subprocess.CompletedProcess[str]:
@@ -474,6 +500,7 @@ def doctor(*, client: str, as_json: bool) -> None:
             _hook_state(client),
             _legacy_state(client),
             _entity_settings(),
+            _custom_patterns(),
             _session_record_check(),
             _runner_check(client),
             _resolution_check(),

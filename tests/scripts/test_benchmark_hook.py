@@ -26,5 +26,5 @@ def test_benchmark_covers_the_prompt_and_the_reply() -> None:
     )
     result = json.loads(completed.stdout)
 
-    assert result["sample_counts"] == {"safe": 1, "block": 1, "stop": 1}
-    assert set(result["timings_ms"]) == {"safe", "block", "stop"}
+    assert result["sample_counts"] == {"safe": 1, "block": 1, "stop": 1, "custom": 1}
+    assert set(result["timings_ms"]) == {"safe", "block", "stop", "custom"}

@@ -184,6 +184,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         exchange.sections = measured.sections
         exchange.entities = measured.entities
         exchange.entities_by_section = measured.entities_by_section
+        exchange.custom = measured.custom
         exchange.at_files = measured.at_files
         exchange.measured = measured.measured
 
@@ -283,7 +284,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             )
             if exchange.response_scan_status != "unavailable":
                 try:
-                    exchange.response_entities = scan_response(reader, self.evaluate)
+                    exchange.response_entities, exchange.response_custom = (
+                        scan_response(reader, self.evaluate)
+                    )
                 except Exception:
                     exchange.response_entities = {}
                     exchange.response_scan_status = "unavailable"

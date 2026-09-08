@@ -60,6 +60,14 @@ def _counts(findings) -> tuple:
     return tuple(sorted(totals.items()))
 
 
+def _custom_counts(findings) -> tuple:
+    totals: dict = {}
+    for _path, decision in findings:
+        for name, count in decision.custom_counts:
+            totals[name] = totals.get(name, 0) + count
+    return tuple(sorted(totals.items()))
+
+
 def _summary(counts) -> str:
     return ", ".join(f"{entity} ({count})" for entity, count in counts)
 
@@ -134,6 +142,7 @@ def process(
         note="",
         transforms=(),
         markers=(),
+        custom=(),
     ) -> Record:
         return Record(
             client=entry.client,
@@ -150,6 +159,7 @@ def process(
             note=note,
             transforms=transforms,
             markers=markers,
+            custom=custom,
         )
 
     if body is None:
@@ -182,6 +192,7 @@ def process(
                 note=note,
                 transforms=result.transforms if can_rewrite else (),
                 markers=result.markers,
+                custom=_custom_counts(result.findings),
             ),
         )
 
@@ -203,7 +214,12 @@ def process(
     counts = _counts(findings)
     action = decide(direction, mode)
     if action == ALLOW:
-        return Outcome(b"", record(ALLOW, counts, fields=len(findings)))
+        return Outcome(
+            b"",
+            record(
+                ALLOW, counts, fields=len(findings), custom=_custom_counts(findings)
+            ),
+        )
 
     message = _message(tool_label, counts, action)
     emitted = rewritten if action == MASK and changed else body
@@ -218,6 +234,7 @@ def process(
             fields=len(findings),
             transforms=result.transforms if action == MASK else (),
             markers=result.markers,
+            custom=_custom_counts(findings),
         ),
     )
 

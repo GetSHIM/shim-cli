@@ -264,3 +264,28 @@ def test_the_model_counts_reach_the_json_report() -> None:
 
 def test_a_session_with_no_model_line_still_carries_the_json_key() -> None:
     assert summary.as_json([_record()])["model_output"] == {}
+
+
+def test_a_named_pattern_is_reported_beside_the_type_it_masked() -> None:
+    text = summary.render(
+        [_record(entities={"CUSTOM": 3}, custom={"PROJECT_CODENAME": 2, "HOST": 1})]
+    )
+
+    assert "masked    3 CUSTOM" in text
+    assert "custom    2 PROJECT_CODENAME, 1 HOST" in text
+
+
+def test_pattern_names_reach_the_json_report() -> None:
+    document = summary.as_json([_record(custom={"PROJECT_CODENAME": 2})])
+
+    assert document["custom"] == {"PROJECT_CODENAME": 2}
+
+
+def test_a_session_without_named_patterns_carries_an_empty_map() -> None:
+    assert summary.as_json([_record()])["custom"] == {}
+
+
+def test_a_malformed_custom_map_is_ignored_rather_than_rendered() -> None:
+    text = summary.render([_record(custom="not a map")])
+
+    assert "custom" not in text

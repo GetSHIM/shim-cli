@@ -348,6 +348,53 @@ Every key in the file is optional. A file holding only `[mode]` or only
 Changes are previewed before they are saved. The CLI, installed hook, `scan`,
 and `redact` all use the same policy.
 
+### Your own patterns
+
+The eleven built-in types do not know your project's code name, your internal
+host format, or your customer id shape. Name a pattern and shim masks it like
+any other type, as `CUSTOM`:
+
+```console
+shim config --custom PROJECT_CODENAME='\bATLAS-[0-9]{4}\b'
+shim config --custom-literal INTERNAL_HOST='build.corp.internal'
+shim config --remove-custom PROJECT_CODENAME
+```
+
+```toml
+[[custom]]
+name = "PROJECT_CODENAME"
+pattern = '\bATLAS-[0-9]{4}\b'
+
+[[custom]]
+name = "INTERNAL_HOST"
+literal = "build.corp.internal"
+ignore_case = true
+```
+
+A match is replaced by `<CUSTOM_1>` — the name stays out of the model's
+context — and the session summary says which pattern matched:
+
+```text
+  masked    3 CUSTOM  (Read config/settings.py)
+  custom    2 PROJECT_CODENAME, 1 INTERNAL_HOST
+```
+
+A literal matches whole words unless you set `whole_word = false`; a pattern is
+a Python regular expression and writes its own boundaries. At most 32 patterns,
+and a built-in type wins wherever the two overlap, so a custom pattern can add
+detection but never take an email away from `EMAIL`.
+
+**The pattern is checked when you write it, not when it runs.** The hook is
+synchronous and Python's `re` has no per-match timeout, so a pattern that
+backtracks would overrun the client's own timeout on a large tool result.
+`shim config` refuses one before writing it, `shim doctor` re-checks the file,
+and 32 patterns cost no measurable time on the hook path:
+
+```console
+$ shim config --custom BAD='(a+)+$'
+FAIL pattern BAD backtracks on repeated input; simplify it
+```
+
 ## Privacy limitations
 
 - The host client receives the raw prompt before its hook runs, and other hooks

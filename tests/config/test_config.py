@@ -8,6 +8,7 @@ from shim_cli.config import (
     load_policy,
     parse_settings,
     render_entities,
+    render_settings,
 )
 from shim_cli.guard import DEFAULT_ENTITIES
 
@@ -97,6 +98,7 @@ def test_a_version_one_file_is_a_valid_version_two_file() -> None:
         "entities": {},
         "ledger": False,
         "diet": ("json",),
+        "custom": [],
     }
 
 
@@ -190,3 +192,77 @@ def test_observing_model_output_is_accepted(key: str) -> None:
     settings = parse_settings(f'[mode]\n"{key}" = "observe"\n')
 
     assert settings["mode"][key] == "observe"
+
+
+CUSTOM = '[[custom]]\nname = "PROJECT_CODENAME"\npattern = "ATLAS-[0-9]{4}"\n'
+
+
+def test_a_custom_pattern_survives_a_settings_round_trip() -> None:
+    parsed = parse_settings(CUSTOM)
+
+    rendered = render_settings(DEFAULT_ENTITIES, custom=parsed["custom"])
+
+    assert parse_settings(rendered.decode())["custom"] == parsed["custom"]
+
+
+@pytest.mark.parametrize(
+    "body",
+    (
+        '[[custom]]\nname = "lowercase"\npattern = "x"\n',
+        '[[custom]]\nname = "9LEADING"\npattern = "x"\n',
+        '[[custom]]\nname = "' + "A" * 33 + '"\npattern = "x"\n',
+        '[[custom]]\nname = "A"\n',
+        '[[custom]]\nname = "A"\npattern = "x"\nliteral = "abc"\n',
+        '[[custom]]\nname = "A"\npattern = "' + "x" * 257 + '"\n',
+        '[[custom]]\nname = "A"\nliteral = "ab"\n',
+        '[[custom]]\nname = "A"\npattern = "x"\nscore = 1.5\n',
+        '[[custom]]\nname = "A"\npattern = "x"\nscore = "high"\n',
+        '[[custom]]\nname = "A"\npattern = "x"\nignore_case = "yes"\n',
+        '[[custom]]\nname = "A"\npattern = "x"\nwhole_word = false\n',
+        '[[custom]]\nname = "A"\npattern = "(unclosed"\n',
+        '[[custom]]\nname = "A"\npattern = "x"\nunknown = 1\n',
+        '[[custom]]\nname = "A"\npattern = "x"\n[[custom]]\nname = "A"\npattern = "y"\n',
+        "custom = 7\n",
+    ),
+)
+def test_a_malformed_custom_entry_fails_closed(body: str) -> None:
+    with pytest.raises(ValueError):
+        parse_settings(body)
+
+
+@pytest.mark.parametrize(
+    "body",
+    (
+        '[[custom]]\nname = "A"\npattern = "x"\n',
+        '[[custom]]\nname = "A_1"\nliteral = "abc"\n',
+        '[[custom]]\nname = "A"\nliteral = "abc"\nwhole_word = false\n',
+        '[[custom]]\nname = "A"\npattern = "x"\nscore = 0\n',
+        '[[custom]]\nname = "A"\npattern = "x"\nscore = 1\n',
+        '[[custom]]\nname = "A"\npattern = "x"\nignore_case = true\n',
+    ),
+)
+def test_a_well_formed_custom_entry_is_accepted(body: str) -> None:
+    assert parse_settings(body)["custom"]
+
+
+def test_more_patterns_than_the_cap_fails_closed() -> None:
+    from shim_cli.guard.entities import MAX_CUSTOM_PATTERNS
+
+    body = "".join(
+        f'[[custom]]\nname = "P{index}"\npattern = "x{index}"\n'
+        for index in range(MAX_CUSTOM_PATTERNS + 1)
+    )
+
+    with pytest.raises(ValueError, match="shim settings are invalid"):
+        parse_settings(body)
+
+
+def test_exactly_the_cap_is_accepted() -> None:
+    from shim_cli.guard.entities import MAX_CUSTOM_PATTERNS
+
+    body = "".join(
+        f'[[custom]]\nname = "P{index}"\npattern = "x{index}"\n'
+        for index in range(MAX_CUSTOM_PATTERNS)
+    )
+
+    assert len(parse_settings(body)["custom"]) == MAX_CUSTOM_PATTERNS

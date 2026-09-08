@@ -1,0 +1,83 @@
+{
+  "version": 1,
+  "evaluation_unit": "exact redacted output",
+  "note": "User-defined patterns. Every value here is synthetic.",
+  "cases": [
+    {
+      "id": "custom-codename",
+      "custom": [{ "name": "PROJECT_CODENAME", "pattern": "\\bATLAS-[0-9]{4}\\b" }],
+      "text": "ship ATLAS-0042 before Friday",
+      "expected_output": "ship <CUSTOM_1> before Friday",
+      "expected_custom": { "PROJECT_CODENAME": 1 }
+    },
+    {
+      "id": "custom-internal-host",
+      "custom": [
+        { "name": "INTERNAL_HOST", "pattern": "\\b[a-z]+\\.corp\\.internal\\b" }
+      ],
+      "text": "deploy to build.corp.internal and cache.corp.internal",
+      "expected_output": "deploy to <CUSTOM_1> and <CUSTOM_2>",
+      "expected_custom": { "INTERNAL_HOST": 2 }
+    },
+    {
+      "id": "custom-literal-with-metacharacters",
+      "custom": [{ "name": "TICKET", "literal": "PROJ-1.2+3" }],
+      "text": "see PROJ-1.2+3 for the plan",
+      "expected_output": "see <CUSTOM_1> for the plan",
+      "expected_custom": { "TICKET": 1 }
+    },
+    {
+      "id": "custom-literal-is-whole-word-by-default",
+      "custom": [{ "name": "CODENAME", "literal": "atlas" }],
+      "text": "atlas and atlases",
+      "expected_output": "<CUSTOM_1> and atlases",
+      "expected_custom": { "CODENAME": 1 }
+    },
+    {
+      "id": "custom-literal-without-word-boundaries",
+      "custom": [
+        { "name": "CODENAME", "literal": "atlas", "whole_word": false }
+      ],
+      "text": "atlas and atlases",
+      "expected_output": "<CUSTOM_1> and <CUSTOM_2>es",
+      "expected_custom": { "CODENAME": 2 }
+    },
+    {
+      "id": "custom-ignore-case-off",
+      "custom": [{ "name": "CODENAME", "literal": "atlas" }],
+      "text": "ATLAS and atlas",
+      "expected_output": "ATLAS and <CUSTOM_1>",
+      "expected_custom": { "CODENAME": 1 }
+    },
+    {
+      "id": "custom-ignore-case-on",
+      "custom": [
+        { "name": "CODENAME", "literal": "atlas", "ignore_case": true }
+      ],
+      "text": "ATLAS and atlas",
+      "expected_output": "<CUSTOM_1> and <CUSTOM_2>",
+      "expected_custom": { "CODENAME": 2 }
+    },
+    {
+      "id": "custom-loses-to-a-built-in-type",
+      "custom": [{ "name": "ANY_TOKEN", "pattern": "[a-z.@]+" }],
+      "text": "alice@example.com",
+      "expected_output": "<EMAIL_1>",
+      "expected_custom": {}
+    },
+    {
+      "id": "custom-negative-no-match",
+      "custom": [{ "name": "PROJECT_CODENAME", "pattern": "\\bATLAS-[0-9]{4}\\b" }],
+      "text": "ship ATLAS-42 before Friday",
+      "expected_output": "ship ATLAS-42 before Friday",
+      "expected_custom": {}
+    },
+    {
+      "id": "custom-negative-no-patterns-configured",
+      "custom": [],
+      "text": "ship ATLAS-0042 before Friday",
+      "expected_output": "ship ATLAS-0042 before Friday",
+      "expected_custom": {}
+    }
+  ]
+}

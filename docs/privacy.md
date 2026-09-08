@@ -143,6 +143,15 @@ These records are never transmitted. The hook and detector add no network
 destination, account, API key, or telemetry. The opt-in `shim watch` proxy
 forwards only to the provider the client already uses.
 
+### Patterns you named yourself
+
+A `[[custom]]` entry is configuration, not prompt-derived data, so its **name**
+appears where an entity type does: in the session summary, in the session
+record, and in the opt-in ledger. The text that matched it never does, exactly
+as with a built-in type, and the placeholder is `<CUSTOM_n>` so the name does
+not reach the model either. Names are bounded to 32 characters and there are at
+most 32 of them.
+
 ### What the model wrote back
 
 At `Stop`, Claude Code hands the hook the final assistant text of the turn.

@@ -145,6 +145,18 @@ def response_totals(exchanges: list) -> dict:
     return combined
 
 
+def custom_totals(exchanges: list) -> dict:
+    combined: dict = {"request": {}, "response": {}}
+    for exchange in exchanges:
+        for where, source in (
+            ("request", exchange.custom),
+            ("response", exchange.response_custom),
+        ):
+            for name, count in source.items():
+                combined[where][name] = combined[where].get(name, 0) + count
+    return combined
+
+
 def response_scan(exchanges: list) -> str:
     if exchanges and all(e.response_scan_status == "known" for e in exchanges):
         return "known"
@@ -339,6 +351,7 @@ def as_json(session, seconds: float) -> dict:
         "stop_reasons": stop_reason_totals(exchanges),
         "response_entities": response_totals(exchanges),
         "response_scan": response_scan(exchanges),
+        "custom": custom_totals(exchanges),
         "exchanges": [
             {
                 "entities_by_section": exchange.entities_by_section,
@@ -356,6 +369,7 @@ __all__ = [
     "PRICES",
     "as_json",
     "at_file_totals",
+    "custom_totals",
     "entity_section_totals",
     "entity_totals",
     "response_scan",

@@ -70,6 +70,7 @@ def render_settings(
     tool_entities: dict | None = None,
     ledger: bool = False,
     diet: tuple | None = None,
+    custom: list | None = None,
 ) -> bytes:
     import tomli_w
 
@@ -91,6 +92,9 @@ def render_settings(
         }
     if modes:
         document["mode"] = dict(sorted(modes.items()))
+    if custom:
+        entity_catalog.compile_custom(custom)
+        document["custom"] = [dict(entry) for entry in custom]
     return tomli_w.dumps(document).encode()
 
 
@@ -98,7 +102,7 @@ def render_entities(entities: Iterable[str]) -> bytes:
     return render_settings(entities)
 
 
-_TOP_LEVEL = {"enabled_entities", "mode", "entities", "ledger", "diet"}
+_TOP_LEVEL = {"enabled_entities", "mode", "entities", "ledger", "diet", "custom"}
 
 
 def _modes(document: dict) -> dict:
@@ -113,6 +117,18 @@ def _modes(document: dict) -> dict:
             raise ValueError("shim settings are invalid")
         modes[key] = value
     return modes
+
+
+def _custom(document: dict) -> list:
+    section = document.get("custom", [])
+    if not isinstance(section, list):
+        raise ValueError("shim settings are invalid")
+    try:
+        entity_catalog.compile_custom(section)
+    except ValueError as error:
+        # `shim config` reports the specific reason; the file itself fails closed.
+        raise ValueError("shim settings are invalid") from error
+    return [dict(entry) for entry in section]
 
 
 def _tool_entities(document: dict) -> dict:
@@ -159,6 +175,7 @@ def parse_settings(text: str) -> dict:
         "entities": _tool_entities(document),
         "ledger": ledger,
         "diet": _diet(document),
+        "custom": _custom(document),
     }
 
 
@@ -181,7 +198,7 @@ def policy_from_state(state: FileState) -> policy.Policy:
         from shim_cli.events.diet import DEFAULT_TRANSFORMS
 
         return policy.Policy(
-            entity_catalog.DEFAULT_ENTITIES, {}, {}, False, DEFAULT_TRANSFORMS
+            entity_catalog.DEFAULT_ENTITIES, {}, {}, False, DEFAULT_TRANSFORMS, ()
         )
     if state.kind is not StateKind.FILE or state.content is None:
         raise ValueError("shim settings cannot be read safely")
@@ -196,6 +213,7 @@ def policy_from_state(state: FileState) -> policy.Policy:
             document["entities"],
             document["ledger"],
             document["diet"],
+            entity_catalog.compile_custom(document["custom"]),
         )
     except ValueError as error:
         raise ValueError("shim settings are invalid") from error

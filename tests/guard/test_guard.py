@@ -26,9 +26,9 @@ CORPUS = json.loads(
 
 
 def test_models_are_immutable_and_counts_follow_first_source_occurrence() -> None:
-    later = Finding("EMAIL", 20, 30, 0.9)
-    first = Finding("PHONE", 0, 10, 0.8)
-    decision = GuardDecision((later, first, Finding("EMAIL", 40, 50, 0.7)), "x")
+    later = Finding("EMAIL", 20, 30, 0.9, "")
+    first = Finding("PHONE", 0, 10, 0.8, "")
+    decision = GuardDecision((later, first, Finding("EMAIL", 40, 50, 0.7, "")), "x")
 
     assert decision.counts == (("PHONE", 1), ("EMAIL", 2))
     with pytest.raises((AttributeError, TypeError)):
@@ -87,7 +87,7 @@ def test_invalid_or_incomplete_analyzer_spans_fail_safely(
 ) -> None:
     module = importlib.import_module("shim_cli.guard.analyze")
 
-    def out_of_range(_text: str, _entities: tuple[str, ...]) -> list[Match]:
+    def out_of_range(_text: str, _entities: tuple[str, ...], _custom=()) -> list[Match]:
         return [Match("EMAIL_ADDRESS", 0, 999, 0.9)]
 
     monkeypatch.setattr(module, "analyze_text", out_of_range)
@@ -100,7 +100,7 @@ def test_shared_analysis_deadline_fails_safely(
 ) -> None:
     module = importlib.import_module("shim_cli.guard.analyze")
 
-    def slow(_text: str, _entities: tuple[str, ...]) -> list[Match]:
+    def slow(_text: str, _entities: tuple[str, ...], _custom=()) -> list[Match]:
         time.sleep(1)
         return []
 
@@ -132,12 +132,12 @@ def test_overlap_tie_is_deterministic_and_covers_the_component() -> None:
     module = importlib.import_module("shim_cli.guard.analyze")
     resolved = module._resolve_overlaps(
         [
-            Finding("TR_VKN", 0, 8, 0.8),
-            Finding("TR_NATIONAL_ID", 4, 12, 0.8),
+            Finding("TR_VKN", 0, 8, 0.8, ""),
+            Finding("TR_NATIONAL_ID", 4, 12, 0.8, ""),
         ]
     )
 
-    assert resolved == [Finding("TR_NATIONAL_ID", 0, 12, 0.8)]
+    assert resolved == [Finding("TR_NATIONAL_ID", 0, 12, 0.8, "")]
 
 
 def test_email_validation_reads_neither_the_network_nor_the_filesystem(
@@ -243,3 +243,88 @@ def test_a_credential_or_a_real_host_is_still_caught(text: str, entity: str) -> 
 
     assert entity in dict(decision.counts), decision.counts
     assert text not in decision.redacted_text
+
+
+def _custom(*entries):
+    from shim_cli.guard.entities import compile_custom
+
+    return compile_custom(entries)
+
+
+def test_a_custom_pattern_is_masked_and_numbered_like_any_other_type() -> None:
+    from shim_cli.guard import evaluate
+
+    patterns = _custom({"name": "CODENAME", "pattern": r"ATLAS-[0-9]{4}"})
+
+    decision = evaluate("ATLAS-0042 and ATLAS-0043", custom=patterns)
+
+    assert decision.redacted_text == "<CUSTOM_1> and <CUSTOM_2>"
+    assert decision.counts == (("CUSTOM", 2),)
+    assert decision.custom_counts == (("CODENAME", 2),)
+
+
+def test_the_pattern_name_never_reaches_the_placeholder() -> None:
+    from shim_cli.guard import evaluate
+
+    patterns = _custom({"name": "SECRET_PROJECT_NAME", "literal": "atlas"})
+
+    decision = evaluate("atlas ships", custom=patterns)
+
+    assert "SECRET_PROJECT_NAME" not in decision.redacted_text
+    assert decision.findings[0].label == "SECRET_PROJECT_NAME"
+
+
+def test_a_built_in_type_wins_an_overlapping_custom_span() -> None:
+    from shim_cli.guard import evaluate
+
+    patterns = _custom({"name": "ANYTHING", "pattern": r"[a-z.@]+"})
+
+    decision = evaluate("alice@example.com", custom=patterns)
+
+    assert decision.redacted_text == "<EMAIL_1>"
+    assert decision.custom_counts == ()
+
+
+def test_two_patterns_are_counted_under_their_own_names() -> None:
+    from shim_cli.guard import evaluate
+
+    patterns = _custom(
+        {"name": "CODENAME", "literal": "atlas"},
+        {"name": "HOST", "pattern": r"\b[a-z]+\.corp\.internal\b"},
+    )
+
+    decision = evaluate("atlas on build.corp.internal", custom=patterns)
+
+    assert dict(decision.custom_counts) == {"CODENAME": 1, "HOST": 1}
+
+
+def test_no_configured_patterns_means_no_custom_findings() -> None:
+    from shim_cli.guard import evaluate
+
+    decision = evaluate("ATLAS-0042 ships")
+
+    assert decision.findings == ()
+    assert decision.custom_counts == ()
+
+
+def test_scan_custom_reports_the_span_it_matched() -> None:
+    from shim_cli.guard.recognizers import scan_custom
+
+    patterns = _custom({"name": "CODENAME", "literal": "atlas"})
+
+    matches = scan_custom("say atlas now", patterns)
+
+    assert [(m.entity_type, m.start, m.end, m.label) for m in matches] == [
+        ("CUSTOM", 4, 9, "CODENAME")
+    ]
+
+
+def test_a_backtracking_pattern_is_named_before_it_can_run() -> None:
+    from shim_cli.guard.entities import unsafe_pattern
+
+    assert unsafe_pattern("BAD", "(a+)+$").startswith("pattern BAD backtracks")
+    assert unsafe_pattern("BACKREF", r"(a)\1").startswith("pattern BACKREF backtracks")
+    assert unsafe_pattern("BROKEN", "(unclosed") == (
+        "pattern BROKEN is not a valid regular expression"
+    )
+    assert unsafe_pattern("FINE", r"\bATLAS-[0-9]{4}\b") == ""

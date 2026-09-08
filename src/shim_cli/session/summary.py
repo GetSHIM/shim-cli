@@ -127,6 +127,18 @@ def _uninspected(records: list) -> list:
     ]
 
 
+def _custom_totals(records: list) -> list:
+    counts: dict = {}
+    for record in records:
+        custom = record.get("custom")
+        if not isinstance(custom, dict):
+            continue
+        for name, count in custom.items():
+            if isinstance(name, str) and isinstance(count, int):
+                counts[name] = counts.get(name, 0) + count
+    return sorted(counts.items(), key=lambda pair: (-pair[1], pair[0]))
+
+
 def _acted(records: list) -> list:
     return [
         record
@@ -170,6 +182,10 @@ def render(records: list, capped: bool = False) -> str:
             column = label if first else " " * len(label)
             first = False
             lines.append(f"  {column:<9} {count} {entity}{_where(relevant)}")
+    named = _custom_totals(records)
+    if named:
+        listed = ", ".join(f"{count} {name}" for name, count in named)
+        lines.append(f"  {'custom':<9} {listed}")
     replies = _model_output(records)
     if replies:
         listed = ", ".join(f"{count} {entity}" for entity, count in _totals(replies))
@@ -236,6 +252,7 @@ def as_json(records: list, capped: bool = False) -> dict:
             for marker, count in _marker_totals(records)
         },
         "model_output": dict(_totals(_model_output(records))),
+        "custom": dict(_custom_totals(records)),
         "capped": capped,
     }
 

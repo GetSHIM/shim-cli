@@ -25,6 +25,7 @@ ENTITY_MAP = {
     "TR_VKN": "TR_VKN",
     "SECRET": "SECRET",
     "DB_URI": "DB_URI",
+    "CUSTOM": "CUSTOM",
 }
 
 _FLAGS = re.DOTALL | re.MULTILINE | re.IGNORECASE
@@ -40,6 +41,7 @@ class Match(NamedTuple):
     start: int
     end: int
     score: float
+    label: str = ""
 
 
 def _compile(
@@ -518,10 +520,24 @@ _RECOGNIZERS: tuple[tuple[str, Callable[[str], list[Match]]], ...] = (
 )
 
 
-def analyze_text(text: str, entities: tuple[str, ...]) -> list[Match]:
+def scan_custom(text: str, patterns: tuple) -> list[Match]:
+    results: list[Match] = []
+    for pattern in patterns:
+        for match in pattern.regex.finditer(text):
+            start, end = match.span()
+            if end > start:
+                results.append(Match("CUSTOM", start, end, pattern.score, pattern.name))
+    return deduplicate(results)
+
+
+def analyze_text(
+    text: str, entities: tuple[str, ...], custom: tuple = ()
+) -> list[Match]:
     requested = frozenset(entities)
     results: list[Match] = []
     for entity, scan in _RECOGNIZERS:
         if entity in requested:
             results.extend(scan(text))
+    if custom and "CUSTOM" in requested:
+        results.extend(scan_custom(text, custom))
     return results

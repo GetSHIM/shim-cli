@@ -239,3 +239,11 @@ def test_a_model_output_record_keeps_its_direction_through_the_ledger() -> None:
 
     assert entries[0]["direction"] == "model-output"
     assert entries[0]["action"] == "report"
+
+
+def test_a_named_pattern_survives_the_ledger() -> None:
+    ledger.append(
+        _entry(entities={"CUSTOM": 1}, custom={"PROJECT_CODENAME": 1}), JANUARY
+    )
+
+    assert ledger.entries()[0]["custom"] == {"PROJECT_CODENAME": 1}

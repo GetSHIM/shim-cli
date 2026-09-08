@@ -269,7 +269,7 @@ def test_config_selects_entities_for_privacy_commands(
     assert json.loads(path_scan.output)["status"] == "safe"
     assert initial.exit_code == saved.exit_code == current.exit_code == 0
     assert adjusted.exit_code == final.exit_code == 0
-    assert "Current detection: 11/11 enabled" in initial.output
+    assert "Current detection: 12/12 enabled" in initial.output
     assert "ON" in saved.output and "OFF" in saved.output
     assert stat.S_IMODE(target.stat().st_mode) == 0o600
     assert json.loads(scan.output)["counts"] == {"EMAIL": 1}
@@ -374,6 +374,7 @@ def test_claude_install_status_doctor_and_revert(monkeypatch, tmp_path: Path) ->
         "hook_configuration",
         "legacy_names",
         "entity_settings",
+        "custom_patterns",
         "session_record",
         "runner",
         "hook_resolution",
@@ -427,6 +428,7 @@ def test_confirmation_and_doctor(monkeypatch, tmp_path: Path) -> None:
         "hook_configuration",
         "legacy_names",
         "entity_settings",
+        "custom_patterns",
         "session_record",
         "runner",
         "hook_resolution",
@@ -886,3 +888,88 @@ def test_the_coverage_table_says_what_stop_sees_and_that_it_changes_nothing(
     assert "last_assistant_message" in rows["Stop"]["sees"]
     assert rows["Stop"]["can_mask"] is False
     assert rows["Stop"]["can_report"] is True
+
+
+def test_custom_patterns_are_written_read_and_removed(monkeypatch, tmp_path) -> None:
+    target = _guard_config(monkeypatch, tmp_path)
+
+    added = runner.invoke(
+        app,
+        ["config", "--custom", r"CODENAME=\bATLAS-[0-9]{4}\b", "--yes"],
+        color=False,
+    )
+    scanned = runner.invoke(app, ["scan", "--json"], input="ship ATLAS-0042")
+    removed = runner.invoke(
+        app, ["config", "--remove-custom", "CODENAME", "--yes"], color=False
+    )
+    after = runner.invoke(app, ["scan", "--json"], input="ship ATLAS-0042")
+
+    assert added.exit_code == 0
+    assert json.loads(scanned.output)["counts"] == {"CUSTOM": 1}
+    assert removed.exit_code == 0
+    assert json.loads(after.output)["counts"] == {}
+    assert "custom" not in target.read_text(encoding="utf-8")
+
+
+def test_a_literal_is_written_and_matched_whole(monkeypatch, tmp_path) -> None:
+    _guard_config(monkeypatch, tmp_path)
+
+    runner.invoke(app, ["config", "--custom-literal", "CODENAME=atlas", "--yes"])
+    matched = runner.invoke(app, ["scan", "--json"], input="atlas ships")
+    missed = runner.invoke(app, ["scan", "--json"], input="atlases ship")
+
+    assert json.loads(matched.output)["counts"] == {"CUSTOM": 1}
+    assert json.loads(missed.output)["counts"] == {}
+
+
+@pytest.mark.parametrize(
+    "value", (r"BAD=(a+)+$", r"BACKREF=(a)\1", "NOEQUALS", "lower=x")
+)
+def test_a_pattern_that_cannot_be_trusted_is_refused(
+    monkeypatch, tmp_path, value: str
+) -> None:
+    target = _guard_config(monkeypatch, tmp_path)
+    before = target.read_bytes() if target.exists() else None
+
+    result = runner.invoke(app, ["config", "--custom", value, "--yes"], color=False)
+
+    assert result.exit_code == 2
+    assert (target.read_bytes() if target.exists() else None) == before
+
+
+def test_a_backtracking_pattern_names_itself(monkeypatch, tmp_path) -> None:
+    _guard_config(monkeypatch, tmp_path)
+
+    result = runner.invoke(app, ["config", "--custom", "BAD=(a+)+$", "--yes"])
+
+    assert "BAD backtracks on repeated input" in unstyle(result.output)
+
+
+def test_the_same_name_twice_replaces_rather_than_duplicates(
+    monkeypatch, tmp_path
+) -> None:
+    target = _guard_config(monkeypatch, tmp_path)
+
+    runner.invoke(app, ["config", "--custom", "CODENAME=alpha", "--yes"])
+    runner.invoke(app, ["config", "--custom", "CODENAME=beta", "--yes"])
+
+    body = target.read_text(encoding="utf-8")
+    assert body.count("CODENAME") == 1
+    assert "beta" in body and "alpha" not in body
+
+
+def test_doctor_reports_a_pattern_that_is_already_in_the_file(
+    monkeypatch, tmp_path
+) -> None:
+    target = _guard_config(monkeypatch, tmp_path)
+    target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    target.write_text(
+        'enabled_entities = ["CUSTOM"]\n[[custom]]\nname = "BAD"\npattern = "(a+)+$"\n',
+        encoding="utf-8",
+    )
+    target.chmod(0o600)
+
+    result = runner.invoke(app, ["doctor", "claude", "--json"])
+
+    checks = {item["name"]: item for item in json.loads(result.output)["checks"]}
+    assert checks["custom_patterns"]["status"] == "FAIL"

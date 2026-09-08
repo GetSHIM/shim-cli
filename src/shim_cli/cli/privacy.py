@@ -24,10 +24,11 @@ def read_stdin() -> str:
 
 
 def evaluate(text: str):
-    from shim_cli.config import load_entities
+    from shim_cli.config import load_policy
     from shim_cli.guard import evaluate as evaluate_guard
 
-    return evaluate_guard(text, load_entities())
+    policy = load_policy()
+    return evaluate_guard(text, policy.entities, policy.custom)
 
 
 def _read_and_evaluate(command: str, as_json: bool):

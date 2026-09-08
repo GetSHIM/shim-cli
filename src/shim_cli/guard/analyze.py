@@ -24,6 +24,7 @@ _PRIORITY = {
     "IP_ADDRESS": 40,
     "EMAIL": 30,
     "PHONE": 20,
+    "CUSTOM": 10,
 }
 
 
@@ -63,6 +64,7 @@ def _validated(items: Iterable[Match], text_length: int) -> list[Finding]:
         start = getattr(item, "start", None)
         end = getattr(item, "end", None)
         score = getattr(item, "score", None)
+        label = getattr(item, "label", "")
         if not isinstance(entity_type, str) or entity_type not in ENTITY_MAP:
             raise ValueError("Guard analyzer returned an unsupported finding.")
         if (
@@ -77,7 +79,7 @@ def _validated(items: Iterable[Match], text_length: int) -> list[Finding]:
             raise ValueError("Guard analyzer returned an invalid span.")
         if isinstance(score, bool) or not isinstance(score, (int, float)):
             raise ValueError("Guard analyzer returned an invalid score.")
-        finding = Finding(ENTITY_MAP[entity_type], start, end, score)
+        finding = Finding(ENTITY_MAP[entity_type], start, end, score, label)
         key = (finding.entity_type, start, end)
         previous = unique.get(key)
         if previous is None or finding.score > previous.score:
@@ -113,6 +115,7 @@ def _resolve_overlaps(items: Iterable[Finding]) -> list[Finding]:
                 min(item.start for item in component),
                 max(item.end for item in component),
                 winner.score,
+                winner.label,
             )
         )
 
@@ -148,12 +151,16 @@ def _source_findings(
             ):
                 raise ValueError("Guard normalization returned an invalid span.")
             previous = (start, end)
-        mapped.append(Finding(item.entity_type, spans[0][0], spans[-1][1], item.score))
+        mapped.append(
+            Finding(item.entity_type, spans[0][0], spans[-1][1], item.score, item.label)
+        )
     return _resolve_overlaps(mapped)
 
 
 def analyze(
-    text: str, enabled_entities: Iterable[str] = ENTITY_TYPES
+    text: str,
+    enabled_entities: Iterable[str] = ENTITY_TYPES,
+    custom: tuple = (),
 ) -> tuple[Finding, ...]:
     enabled = frozenset(normalize_entities(enabled_entities))
     if not enabled:
@@ -166,7 +173,7 @@ def analyze(
     )
     try:
         with _deadline():
-            raw = analyze_text(normalized.text, source_entities)
+            raw = analyze_text(normalized.text, source_entities, custom)
         normalized_findings = _resolve_overlaps(_validated(raw, len(normalized.text)))
     except TimeoutError as error:
         raise ValueError("Guard analysis exceeded its runtime limit.") from error

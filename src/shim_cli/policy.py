@@ -67,6 +67,7 @@ class Policy:
     tool_entities: dict
     ledger: bool = False
     diet: tuple = ()
+    custom: tuple = ()
 
     def mode_for(self, direction: str, tool: str = "", event: str = "") -> str:
         for key in (tool, event, direction):

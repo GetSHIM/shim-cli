@@ -149,6 +149,30 @@ def config_command(
             "in the config file.",
         ),
     ] = None,
+    custom: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--custom",
+            metavar="NAME=PATTERN",
+            help="Add or replace a named regular expression; repeatable.",
+        ),
+    ] = None,
+    custom_literal: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--custom-literal",
+            metavar="NAME=TEXT",
+            help="Add or replace a named literal; repeatable.",
+        ),
+    ] = None,
+    remove_custom: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--remove-custom",
+            metavar="NAME",
+            help="Remove a named pattern; repeatable.",
+        ),
+    ] = None,
     reset: bool = typer.Option(False, "--reset", help="Restore all defaults."),
     yes: bool = typer.Option(False, "--yes", help="Apply without confirmation."),
     json_output: bool = typer.Option(False, "--json", help="Write a JSON result."),
@@ -163,6 +187,9 @@ def config_command(
         reset=reset,
         ledger=ledger,
         diet=diet,
+        custom=tuple(custom or ()),
+        custom_literal=tuple(custom_literal or ()),
+        remove_custom=tuple(remove_custom or ()),
         yes=yes,
         as_json=json_output,
     )

@@ -33,6 +33,7 @@ class Record:
     fields: int = 0
     transforms: tuple = ()
     markers: tuple = ()
+    custom: tuple = ()
     note: str = ""
 
     def as_dict(self) -> dict:
@@ -50,6 +51,7 @@ class Record:
             "fields": self.fields,
             "transforms": list(self.transforms),
             "markers": list(self.markers),
+            "custom": dict(self.custom),
             "note": self.note,
         }
 

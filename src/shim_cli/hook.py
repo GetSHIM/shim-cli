@@ -241,6 +241,7 @@ def _prompt_record(client, event, mode, action, decision, prompt):
         in_bytes=len(prompt.encode("utf-8", "replace")),
         out_bytes=0,
         fields=1 if decision.counts else 0,
+        custom=decision.custom_counts,
     )
 
 
@@ -259,7 +260,9 @@ def _count_model_output(document: dict, client: str, session_id: str) -> None:
         policy = load_policy()
         # The detector refuses more than this; a short count beats no count.
         note = "truncated" if len(text) > MAX_SOURCE_CHARACTERS else ""
-        decision = evaluate(text[:MAX_SOURCE_CHARACTERS], policy.entities)
+        decision = evaluate(
+            text[:MAX_SOURCE_CHARACTERS], policy.entities, policy.custom
+        )
         remember(
             session_id,
             Record(
@@ -273,6 +276,7 @@ def _count_model_output(document: dict, client: str, session_id: str) -> None:
                 in_bytes=len(text.encode("utf-8", "replace")),
                 out_bytes=0,
                 fields=1 if decision.counts else 0,
+                custom=decision.custom_counts,
                 note=note,
             ),
             _elapsed_ms(),
@@ -381,9 +385,13 @@ def _tool_output(
     from shim_cli.config import load_policy
     from shim_cli.events.pipeline import process
     from shim_cli.guard import evaluate
+    from shim_cli.guard.entities import ENTITY_TYPES
     from shim_cli.session import remember
 
     policy = load_policy()
+
+    def scan(text: str, entities: tuple = ENTITY_TYPES):
+        return evaluate(text, entities, policy.custom)
 
     def mode_for(direction: str, tool: str) -> str:
         return policy.mode_for(direction, tool, event)
@@ -391,7 +399,7 @@ def _tool_output(
     def entities_for(tool: str, _event: str = "") -> tuple:
         return policy.entities_for(tool, event)
 
-    outcome = process(entry, raw, mode_for, evaluate, policy.diet, entities_for)
+    outcome = process(entry, raw, mode_for, scan, policy.diet, entities_for)
     remember(session_id, outcome.record, _elapsed_ms(), policy.ledger)
     return outcome.output
 
@@ -461,7 +469,7 @@ def _output(raw: bytes, client: str = "codex") -> bytes:
                 from shim_cli.session import remember
 
                 policy = load_policy()
-                decision = evaluate(prompt, policy.entities)
+                decision = evaluate(prompt, policy.entities, policy.custom)
                 mode = policy.mode_for("user-prompt", event=event or _PROMPT_EVENT)
 
                 def keep(action: str) -> None:

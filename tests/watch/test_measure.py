@@ -433,7 +433,7 @@ def test_the_memo_is_bounded_and_keeps_counts_rather_than_text() -> None:
     assert "tool-0" not in stored
     assert all(
         isinstance(entity, str) and isinstance(count, int)
-        for counts in memo._counts.values()
+        for counts, _named in memo._counts.values()
         for entity, count in counts.items()
     )
 
@@ -601,7 +601,7 @@ def test_a_value_split_across_two_deltas_is_rejoined_before_it_is_scanned() -> N
     assert reader.response_texts() == [
         ("text", "the account is TR330006100519786457841326 as recorded")
     ]
-    assert measure.scan_response(reader, evaluate) == {"text": {"IBAN": 1}}
+    assert measure.scan_response(reader, evaluate)[0] == {"text": {"IBAN": 1}}
     assert reader.response_status == "known"
 
 
@@ -610,7 +610,7 @@ def test_thinking_is_counted_apart_from_the_answer() -> None:
 
     reader = _fed("thinking.sse")
 
-    assert measure.scan_response(reader, evaluate) == {"thinking": {"IBAN": 1}}
+    assert measure.scan_response(reader, evaluate)[0] == {"thinking": {"IBAN": 1}}
     assert dict(reader.response_texts())["text"] == "I removed the duplicate."
 
 
@@ -620,7 +620,7 @@ def test_a_tool_call_the_model_wrote_is_not_counted_here() -> None:
     reader = _fed("tool-input.sse")
 
     assert reader.response_texts() == []
-    assert measure.scan_response(reader, evaluate) == {}
+    assert measure.scan_response(reader, evaluate)[0] == {}
     assert reader.stop_reason == "tool_use"
 
 
@@ -629,7 +629,7 @@ def test_an_address_the_model_wrote_is_counted_as_model_text() -> None:
 
     reader = _fed("email-in-text.sse")
 
-    assert measure.scan_response(reader, evaluate) == {"text": {"EMAIL": 1}}
+    assert measure.scan_response(reader, evaluate)[0] == {"text": {"EMAIL": 1}}
 
 
 def test_a_plain_json_response_yields_its_blocks_directly() -> None:
@@ -637,7 +637,7 @@ def test_a_plain_json_response_yields_its_blocks_directly() -> None:
 
     reader = _fed("body.json", "application/json")
 
-    assert measure.scan_response(reader, evaluate) == {
+    assert measure.scan_response(reader, evaluate)[0] == {
         "thinking": {"IBAN": 1},
         "text": {"EMAIL": 1},
     }

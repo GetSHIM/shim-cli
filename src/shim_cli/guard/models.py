@@ -10,12 +10,13 @@ _ENTITY_TYPES = frozenset(ENTITY_TYPES)
 
 @dataclass(frozen=True)
 class Finding:
-    __slots__ = ("end", "entity_type", "score", "start")
+    __slots__ = ("end", "entity_type", "label", "score", "start")
 
     entity_type: str
     start: int
     end: int
     score: float
+    label: str
 
     def __post_init__(self) -> None:
         if self.entity_type not in _ENTITY_TYPES:
@@ -36,6 +37,8 @@ class Finding:
             or not 0 <= self.score <= 1
         ):
             raise ValueError("Invalid Guard finding score.")
+        if not isinstance(self.label, str) or len(self.label) > 32:
+            raise ValueError("Invalid Guard finding label.")
         object.__setattr__(self, "score", float(self.score))
 
 
@@ -65,4 +68,15 @@ class GuardDecision:
             self.findings, key=lambda item: (item.start, item.end, item.entity_type)
         ):
             counts[finding.entity_type] = counts.get(finding.entity_type, 0) + 1
+        return tuple(counts.items())
+
+    @property
+    def custom_counts(self) -> tuple[tuple[str, int], ...]:
+        """Which named pattern matched. Config-authored, never prompt-derived."""
+        counts: dict[str, int] = {}
+        for finding in sorted(
+            self.findings, key=lambda item: (item.start, item.end, item.label)
+        ):
+            if finding.label:
+                counts[finding.label] = counts.get(finding.label, 0) + 1
         return tuple(counts.items())

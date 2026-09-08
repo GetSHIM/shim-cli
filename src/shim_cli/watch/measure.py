@@ -364,21 +364,29 @@ def _opaque(document: dict, path: tuple) -> bool:
     return isinstance(parent, dict) and parent.get("type") == "base64"
 
 
-def _tally(leaves: list, evaluate) -> dict:
+def _tally(leaves: list, evaluate) -> tuple[dict, dict]:
     counts: dict = {}
+    named: dict = {}
     for _path, text in leaves:
-        for entity, count in getattr(evaluate(text), "counts", ()):
+        decision = evaluate(text)
+        for entity, count in getattr(decision, "counts", ()):
             counts[entity] = counts.get(entity, 0) + count
-    return counts
+        for name, count in getattr(decision, "custom_counts", ()):
+            named[name] = named.get(name, 0) + count
+    return counts, named
 
 
-def scan_response(reader: UsageReader, evaluate) -> dict:
+def scan_response(reader: UsageReader, evaluate) -> tuple[dict, dict]:
     counts: dict[str, dict] = {}
+    named: dict = {}
     for kind, text in reader.response_texts():
+        decision = evaluate(text)
         found = counts.setdefault(kind, {})
-        for entity, count in getattr(evaluate(text), "counts", ()):
+        for entity, count in getattr(decision, "counts", ()):
             found[entity] = found.get(entity, 0) + count
-    return {kind: found for kind, found in counts.items() if found}
+        for label, count in getattr(decision, "custom_counts", ()):
+            named[label] = named.get(label, 0) + count
+    return {kind: found for kind, found in counts.items() if found}, named
 
 
 def _flatten(by_section: dict) -> dict:
@@ -398,10 +406,10 @@ class SectionMemo:
     """
 
     def __init__(self) -> None:
-        self._counts: dict[str, dict] = {}
+        self._counts: dict[str, tuple[dict, dict]] = {}
         self._lock = threading.Lock()
 
-    def tally(self, section: str, value: object, leaves: list, evaluate) -> dict:
+    def tally(self, section: str, value: object, leaves: list, evaluate) -> tuple:
         serialised = _bytes(value)
         if not serialised:
             return _tally(leaves, evaluate)
@@ -430,7 +438,9 @@ class Exchange:
     sections: dict = field(default_factory=dict)
     entities: dict = field(default_factory=dict)
     entities_by_section: dict = field(default_factory=dict)
+    custom: dict = field(default_factory=dict)
     response_entities: dict = field(default_factory=dict)
+    response_custom: dict = field(default_factory=dict)
     response_scan_status: str = "unavailable"
     stop_reason: str = ""
     at_files: AtFiles = field(default_factory=AtFiles)
@@ -481,16 +491,20 @@ def inspect_request(body: bytes | bytearray, evaluate=None, memo=None) -> Exchan
             if not _opaque(document, leaf[0]):
                 grouped.setdefault(_section(leaf[0]), []).append(leaf)
         found: dict[str, dict] = {}
+        named: dict = {}
         for name, group in grouped.items():
-            counts = (
+            counts, custom = (
                 memo.tally(name, document.get(name), group, evaluate)
                 if memo is not None and name in MEMOISED
                 else _tally(group, evaluate)
             )
             if counts:
                 found[name] = counts
+            for label, count in custom.items():
+                named[label] = named.get(label, 0) + count
         exchange.entities_by_section = found
         exchange.entities = _flatten(found)
+        exchange.custom = named
     return exchange
 
 

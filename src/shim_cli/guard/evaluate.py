@@ -8,9 +8,11 @@ from .models import GuardDecision
 
 
 def evaluate(
-    text: str, enabled_entities: Iterable[str] = ENTITY_TYPES
+    text: str,
+    enabled_entities: Iterable[str] = ENTITY_TYPES,
+    custom: tuple = (),
 ) -> GuardDecision:
-    findings = analyze(text, enabled_entities)
+    findings = analyze(text, enabled_entities, custom)
     if not findings:
         return GuardDecision((), text)
 

@@ -121,6 +121,7 @@ def benchmark(python: Path, samples_per_fixture: int) -> dict[str, object]:
     safe_samples: list[float] = []
     block_samples: list[float] = []
     stop_samples: list[float] = []
+    custom_samples: list[float] = []
     with tempfile.TemporaryDirectory(prefix="shim-guard-benchmark-") as directory:
         temporary = Path(directory).resolve()
         config = temporary / "config.toml"
@@ -129,6 +130,19 @@ def benchmark(python: Path, samples_per_fixture: int) -> dict[str, object]:
         environment = os.environ.copy()
         environment["SHIM_GUARD_CONFIG"] = str(config)
         environment["TMPDIR"] = str(temporary)
+        # The configured ceiling of user patterns, on the same safe prompt.
+        patterns = temporary / "custom.toml"
+        patterns.write_text(
+            '[mode]\nuser-prompt = "enforce"\n'
+            + "".join(
+                f'[[custom]]\nname = "P{index}"\n'
+                f'pattern = "\\\\bMARK{index}-[0-9]{{4}}\\\\b"\n'
+                for index in range(32)
+            ),
+            encoding="utf-8",
+        )
+        patterns.chmod(0o600)
+        with_patterns = dict(environment, SHIM_GUARD_CONFIG=str(patterns))
         for _ in range(samples_per_fixture):
             safe_samples.append(run_hook(python, SAFE_INPUT, b"", b"", environment))
             block_samples.append(
@@ -143,10 +157,12 @@ def benchmark(python: Path, samples_per_fixture: int) -> dict[str, object]:
             stop_samples.append(
                 run_hook(python, STOP_INPUT, b"", b"quick brown fox", environment)
             )
+            custom_samples.append(run_hook(python, SAFE_INPUT, b"", b"", with_patterns))
     timings = {
         "safe": summary(safe_samples),
         "block": summary(block_samples),
         "stop": summary(stop_samples),
+        "custom": summary(custom_samples),
     }
     return {
         "schema_version": 1,
@@ -154,6 +170,7 @@ def benchmark(python: Path, samples_per_fixture: int) -> dict[str, object]:
             "safe": len(safe_samples),
             "block": len(block_samples),
             "stop": len(stop_samples),
+            "custom": len(custom_samples),
         },
         "platform": {
             "system": platform.system(),

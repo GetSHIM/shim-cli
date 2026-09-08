@@ -16,6 +16,7 @@ from shim_cli.config import (
 )
 from shim_cli.events.diet import DEFAULT_TRANSFORMS
 from shim_cli.guard import DEFAULT_ENTITIES, ENTITY_TYPES, normalize_entities
+from shim_cli.guard.entities import compile_custom, entry_source, unsafe_pattern
 from shim_cli.settings_files import (
     InstallationError,
     apply,
@@ -25,8 +26,42 @@ from shim_cli.settings_files import (
 )
 
 
+def _pair(text: str) -> tuple[str, str]:
+    name, separator, value = text.partition("=")
+    if not separator:
+        raise ValueError("a custom pattern needs NAME=VALUE")
+    return name.strip(), value
+
+
+def _with_custom(
+    existing: list,
+    patterns: tuple[str, ...],
+    literals: tuple[str, ...],
+    removed: tuple[str, ...],
+) -> list:
+    entries = [dict(entry) for entry in existing]
+    for text, key in [(item, "pattern") for item in patterns] + [
+        (item, "literal") for item in literals
+    ]:
+        name, value = _pair(text)
+        entry = {"name": name, key: value}
+        compile_custom([entry])
+        reason = unsafe_pattern(name, entry_source(entry))
+        if reason:
+            raise ValueError(reason)
+        entries = [item for item in entries if item.get("name") != name] + [entry]
+    dropped = {name.strip() for name in removed}
+    entries = [item for item in entries if item.get("name") not in dropped]
+    compile_custom(entries)
+    return entries
+
+
 def _show(
-    enabled: tuple[str, ...], title: str, ledger: bool, diet: tuple[str, ...]
+    enabled: tuple[str, ...],
+    title: str,
+    ledger: bool,
+    diet: tuple[str, ...],
+    custom: list | None = None,
 ) -> None:
     selected = set(enabled)
     output = console()
@@ -60,8 +95,17 @@ def _show(
             style="dim",
         )
     )
+    if custom:
+        names = ", ".join(str(entry.get("name")) for entry in custom)
+        output.print(Text(f"Custom: {names}", style="dim"))
     if not enabled:
         emit("WARN", "All sensitive-data detection is disabled.")
+
+
+_INVALID = (
+    "Entity settings are invalid or unsafe. Reset malformed contents; "
+    "review unsafe paths manually."
+)
 
 
 def _fail(
@@ -93,6 +137,9 @@ def configure(
     reset: bool,
     ledger: bool | None,
     diet: bool | None,
+    custom: tuple[str, ...] = (),
+    custom_literal: tuple[str, ...] = (),
+    remove_custom: tuple[str, ...] = (),
     yes: bool,
     as_json: bool,
 ) -> None:
@@ -104,7 +151,15 @@ def configure(
     except ValueError:
         _fail(as_json, "Entity settings path is invalid.")
     changing = bool(
-        only or enable or disable or reset or ledger is not None or diet is not None
+        only
+        or enable
+        or disable
+        or reset
+        or ledger is not None
+        or diet is not None
+        or custom
+        or custom_literal
+        or remove_custom
     )
     if reset and (only or enable or disable):
         _fail(as_json, "--reset cannot be combined with entity options.")
@@ -134,6 +189,7 @@ def configure(
         if reset:
             enabled, modes, tool_entities = DEFAULT_ENTITIES, {}, {}
             keep_ledger, keep_diet = False, DEFAULT_TRANSFORMS
+            keep_custom: list = []
         else:
             assert policy is not None or only
             modes = policy.modes if policy else {}
@@ -144,6 +200,12 @@ def configure(
             keep_diet = policy.diet if policy else DEFAULT_TRANSFORMS
             if diet is not None:
                 keep_diet = DEFAULT_TRANSFORMS if diet else ()
+            keep_custom = _with_custom(
+                [pattern.entry for pattern in policy.custom] if policy else [],
+                custom,
+                custom_literal,
+                remove_custom,
+            )
             if only:
                 enabled = normalize_entities(set(only))
             else:
@@ -152,29 +214,35 @@ def configure(
                 selected.update(enable)
                 selected.difference_update(disable)
                 enabled = normalize_entities(selected)
-    except (OSError, ValueError):
-        _fail(
-            as_json,
-            "Entity settings are invalid or unsafe. Reset malformed contents; review unsafe paths manually.",
-        )
+    except ValueError as error:
+        _fail(as_json, str(error) if custom or custom_literal else _INVALID)
+    except OSError:
+        _fail(as_json, _INVALID)
 
     if not changing:
         if as_json:
-            _emit_settings_json(enabled, ledger=keep_ledger, diet=list(keep_diet))
+            _emit_settings_json(
+                enabled,
+                ledger=keep_ledger,
+                diet=list(keep_diet),
+                custom=keep_custom,
+            )
             return
-        _show(enabled, "Current detection", keep_ledger, keep_diet)
+        _show(enabled, "Current detection", keep_ledger, keep_diet, keep_custom)
         emit("PASS", f"File: {target}")
         return
 
     plan = plan_change(
         target,
         state,
-        render_settings(enabled, modes, tool_entities, keep_ledger, keep_diet),
+        render_settings(
+            enabled, modes, tool_entities, keep_ledger, keep_diet, keep_custom
+        ),
     )
     if as_json and not yes:
         _fail(True)
     if not as_json:
-        _show(enabled, "New detection", keep_ledger, keep_diet)
+        _show(enabled, "New detection", keep_ledger, keep_diet, keep_custom)
         emit("WARN", f"File: {target}")
         if not yes and not typer.confirm("Save these settings?", default=False):
             emit("WARN", "Settings unchanged.")
@@ -187,7 +255,11 @@ def configure(
 
     if as_json:
         _emit_settings_json(
-            enabled, changed=changed, ledger=keep_ledger, diet=list(keep_diet)
+            enabled,
+            changed=changed,
+            ledger=keep_ledger,
+            diet=list(keep_diet),
+            custom=keep_custom,
         )
     else:
         emit(

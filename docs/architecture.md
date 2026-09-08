@@ -117,8 +117,17 @@ may need. Lossless JSON compaction is the default; trailing-whitespace removal
 is available only through explicit configuration because it can change
 Markdown hard breaks.
 
-The detector contracts are `guard-v2.json`, `guard-tools-v1.json`, and
-`parity-v1.json`. The last is generated migration evidence and is never
+Eleven entity types are built in. The twelfth, `CUSTOM`, is whatever the user
+named in `[[custom]]`: `guard/entities.py` compiles those entries, the hook and
+the proxy pass the compiled tuple to `evaluate`, and a `Finding` carries the
+pattern's name as its `label` so the report can say which one matched while the
+placeholder stays `<CUSTOM_n>`. A built-in type outranks it wherever the two
+overlap. A pattern is checked for catastrophic backtracking when `shim config`
+writes it and again by `shim doctor`, never on the hook path: `re` has no
+per-match timeout and the hook is what a user is waiting on.
+
+The detector contracts are `guard-v2.json`, `guard-tools-v1.json`,
+`custom-v1.json`, and `parity-v1.json`. The last is generated migration evidence and is never
 regenerated to make a test pass; intentional differences are recorded in
 `DELIBERATE_DIVERGENCES`. Detailed evidence belongs in
 [Compatibility](compatibility.md), not in this module map.

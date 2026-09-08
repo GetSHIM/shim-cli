@@ -232,3 +232,44 @@ def test_a_reply_just_under_the_bound_is_counted_in_full() -> None:
 
     assert records[0]["note"] == ""
     assert records[0]["entities"] == {"EMAIL": 1}
+
+
+CUSTOM_SETTINGS = (
+    'enabled_entities = ["CUSTOM"]\n'
+    '[[custom]]\nname = "PROJECT_CODENAME"\npattern = "ATLAS-[0-9]{4}"\n'
+)
+
+
+@pytest.fixture
+def _configured(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    target = tmp_path / "settings" / "config.toml"
+    target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    target.write_text(CUSTOM_SETTINGS, encoding="utf-8")
+    target.chmod(0o600)
+    monkeypatch.setenv("SHIM_CONFIG", str(target))
+
+
+def _codename_event() -> dict:
+    return {
+        "hook_event_name": "PostToolUse",
+        "session_id": SESSION,
+        "tool_name": "Read",
+        "tool_input": {"file_path": "/work/plan.md"},
+        "tool_response": {"type": "text", "file": {"content": "ship ATLAS-0042\n"}},
+    }
+
+
+def test_a_configured_pattern_masks_a_tool_result_and_names_itself(
+    _configured,
+) -> None:
+    masked = json.loads(_run(_codename_event()))
+    document = json.loads(_run(_stop()))
+
+    output = masked["hookSpecificOutput"]["updatedToolOutput"]
+    assert output["file"]["content"] == "ship <CUSTOM_1>\n"
+    assert "custom    1 PROJECT_CODENAME" in document["systemMessage"]
+    assert "ATLAS-0042" not in document["systemMessage"]
+
+
+def test_the_same_result_is_untouched_without_the_pattern() -> None:
+    assert _run(_codename_event()) == b""
