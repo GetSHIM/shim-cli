@@ -141,3 +141,19 @@ def test_failed_tools_report_an_error_string_and_no_result() -> None:
     assert "tool_response" not in payload
     assert isinstance(payload["error"], str)
     assert payload["is_interrupt"] is False
+
+
+def test_the_stop_event_carries_only_the_turn_s_last_text_block() -> None:
+    """The captured turn said CHECKING, called Read, then answered."""
+    message = _load("Stop-none-model-reply-1.json")["last_assistant_message"]
+
+    assert message == "The file sets OWNER_EMAIL to alice@example.com."
+    assert "CHECKING" not in message
+
+
+def test_the_detector_counts_what_the_model_wrote_in_that_capture() -> None:
+    from shim_cli.guard import evaluate
+
+    message = _load("Stop-none-model-reply-1.json")["last_assistant_message"]
+
+    assert dict(evaluate(message).counts) == {"EMAIL": 1}

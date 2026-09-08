@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[2]
 BENCHMARK = ROOT / "scripts" / "benchmark_hook.py"
 
 
-def test_benchmark_enables_its_block_fixture() -> None:
+def test_benchmark_covers_the_prompt_and_the_reply() -> None:
     completed = subprocess.run(
         (
             sys.executable,
@@ -26,4 +26,5 @@ def test_benchmark_enables_its_block_fixture() -> None:
     )
     result = json.loads(completed.stdout)
 
-    assert result["sample_counts"] == {"safe": 1, "block": 1}
+    assert result["sample_counts"] == {"safe": 1, "block": 1, "stop": 1}
+    assert set(result["timings_ms"]) == {"safe", "block", "stop"}

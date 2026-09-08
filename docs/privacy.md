@@ -143,6 +143,18 @@ These records are never transmitted. The hook and detector add no network
 destination, account, API key, or telemetry. The opt-in `shim watch` proxy
 forwards only to the provider the client already uses.
 
+### What the model wrote back
+
+At `Stop`, Claude Code hands the hook the final assistant text of the turn.
+shim counts the entities in it and keeps the counts; the text is scanned in
+memory and stored nowhere, exactly as a prompt is. Nothing is changed, because
+the client has already shown it — the `model-output` direction can only
+observe, and a settings file that asks it to warn or enforce is refused. Text
+beyond the detector's 100,000-character limit is not scanned and the record
+says `truncated` rather than reporting a short count as a whole one. Only the
+turn's last text block reaches the hook, so anything the model said before a
+tool call in the same turn is not counted.
+
 ### When shim cannot inspect something
 
 Some payloads cannot be scanned: a tool result past the size bound, or an

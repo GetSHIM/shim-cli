@@ -16,6 +16,17 @@ SAFE_INPUT = b'{"hook_event_name":"UserPromptSubmit","prompt":"Explain merge sor
 BLOCK_INPUT = (
     b'{"hook_event_name":"UserPromptSubmit","prompt":"Contact alice@example.com"}'
 )
+# One turn's final assistant text at the top of the range shim will meet.
+STOP_INPUT = json.dumps(
+    {
+        "hook_event_name": "Stop",
+        "session_id": "00000000-0000-4000-8000-000000000001",
+        "stop_hook_active": False,
+        "last_assistant_message": (
+            "The quick brown fox jumps over the lazy dog. " * 1_500
+        ),
+    }
+).encode()
 HOOK_COMMAND = ("-I", "-B", "-m", "shim_cli.hook")
 HOOK_TIMEOUT_SECONDS = 35
 COPY_INSTRUCTION = "Copy and paste this as your next prompt:"
@@ -109,6 +120,7 @@ def benchmark(python: Path, samples_per_fixture: int) -> dict[str, object]:
         raise ValueError("samples must be positive")
     safe_samples: list[float] = []
     block_samples: list[float] = []
+    stop_samples: list[float] = []
     with tempfile.TemporaryDirectory(prefix="shim-guard-benchmark-") as directory:
         temporary = Path(directory).resolve()
         config = temporary / "config.toml"
@@ -128,10 +140,21 @@ def benchmark(python: Path, samples_per_fixture: int) -> dict[str, object]:
                     environment,
                 )
             )
-    timings = {"safe": summary(safe_samples), "block": summary(block_samples)}
+            stop_samples.append(
+                run_hook(python, STOP_INPUT, b"", b"quick brown fox", environment)
+            )
+    timings = {
+        "safe": summary(safe_samples),
+        "block": summary(block_samples),
+        "stop": summary(stop_samples),
+    }
     return {
         "schema_version": 1,
-        "sample_counts": {"safe": len(safe_samples), "block": len(block_samples)},
+        "sample_counts": {
+            "safe": len(safe_samples),
+            "block": len(block_samples),
+            "stop": len(stop_samples),
+        },
         "platform": {
             "system": platform.system(),
             "release": platform.release(),

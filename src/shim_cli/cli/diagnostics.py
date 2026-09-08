@@ -412,7 +412,7 @@ def _coverage_rows(client: str) -> list:
         rows.append(
             {
                 "event": "Stop",
-                "sees": "session record",
+                "sees": "session record, last_assistant_message",
                 "can_mask": False,
                 "can_report": True,
                 "verified": True,

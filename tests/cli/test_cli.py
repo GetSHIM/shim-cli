@@ -874,3 +874,15 @@ def test_config_refuses_file_created_during_confirmation(monkeypatch, tmp_path):
     result = CliRunner().invoke(app, ["config", "--enable", "PHONE"])
     assert result.exit_code == 2
     assert target.read_bytes() == concurrent
+
+
+def test_the_coverage_table_says_what_stop_sees_and_that_it_changes_nothing(
+    monkeypatch, tmp_path: Path
+) -> None:
+    from shim_cli.cli.diagnostics import _coverage_rows
+
+    rows = {row["event"]: row for row in _coverage_rows("claude")}
+
+    assert "last_assistant_message" in rows["Stop"]["sees"]
+    assert rows["Stop"]["can_mask"] is False
+    assert rows["Stop"]["can_report"] is True

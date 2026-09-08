@@ -72,9 +72,33 @@ def test_unrewritable_directions_deny_under_enforce(direction: str) -> None:
     assert decide(direction, ENFORCE) == DENY
 
 
-def test_observe_never_acts() -> None:
+def test_observe_never_acts_where_acting_is_possible() -> None:
     for direction in policy.DIRECTIONS:
+        if direction == policy.MODEL_OUTPUT:
+            continue
         assert decide(direction, OBSERVE) == ALLOW
+
+
+def test_model_output_is_a_direction_that_can_only_be_counted() -> None:
+    assert policy.MODEL_OUTPUT in policy.DIRECTIONS
+    assert policy.DEFAULT_MODES[policy.MODEL_OUTPUT] == OBSERVE
+    assert policy.REWRITABLE[policy.MODEL_OUTPUT] is False
+
+
+def test_observing_model_output_is_reporting_it() -> None:
+    """Nothing can be done about it, so observing has to mean counting."""
+    assert decide(policy.MODEL_OUTPUT, OBSERVE) == REPORT
+
+
+@pytest.mark.parametrize("mode", (WARN, ENFORCE))
+def test_model_output_refuses_a_mode_that_promises_to_act(mode: str) -> None:
+    with pytest.raises(ValueError, match="model-output can only observe"):
+        decide(policy.MODEL_OUTPUT, mode)
+
+
+def test_a_stop_event_is_not_a_tool_event() -> None:
+    with pytest.raises(ValueError, match="unsupported hook event"):
+        policy.direction_for("Stop", "")
 
 
 def test_unknown_directions_and_modes_are_refused() -> None:

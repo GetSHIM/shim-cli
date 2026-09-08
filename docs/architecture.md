@@ -123,6 +123,24 @@ regenerated to make a test pass; intentional differences are recorded in
 `DELIBERATE_DIVERGENCES`. Detailed evidence belongs in
 [Compatibility](compatibility.md), not in this module map.
 
+## Directions
+
+`policy.py` classifies every inspected thing into one of six directions:
+`user-prompt`, `outbound`, `inbound`, `local-write`, `executable-text` and
+`model-output`. The first five come from a hook event and a tool name and can
+be masked, blocked or reported according to their mode.
+
+`model-output` is different, and deliberately so. It is the final assistant
+text of a turn, handed to the hook by Claude Code at `Stop`; the client has
+already shown it, so nothing can be done about it. Its only mode is `observe`,
+`decide` refuses `warn` and `enforce` with an error rather than accepting a
+mode it could not honour, and `config.py` rejects any other value for it — or
+for `Stop` as a per-event override — through the malformed-settings path.
+Because acting is impossible, observing has to mean counting: `decide` returns
+`report` where every other direction returns `allow`, so the count reaches the
+summary. The text itself is never stored, and only the last text block of the
+turn is visible (see [Compatibility](compatibility.md)).
+
 ## Session records
 
 `session.record` owns the bounded persisted schema and the best-effort

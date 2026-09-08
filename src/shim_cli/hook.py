@@ -244,6 +244,44 @@ def _prompt_record(client, event, mode, action, decision, prompt):
     )
 
 
+def _count_model_output(document: dict, client: str, session_id: str) -> None:
+    """The client has already shown this text. Count it; change nothing."""
+    text = document.get("last_assistant_message")
+    if client != "claude" or not session_id or not isinstance(text, str) or not text:
+        return
+    try:
+        from shim_cli.config import load_policy
+        from shim_cli.guard import evaluate
+        from shim_cli.guard.normalize import MAX_SOURCE_CHARACTERS
+        from shim_cli.session import remember
+        from shim_cli.session.record import Record
+
+        policy = load_policy()
+        # The detector refuses more than this; a short count beats no count.
+        note = "truncated" if len(text) > MAX_SOURCE_CHARACTERS else ""
+        decision = evaluate(text[:MAX_SOURCE_CHARACTERS], policy.entities)
+        remember(
+            session_id,
+            Record(
+                client=client,
+                event=_STOP_EVENT,
+                tool_name="",
+                direction="model-output",
+                mode="observe",
+                action="report",
+                entities=tuple(decision.counts),
+                in_bytes=len(text.encode("utf-8", "replace")),
+                out_bytes=0,
+                fields=1 if decision.counts else 0,
+                note=note,
+            ),
+            _elapsed_ms(),
+            policy.ledger,
+        )
+    except Exception:
+        return
+
+
 def _summary_output(session_id: str, stop_active: bool) -> bytes:
     if not session_id or stop_active:
         return b""
@@ -401,6 +439,7 @@ def _output(raw: bytes, client: str = "codex") -> bytes:
                 except ValueError:
                     return _refusal_output(raw, client)
                 if event == _STOP_EVENT:
+                    _count_model_output(document, client, session_id)
                     return _summary_output(session_id, stop_active)
                 if event == _SESSION_END_EVENT:
                     return _forget(session_id)

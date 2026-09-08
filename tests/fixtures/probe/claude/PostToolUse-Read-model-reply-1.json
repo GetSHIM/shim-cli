@@ -1,0 +1,27 @@
+{
+  "session_id": "00000000-0000-4000-8000-000000000001",
+  "transcript_path": "/home/probe/.claude/projects/-probe-workspace/00000000-0000-4000-8000-000000000001.jsonl",
+  "cwd": "/probe/workspace",
+  "prompt_id": "00000000-0000-4000-8000-000000000002",
+  "permission_mode": "bypassPermissions",
+  "effort": {
+    "level": "low"
+  },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Read",
+  "tool_input": {
+    "file_path": "/probe/workspace/dotenv-sample.txt"
+  },
+  "tool_response": {
+    "type": "text",
+    "file": {
+      "filePath": "dotenv-sample.txt",
+      "content": "DATABASE_URL=postgresql://alice:s3cr3tpw@db.example.com/app\nAWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE\nGITHUB_TOKEN=ghp_0123456789abcdefghijklmnopqrstuvwx\npassword = SuperSecret123!\nOWNER_EMAIL=alice@example.com\n",
+      "numLines": 6,
+      "startLine": 1,
+      "totalLines": 6
+    }
+  },
+  "tool_use_id": "toolu_000000000000000000000003",
+  "duration_ms": 2
+}

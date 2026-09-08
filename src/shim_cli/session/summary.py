@@ -10,6 +10,8 @@ ACTION_LABELS = (
 )
 MAX_SOURCES = 3
 BYTES_PER_TOKEN = 4
+MODEL_OUTPUT = "model-output"
+NOT_LEAKS = "model-generated content, not leaks"
 
 
 def _sources(records: list) -> list:
@@ -126,7 +128,20 @@ def _uninspected(records: list) -> list:
 
 
 def _acted(records: list) -> list:
-    return [record for record in records if record.get("action") not in (None, "allow")]
+    return [
+        record
+        for record in records
+        if record.get("action") not in (None, "allow")
+        and record.get("direction") != MODEL_OUTPUT
+    ]
+
+
+def _model_output(records: list) -> list:
+    return [
+        record
+        for record in records
+        if record.get("direction") == MODEL_OUTPUT and record.get("entities")
+    ]
 
 
 def render(records: list, capped: bool = False) -> str:
@@ -155,6 +170,10 @@ def render(records: list, capped: bool = False) -> str:
             column = label if first else " " * len(label)
             first = False
             lines.append(f"  {column:<9} {count} {entity}{_where(relevant)}")
+    replies = _model_output(records)
+    if replies:
+        listed = ", ".join(f"{count} {entity}" for entity, count in _totals(replies))
+        lines.append(f"  {'model':<9} {listed} in its replies ({NOT_LEAKS})")
     first = True
     for marker, count in markers:
         column = "flagged" if first else " " * len("flagged")
@@ -216,6 +235,7 @@ def as_json(records: list, capped: bool = False) -> dict:
             marker: {"count": count, "sources": _sources(_carrying(records, marker))}
             for marker, count in _marker_totals(records)
         },
+        "model_output": dict(_totals(_model_output(records))),
         "capped": capped,
     }
 

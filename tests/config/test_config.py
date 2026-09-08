@@ -176,3 +176,17 @@ def test_a_missing_config_file_means_the_shipped_defaults_not_empty_ones(
     assert policy.diet == DEFAULT_TRANSFORMS
     assert policy.ledger is False
     assert policy.mode_for("inbound") == "enforce"
+
+
+@pytest.mark.parametrize("key", ("model-output", "Stop"))
+@pytest.mark.parametrize("value", ("warn", "enforce"))
+def test_a_mode_that_promises_to_act_on_model_output_is_refused(key, value) -> None:
+    with pytest.raises(ValueError, match="shim settings are invalid"):
+        parse_settings(f'[mode]\n"{key}" = "{value}"\n')
+
+
+@pytest.mark.parametrize("key", ("model-output", "Stop"))
+def test_observing_model_output_is_accepted(key: str) -> None:
+    settings = parse_settings(f'[mode]\n"{key}" = "observe"\n')
+
+    assert settings["mode"][key] == "observe"

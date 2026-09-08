@@ -227,3 +227,15 @@ def test_unsafe_directory_is_refused_before_pruning(tmp_path):
     with pytest.raises(ledger.LedgerError):
         ledger.append(_entry(), JANUARY)
     assert old.read_bytes() == b"keep\n"
+
+
+def test_a_model_output_record_keeps_its_direction_through_the_ledger() -> None:
+    ledger.append(
+        _entry(direction="model-output", action="report", entities={"IBAN": 1}),
+        JANUARY,
+    )
+
+    entries = ledger.entries()
+
+    assert entries[0]["direction"] == "model-output"
+    assert entries[0]["action"] == "report"

@@ -7,7 +7,15 @@ OUTBOUND = "outbound"
 INBOUND = "inbound"
 LOCAL_WRITE = "local-write"
 EXECUTABLE_TEXT = "executable-text"
-DIRECTIONS = (USER_PROMPT, OUTBOUND, INBOUND, LOCAL_WRITE, EXECUTABLE_TEXT)
+MODEL_OUTPUT = "model-output"
+DIRECTIONS = (
+    USER_PROMPT,
+    OUTBOUND,
+    INBOUND,
+    LOCAL_WRITE,
+    EXECUTABLE_TEXT,
+    MODEL_OUTPUT,
+)
 
 OBSERVE = "observe"
 WARN = "warn"
@@ -25,6 +33,7 @@ DEFAULT_MODES = {
     INBOUND: ENFORCE,
     LOCAL_WRITE: WARN,
     EXECUTABLE_TEXT: WARN,
+    MODEL_OUTPUT: OBSERVE,
 }
 
 REWRITABLE = {
@@ -33,7 +42,11 @@ REWRITABLE = {
     INBOUND: True,
     LOCAL_WRITE: False,
     EXECUTABLE_TEXT: False,
+    MODEL_OUTPUT: False,
 }
+
+# The client has already shown the text; a mode that promises otherwise is a lie.
+OBSERVE_ONLY = frozenset({MODEL_OUTPUT, "Stop"})
 
 LOCAL_WRITE_TOOLS = frozenset(
     {"Write", "Edit", "MultiEdit", "NotebookEdit", "apply_patch", "ApplyPatch"}
@@ -89,6 +102,11 @@ def decide(direction: str, mode: str) -> str:
         raise ValueError("unsupported policy direction")
     if mode not in MODES:
         raise ValueError("unsupported policy mode")
+    if direction == MODEL_OUTPUT:
+        if mode != OBSERVE:
+            raise ValueError("model-output can only observe")
+        # Observing is the whole feature here: the count must reach the summary.
+        return REPORT
 
     if mode == OBSERVE:
         return ALLOW

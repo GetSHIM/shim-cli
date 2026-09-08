@@ -155,3 +155,80 @@ def test_the_installed_session_events_are_the_ones_the_hook_dispatches() -> None
     from shim_cli import hook
 
     assert set(SESSION_EVENTS) == {hook._STOP_EVENT, hook._SESSION_END_EVENT}
+
+
+REPLY = "I moved the account TR330006100519786457841326 and told alice@example.com."
+
+
+def test_the_model_s_own_reply_is_counted_at_stop() -> None:
+    _run(_read_event("/work/service/.env"))
+
+    document = json.loads(_run(_stop(last_assistant_message=REPLY)))
+
+    message = document["systemMessage"]
+    assert "model     1 EMAIL, 1 IBAN in its replies" in message
+    assert "(model-generated content, not leaks)" in message
+    assert "TR330006100519786457841326" not in message
+    assert "alice@example.com" not in message
+
+
+def test_a_clean_reply_is_not_worth_a_summary() -> None:
+    assert _run(_stop(last_assistant_message="All three tests pass.")) == b""
+
+
+def test_a_reply_is_counted_even_when_the_summary_is_suppressed() -> None:
+    assert _run(_stop(stop_hook_active=True, last_assistant_message=REPLY)) == b""
+
+    document = json.loads(_run(_stop()))
+
+    assert "model     1 EMAIL, 1 IBAN in its replies" in document["systemMessage"]
+
+
+@pytest.mark.parametrize("value", (None, 7, "", ["a"], {"text": "a"}))
+def test_a_missing_or_malformed_reply_changes_nothing(value: object) -> None:
+    _run(_read_event("/work/service/.env"))
+    payload = _stop()
+    if value is not None:
+        payload["last_assistant_message"] = value
+
+    document = json.loads(_run(payload))
+
+    assert "1 SECRET" in document["systemMessage"]
+    assert "in its replies" not in document["systemMessage"]
+
+
+def test_the_reply_count_reaches_the_report_as_its_own_direction() -> None:
+    _run(_stop(last_assistant_message=REPLY))
+
+    records = spool.entries(SESSION)
+
+    assert [record["direction"] for record in records] == ["model-output"]
+    assert records[0]["action"] == "report"
+    assert records[0]["mode"] == "observe"
+    assert records[0]["entities"] == {"EMAIL": 1, "IBAN": 1}
+    assert REPLY not in json.dumps(records)
+
+
+def test_a_reply_past_the_scan_bound_is_counted_short_and_says_so() -> None:
+    from shim_cli.guard.normalize import MAX_SOURCE_CHARACTERS
+
+    filler = "fine. " * ((MAX_SOURCE_CHARACTERS // 6) + 100)
+    _run(_stop(last_assistant_message=filler + " alice@example.com"))
+
+    records = spool.entries(SESSION)
+
+    assert records[0]["note"] == "truncated"
+    assert records[0]["entities"] == {}
+    assert records[0]["in_bytes"] > MAX_SOURCE_CHARACTERS
+
+
+def test_a_reply_just_under_the_bound_is_counted_in_full() -> None:
+    from shim_cli.guard.normalize import MAX_SOURCE_CHARACTERS
+
+    filler = "fine. " * ((MAX_SOURCE_CHARACTERS // 6) - 100)
+    _run(_stop(last_assistant_message=filler + " alice@example.com"))
+
+    records = spool.entries(SESSION)
+
+    assert records[0]["note"] == ""
+    assert records[0]["entities"] == {"EMAIL": 1}

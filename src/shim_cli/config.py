@@ -109,6 +109,8 @@ def _modes(document: dict) -> dict:
     for key, value in section.items():
         if not isinstance(value, str) or value not in policy.MODES:
             raise ValueError("shim settings are invalid")
+        if key in policy.OBSERVE_ONLY and value != policy.OBSERVE:
+            raise ValueError("shim settings are invalid")
         modes[key] = value
     return modes
 
