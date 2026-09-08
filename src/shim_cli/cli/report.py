@@ -56,7 +56,9 @@ def report(*, as_json: bool) -> None:
 
     text = summary.render(records, truncated)
     if not text:
-        emit("PASS", f"shim inspected {len(records)} events and found nothing.")
+        count = len(records)
+        plural = "" if count == 1 else "s"
+        emit("PASS", f"shim inspected {count} event{plural} and found nothing.")
         return
     print(terminal_text(text, sys.stdout, "\n"))
     if source == "ledger":
@@ -98,3 +100,70 @@ def purge(*, yes: bool, as_json: bool) -> None:
         emit_json("ledger-purge", "ok", removed=removed)
     else:
         emit("PASS", f"Deleted {removed} retained file(s).")
+
+
+def show_ledger(*, as_json: bool) -> None:
+    """Read back what the opt-in ledger kept.
+
+    Turning the ledger on and then only being able to `purge` it made the
+    record write-only: the person who enabled it to prove something to a
+    colleague had to read JSONL by hand.
+    """
+    from shim_cli.session import ledger
+
+    migration.announce(migration.ledger_files(), as_json=as_json)
+
+    try:
+        entries = ledger.entries()
+    except (ledger.LedgerError, OSError):
+        if as_json:
+            emit_json("ledger-show", "error", error="ledger could not be read")
+        else:
+            emit("FAIL", "The ledger could not be read.", error=True)
+        raise typer.Exit(2) from None
+
+    if not entries:
+        if as_json:
+            emit_json("ledger-show", "ok", days=0, events=0, entries=[])
+        else:
+            emit(
+                "PASS",
+                "The ledger is empty. Turn it on with `shim config --ledger`.",
+            )
+        return
+
+    if as_json:
+        emit_json(
+            "ledger-show",
+            "ok",
+            days=len({str(entry.get("ts", ""))[:10] for entry in entries}),
+            events=len(entries),
+            entries=entries,
+        )
+        return
+
+    by_day: dict[str, list] = {}
+    for entry in entries:
+        by_day.setdefault(str(entry.get("ts", ""))[:10] or "unknown", []).append(entry)
+
+    plural = "" if len(entries) == 1 else "s"
+    lines = [
+        f"shim ledger — {len(entries)} event{plural} over {len(by_day)} day(s), "
+        f"kept for {ledger.RETENTION_DAYS} days"
+    ]
+    for day, records in sorted(by_day.items()):
+        counts: dict[str, int] = {}
+        for record in records:
+            found = record.get("entities")
+            if isinstance(found, dict):
+                for name, count in found.items():
+                    if isinstance(name, str) and isinstance(count, int):
+                        counts[name] = counts.get(name, 0) + count
+        listed = ", ".join(
+            f"{count} {name}"
+            for name, count in sorted(counts.items(), key=lambda p: (-p[1], p[0]))
+        )
+        day_plural = "" if len(records) == 1 else "s"
+        detail = f"   {listed}" if listed else "   nothing found"
+        lines.append(f"  {day}   {len(records)} event{day_plural}{detail}")
+    print(terminal_text("\n".join(lines), sys.stdout, "\n"))

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import sys
 from pathlib import Path
 from typing import Literal, NoReturn
 
@@ -11,6 +12,7 @@ from shim_cli.cli.output import emit, emit_json
 from shim_cli.clients.claude import settings as claude_settings
 from shim_cli.clients.codex import settings as codex_settings
 from shim_cli.clients.copilot import settings as copilot_settings
+from shim_cli.clients.hook_settings import interpreter_path
 from shim_cli.settings_files import (
     Action,
     InstallationError,
@@ -141,6 +143,26 @@ def existing_hooks(client: str) -> tuple[bool, bool]:
     return (legacy, bool(hooks))
 
 
+def _fragment_summary(client: str) -> str:
+    """What the JSON below it means, for someone who will not read the JSON.
+
+    The preview is the last thing a person sees before shim edits a settings
+    file they own, and it was 99 lines of raw JSON with no sentence over it.
+    """
+    fragment = _hook_fragment(client)
+    hooks = fragment.get("hooks")
+    events = list(hooks) if isinstance(hooks, dict) else []
+    count = len(events)
+    entry, each = ("entry", "") if count == 1 else ("entries", "each ")
+    named = ", ".join(events)
+    interpreter = interpreter_path(sys.executable)
+    return (
+        f"Would add {count} hook {entry} ({named}), "
+        f"{each}running {interpreter} -m shim_cli.hook {client}. "
+        "Nothing else in the file changes."
+    )
+
+
 def _plan_error(client: str, command: str, as_json: bool = False) -> NoReturn:
     name = client_name(client)
     if as_json:
@@ -173,6 +195,25 @@ def _remove_legacy_copilot_file() -> None:
     emit("PASS", f"removed the old hook file at {legacy}")
 
 
+def _remove_empty_copilot_file() -> Path | None:
+    """Copilot's hook file belongs to shim alone; an empty one is litter."""
+    target = copilot_settings.target_path()
+    try:
+        document = json.loads(target.read_bytes())
+    except (OSError, ValueError):
+        return None
+    if not isinstance(document, dict):
+        return None
+    if document.get("hooks"):
+        return None
+    if set(document) - {"version", "hooks"}:
+        return None
+    with contextlib.suppress(OSError):
+        target.unlink()
+        return target
+    return None
+
+
 def install(*, client: str, dry_run: bool, yes: bool) -> None:
     from shim_cli.cli import migration
 
@@ -200,7 +241,7 @@ def install(*, client: str, dry_run: bool, yes: bool) -> None:
         emit("FAIL", f"{name} hook configuration cannot be changed safely.", error=True)
         emit(
             "WARN",
-            f"Review {name} hooks manually; SHIM did not change malformed, ambiguous, or unsafe settings.",
+            f"Review {name} hooks manually; shim did not change malformed, ambiguous, or unsafe settings.",
             error=True,
         )
         raise typer.Exit(2)
@@ -222,6 +263,7 @@ def install(*, client: str, dry_run: bool, yes: bool) -> None:
     if dry_run:
         verb = "create" if action is Action.CREATE else "append to"
         emit("WARN", f"Would {verb} {name} hooks at {plan.target} with this fragment:")
+        emit("WARN", _fragment_summary(client))
         print(json.dumps(_hook_fragment(client), ensure_ascii=False, indent=2))
         return
     prompt = (
@@ -267,6 +309,12 @@ def install(*, client: str, dry_run: bool, yes: bool) -> None:
         if action is Action.UPDATE and foreign_hooks
         else f"Installed shim for {name}.",
     )
+    if client == "codex":
+        emit(
+            "WARN",
+            "Codex runs a hook only after you trust it: open Codex and accept "
+            "the shim hook when asked.",
+        )
 
 
 def status(*, client: str, as_json: bool) -> None:
@@ -306,7 +354,7 @@ def revert(*, client: str, yes: bool) -> None:
         emit("FAIL", f"{name} hook configuration cannot be removed safely.", error=True)
         emit(
             "WARN",
-            f"Review {name} hooks manually; SHIM removes only its exact hook group.",
+            f"Review {name} hooks manually; shim removes only its exact hook group.",
             error=True,
         )
         raise typer.Exit(2)
@@ -329,4 +377,10 @@ def revert(*, client: str, yes: bool) -> None:
             raise typer.Exit(2) from None
     if client == "copilot":
         _remove_legacy_copilot_file()
+        # The file is shim's own. Leaving `{"version": 1, "hooks": {}}` behind
+        # is litter, not preservation.
+        removed = _remove_empty_copilot_file()
+        if removed:
+            emit("PASS", f"Removed shim and deleted {removed}.")
+            return
     emit("PASS", f"Removed shim and preserved the {name} settings file.")

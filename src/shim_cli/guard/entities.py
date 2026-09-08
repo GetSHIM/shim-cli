@@ -114,7 +114,10 @@ def compile_custom(entries: Iterable[object]) -> tuple[CustomPattern, ...]:
             raise ValueError("a custom entry is invalid")
         name = entry.get("name")
         if not isinstance(name, str) or not _CUSTOM_NAME.match(name):
-            raise ValueError("a custom pattern name is invalid")
+            raise ValueError(
+                "a custom pattern name must be UPPER_CASE letters, digits "
+                "and underscores, up to 32 characters"
+            )
         if name in seen:
             raise ValueError("custom pattern names must not be repeated")
         seen.add(name)

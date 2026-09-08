@@ -69,6 +69,10 @@ The three `IBAN`s came from a file the agent read with a tool: shim scans every
 text field the model reads, including tool results, and says which part of the
 request each finding was in.
 
+If you sign in with a subscription, the `spend` line is what the same traffic
+would cost on an API key, not a bill. shim reads the tokens the provider
+reports and prices them; it cannot see what your plan charges.
+
 The `response` line is the other direction — what the model wrote back, with
 its `thinking` counted apart from its answer. It is a recall measurement, not a
 leak report: on your own key there is no other tenant to leak from, and a coding
@@ -493,14 +497,23 @@ Tested client versions, captured fixtures and the full evidence table are in
 
 ## Uninstall
 
-Remove shim's hook before uninstalling the package:
+In this order, because each step needs the one before it:
 
 ```console
-shim revert codex
+shim revert claude          # once per client you installed
+shim ledger purge           # only if you turned the ledger on (shim ledger show reads it)
+uv tool uninstall shim      # or: /plugin uninstall shim-cli@shim-cli
+rm -r ~/.config/shim        # your settings, if you want them gone too
 ```
 
-Replace `codex` with the client you installed. `shim watch` needs no uninstall:
-it edits nothing, so there is nothing to undo.
+`shim revert` removes only shim's own hook group and leaves every other hook in
+the file untouched; for Copilot it also deletes the hook file, which is shim's
+alone. `shim ledger purge` deletes the retained records — skip it and they age
+out after 30 days on their own. Uninstalling the package leaves
+`~/.config/shim/config.toml` in place, which is why the last line is separate:
+reinstalling later finds your entity choices and custom patterns still there.
+
+`shim watch` needs no uninstall: it edits nothing, so there is nothing to undo.
 
 ## Project documentation
 

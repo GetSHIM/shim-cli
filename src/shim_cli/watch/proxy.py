@@ -12,7 +12,10 @@ import zlib
 from dataclasses import dataclass, field
 
 from .measure import (
+    BODY_TOO_LARGE,
     MAX_BODY_BYTES,
+    NOT_JSON,
+    SLOTS_BUSY,
     Exchange,
     SectionMemo,
     UsageReader,
@@ -117,9 +120,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             measured=False,
         )
         capture = bytearray()
-        measuring = (
-            length <= MAX_BODY_BYTES and self.session._measurement_slots.acquire(False)
-        )
+        oversized = length > MAX_BODY_BYTES
+        measuring = not oversized and self.session._measurement_slots.acquire(False)
+        if not measuring:
+            exchange.incomplete_reason = BODY_TOO_LARGE if oversized else SLOTS_BUSY
 
         def body():
             deadline = time.monotonic() + DOWNSTREAM_TIMEOUT_SECONDS
@@ -179,6 +183,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             measured = inspect_request(body, self.evaluate, self.session.memo)
         except Exception:
             exchange.measured = False
+            exchange.incomplete_reason = NOT_JSON
             return
         exchange.model = measured.model
         exchange.sections = measured.sections
@@ -187,6 +192,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         exchange.custom = measured.custom
         exchange.at_files = measured.at_files
         exchange.measured = measured.measured
+        exchange.incomplete_reason = measured.incomplete_reason
 
     def _stream(self, upstream, exchange: Exchange, measuring: bool = False) -> None:
         self.send_response(upstream.status)

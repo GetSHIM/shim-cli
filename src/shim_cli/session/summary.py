@@ -182,13 +182,20 @@ def render(records: list, capped: bool = False) -> str:
             column = label if first else " " * len(label)
             first = False
             lines.append(f"  {column:<9} {count} {entity}{_where(relevant)}")
-    named = _custom_totals(records)
+    replies = _model_output(records)
+    # The `custom` line sits under `masked` and has to agree with it. Counting
+    # the model's own replies here made it read 4 under a `masked 2 CUSTOM`.
+    named = _custom_totals(
+        [record for record in records if record.get("direction") != MODEL_OUTPUT]
+    )
     if named:
         listed = ", ".join(f"{count} {name}" for name, count in named)
         lines.append(f"  {'custom':<9} {listed}")
-    replies = _model_output(records)
     if replies:
         listed = ", ".join(f"{count} {entity}" for entity, count in _totals(replies))
+        by_name = _custom_totals(replies)
+        if by_name:
+            listed += " (" + ", ".join(f"{c} {n}" for n, c in by_name) + ")"
         lines.append(f"  {'model':<9} {listed} in its replies ({NOT_LEAKS})")
     first = True
     for marker, count in markers:

@@ -73,7 +73,7 @@ def add_hook(content: bytes | None, interpreter: str | Path = sys.executable) ->
         return expected
     if content == expected:
         return content
-    raise ValueError("SHIM's Copilot hook file contains unexpected content")
+    raise ValueError("shim's Copilot hook file contains unexpected content")
 
 
 def is_legacy(content: bytes, interpreter: str | Path = sys.executable) -> bool:
@@ -97,4 +97,4 @@ def remove_hook(content: bytes, interpreter: str | Path = sys.executable) -> byt
         return empty
     if content == empty:
         return content
-    raise ValueError("SHIM's Copilot hook file contains unexpected content")
+    raise ValueError("shim's Copilot hook file contains unexpected content")

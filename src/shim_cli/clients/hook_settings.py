@@ -124,7 +124,7 @@ def _same_group(left: object, right: object) -> bool:
 def _match(groups: list, group: dict[str, object]) -> int | None:
     matches = [index for index, item in enumerate(groups) if _same_group(item, group)]
     if len(matches) > 1:
-        raise ValueError("duplicate SHIM hook groups are ambiguous")
+        raise ValueError("duplicate shim hook groups are ambiguous")
     return matches[0] if matches else None
 
 

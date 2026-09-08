@@ -20,6 +20,14 @@ MAX_SCAN_DEPTH = 200
 
 MAX_BODY_BYTES = 8_000_000
 
+# Why a request could not be measured. The report turns these into sentences,
+# so each one has to name a cause the person can act on.
+SLOTS_BUSY = "slots busy"
+BODY_TOO_LARGE = "body too large"
+NOT_JSON = "not JSON"
+TOO_MANY_FIELDS = "too many fields"
+INCOMPLETE_REASONS = (SLOTS_BUSY, BODY_TOO_LARGE, NOT_JSON, TOO_MANY_FIELDS)
+
 MAX_MODEL_CHARS = 120
 UNKNOWN_MODEL = "unknown"
 
@@ -445,6 +453,9 @@ class Exchange:
     stop_reason: str = ""
     at_files: AtFiles = field(default_factory=AtFiles)
     measured: bool = True
+    # Why `measured` is False, so the report can say it. One of
+    # INCOMPLETE_REASONS; empty when the request was measured.
+    incomplete_reason: str = ""
     usage_status: str = "unavailable"
 
     def __post_init__(self) -> None:
@@ -459,11 +470,13 @@ def inspect_request(body: bytes | bytearray, evaluate=None, memo=None) -> Exchan
     exchange = Exchange(request_bytes=len(body))
     if len(body) > MAX_BODY_BYTES:
         exchange.measured = False
+        exchange.incomplete_reason = BODY_TOO_LARGE
         return exchange
     try:
         document = json.loads(body.decode("utf-8"))
     except (UnicodeDecodeError, ValueError):
         exchange.measured = False
+        exchange.incomplete_reason = NOT_JSON
         return exchange
     if isinstance(document, dict) and isinstance(document.get("model"), str):
         model = document["model"]
@@ -485,6 +498,7 @@ def inspect_request(body: bytes | bytearray, evaluate=None, memo=None) -> Exchan
         except (PayloadTooLarge, RecursionError):
             # Half a count reads as a whole one; say the request was not measured.
             exchange.measured = False
+            exchange.incomplete_reason = TOO_MANY_FIELDS
             return exchange
         grouped: dict[str, list] = {}
         for leaf in leaves:

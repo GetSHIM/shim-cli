@@ -408,7 +408,9 @@ def test_copilot_install_status_doctor_and_revert(monkeypatch, tmp_path: Path) -
     assert json.loads(missing.output)["state"] == "not_installed"
     assert json.loads(current.output)["state"] == "installed"
     assert json.loads(doctor.output)["status"] == "warning"
-    assert json.loads(target.read_bytes()) == {"version": 1, "hooks": {}}
+    # The file is shim's own, so revert deletes it rather than leaving an
+    # empty `{"version": 1, "hooks": {}}` shell behind.
+    assert not target.exists()
     assert json.loads(preview.output[preview.output.index("{") :]) == hook_document()
 
 
@@ -1206,3 +1208,55 @@ def test_the_hook_says_nothing_about_the_contents_of_a_broken_settings_file(
     assert "broken line here" not in output_text
     assert str(target) not in output_text
     assert "shim doctor claude" in output_text
+
+
+def test_the_ledger_can_be_read_back_not_only_deleted(monkeypatch, tmp_path) -> None:
+    """`shim ledger purge` was the only ledger command, so the opt-in record
+    was write-only: enabling it to prove something meant reading JSONL by hand.
+    """
+    from shim_cli.session import ledger
+
+    root = tmp_path / "shim-roots" / "state" / "shim"
+    root.mkdir(parents=True, exist_ok=True)
+    root.chmod(0o700)  # the journal refuses a directory anyone else can read
+    path = root / "ledger-2026-09.jsonl"
+    path.write_text(
+        json.dumps(
+            {"ts": "2026-09-01T00:00:00Z", "entities": {"IBAN": 2}, "tool_name": "Read"}
+        )
+        + "\n"
+        + json.dumps(
+            {
+                "ts": "2026-09-02T00:00:00Z",
+                "entities": {"EMAIL": 1},
+                "tool_name": "Read",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    path.chmod(0o600)
+
+    result = runner.invoke(app, ["ledger", "show"])
+    text = " ".join(unstyle(result.output).split())
+
+    assert result.exit_code == 0
+    assert "2 events over 2 day(s)" in text
+    assert f"kept for {ledger.RETENTION_DAYS} days" in text
+    assert "2026-09-01 1 event 2 IBAN" in text
+    assert "2026-09-02 1 event 1 EMAIL" in text
+
+    payload = json.loads(runner.invoke(app, ["ledger", "show", "--json"]).output)
+    assert payload["events"] == 2
+    assert payload["days"] == 2
+    assert [entry["ts"] for entry in payload["entries"]] == [
+        "2026-09-01T00:00:00Z",
+        "2026-09-02T00:00:00Z",
+    ]
+
+
+def test_an_empty_ledger_says_how_to_turn_it_on(monkeypatch, tmp_path) -> None:
+    result = runner.invoke(app, ["ledger", "show"])
+
+    assert result.exit_code == 0
+    assert "shim config --ledger" in unstyle(result.output)

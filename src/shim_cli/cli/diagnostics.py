@@ -423,7 +423,7 @@ def _duplicate_check(client: str) -> Check:
             "every prompt is inspected twice. Run `shim revert claude` or "
             "uninstall the plugin.",
         )
-    return Check("duplicate_hooks", "PASS", "Exactly one SHIM hook path is installed.")
+    return Check("duplicate_hooks", "PASS", "Exactly one shim hook path is installed.")
 
 
 def _session_record_check() -> Check:
@@ -500,7 +500,7 @@ def _activation_check(client: str) -> Check:
     return Check(
         "hook_activation",
         "WARN",
-        f"{client_name(client)} hook activation is client UI state; verify SHIM with /hooks.",
+        f"{client_name(client)} hook activation is client UI state; verify shim with /hooks.",
     )
 
 
@@ -561,7 +561,11 @@ def doctor(*, client: str, as_json: bool) -> None:
         for check in checks:
             emit(check.status, check.detail, error=check.status == "FAIL")
         _print_coverage(client)
+    # A warning is not a failure. A healthy install prints two of them — the
+    # client is newer than the one tested, and hook activation is state only the
+    # client can show — so exiting non-zero here made `shim doctor claude && …`
+    # useless and taught people to ignore the warnings, which are the only
+    # signal that a client changed shape. FAIL keeps exit 2, as every other
+    # command in the CLI uses for a refusal.
     if status == "error":
         raise typer.Exit(2)
-    if status == "warning":
-        raise typer.Exit(1)

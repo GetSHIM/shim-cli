@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from . import measure
 from .measure import OTHER, RESPONSE_KINDS, SECTIONS, TRUNCATED, Usage
 
 SECTION_WORDS = {
@@ -198,6 +199,40 @@ def _order(names) -> list:
     return known + rest + ([OTHER] if OTHER in names else [])
 
 
+# What each reason means to the person reading it, not to the code.
+_INCOMPLETE_SENTENCES = {
+    measure.SLOTS_BUSY: (
+        "arrived while both inspection slots were busy (parallel agents do this)"
+    ),
+    measure.BODY_TOO_LARGE: "had a body over the scan limit",
+    measure.NOT_JSON: "could not be read as JSON",
+    measure.TOO_MANY_FIELDS: "had more text fields than shim scans at once",
+}
+
+
+_RESPONSE_SENTENCES = {
+    "unavailable": "not streamed in a shape shim can read",
+    "partial": "stopped before the stream finished",
+}
+
+
+def _why_incomplete(exchanges) -> str:
+    """`inspection incomplete for 2 request(s)` with no cause is unactionable."""
+    counts: dict[str, int] = {}
+    for exchange in exchanges:
+        if exchange.measured:
+            continue
+        reason = exchange.incomplete_reason
+        if reason in _INCOMPLETE_SENTENCES:
+            counts[reason] = counts.get(reason, 0) + 1
+    if not counts:
+        return ""
+    ordered = sorted(counts.items(), key=lambda pair: (-pair[1], pair[0]))
+    return ": " + ", ".join(
+        f"{count} {_INCOMPLETE_SENTENCES[reason]}" for reason, count in ordered
+    )
+
+
 def render(session, seconds: float) -> str:
     exchanges = [
         exchange
@@ -206,12 +241,14 @@ def render(session, seconds: float) -> str:
     ]
     if not exchanges and not session.errors:
         return ""
-    lines = [f"shim watch — {_duration(seconds)}, {len(exchanges)} requests"]
+    plural = "" if len(exchanges) == 1 else "s"
+    lines = [f"shim watch — {_duration(seconds)}, {len(exchanges)} request{plural}"]
 
     incomplete = sum(not exchange.measured for exchange in exchanges)
     unknown_usage = sum(exchange.usage_status != "known" for exchange in exchanges)
     if incomplete:
-        lines.append(f"  inspection incomplete for {incomplete} request(s)")
+        why = _why_incomplete(exchanges)
+        lines.append(f"  inspection incomplete for {incomplete} request(s){why}")
     if unknown_usage:
         lines.append(f"  usage unavailable or partial for {unknown_usage} request(s)")
     combined = totals(exchanges)
@@ -283,8 +320,18 @@ def render(session, seconds: float) -> str:
         exchange.response_scan_status == "known" for exchange in exchanges
     )
     if unscanned:
+        states: dict[str, int] = {}
+        for exchange in exchanges:
+            status = exchange.response_scan_status
+            if status != "known":
+                states[status] = states.get(status, 0) + 1
+        why = ", ".join(
+            f"{count} {_RESPONSE_SENTENCES.get(status, status)}"
+            for status, count in sorted(states.items(), key=lambda p: (-p[1], p[0]))
+        )
         lines.append(
             f"  response scan unavailable or partial for {unscanned} request(s)"
+            + (f": {why}" if why else "")
         )
     for index, line in enumerate(_compared(by_section, by_kind)):
         lines.append(f"  compare   {line}" if not index else f"            {line}")
@@ -362,6 +409,7 @@ def as_json(session, seconds: float) -> dict:
                 # the transcript breaks the provider's cache prefix is visible
                 # only in which requests read from it and which rewrite it.
                 "model": exchange.model,
+                "incomplete_reason": exchange.incomplete_reason,
                 "request_bytes": exchange.request_bytes,
                 "usage_status": exchange.usage_status,
                 "usage": {

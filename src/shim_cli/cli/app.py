@@ -217,6 +217,16 @@ ledger_app = typer.Typer(help="Manage the opt-in record kept past a session.")
 app.add_typer(ledger_app, name="ledger")
 
 
+@ledger_app.command("show")
+def ledger_show(
+    json_output: bool = typer.Option(False, "--json", help="Write a JSON result."),
+) -> None:
+    """Show the retained session records."""
+    from shim_cli.cli.report import show_ledger
+
+    show_ledger(as_json=json_output)
+
+
 @ledger_app.command("purge")
 def ledger_purge(
     yes: bool = typer.Option(False, "--yes", help="Delete without confirmation."),

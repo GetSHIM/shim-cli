@@ -337,6 +337,7 @@ def test_the_json_report_carries_both_directions_and_each_request() -> None:
             "response_scan_status": "known",
             "stop_reason": "",
             "model": "claude-sonnet-5",
+            "incomplete_reason": "",
             "request_bytes": 194_236,
             "usage_status": "unavailable",
             "usage": {
@@ -347,3 +348,23 @@ def test_the_json_report_carries_both_directions_and_each_request() -> None:
             },
         }
     ]
+
+
+def test_the_incomplete_line_says_why() -> None:
+    """`inspection incomplete for 2 request(s)` with no cause left the person
+    with nothing to act on — and the usual cause, parallel subagents, is one
+    they can recognise if it is named."""
+    busy = _exchange(measured=False, incomplete_reason=measure.SLOTS_BUSY)
+    big = _exchange(measured=False, incomplete_reason=measure.BODY_TOO_LARGE)
+    text = report.render(_session(busy, _exchange(), big), 90.0)
+
+    line = next(row for row in text.splitlines() if "inspection incomplete" in row)
+    assert "2 request(s):" in line
+    assert "1 arrived while both inspection slots were busy" in line
+    assert "1 had a body over the scan limit" in line
+
+
+def test_a_measured_request_carries_no_reason() -> None:
+    text = report.render(_session(_exchange()), 90.0)
+
+    assert "inspection incomplete" not in text
