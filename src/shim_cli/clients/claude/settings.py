@@ -9,6 +9,7 @@ from shim_cli.clients.hook_settings import (
     MAX_SETTINGS_BYTES,
     Registration,
     add_groups,
+    interpreter_path,
     remove_groups,
 )
 from shim_cli.session import SESSION_EVENTS
@@ -41,9 +42,7 @@ LEGACY_HOOK_MODULE = "shim_guard.hook"
 
 
 def _handler(interpreter: str | Path, module: str = HOOK_MODULE) -> dict[str, object]:
-    executable = Path(interpreter)
-    if not executable.is_absolute() or not str(executable).isprintable():
-        raise ValueError("hook interpreter must be an absolute safe path")
+    executable = interpreter_path(interpreter)
     return {
         "args": ["-I", "-B", "-m", module, "claude"],
         "command": str(executable),

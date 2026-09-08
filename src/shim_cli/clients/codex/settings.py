@@ -14,6 +14,7 @@ from shim_cli.clients.hook_settings import (
     MAX_SETTINGS_BYTES,
     Registration,
     add_groups,
+    interpreter_path,
     remove_groups,
 )
 from shim_cli.settings_files import StateKind, inspect_file
@@ -66,9 +67,7 @@ def has_inline_hooks(path: Path | None = None) -> bool:
 def hook_command(
     interpreter: str | Path = sys.executable, module: str = HOOK_MODULE
 ) -> str:
-    executable = Path(interpreter)
-    if not executable.is_absolute() or not str(executable).isprintable():
-        raise ValueError("hook interpreter must be an absolute safe path")
+    executable = interpreter_path(interpreter)
     return shlex.join((str(executable), "-I", "-B", "-m", module))
 
 

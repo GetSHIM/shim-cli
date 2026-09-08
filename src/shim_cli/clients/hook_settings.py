@@ -2,11 +2,39 @@ from __future__ import annotations
 
 import json
 import math
+import sys
 from collections.abc import Sequence
+from pathlib import Path
 
 MAX_SETTINGS_BYTES = 1_000_000
 
 Registration = tuple
+
+# One interpreter answers to several names. `sys.executable` reports whichever
+# one started Python, so a console script says `.venv/bin/python3` while
+# `python -m` says `.venv/bin/python`.
+INTERPRETER_ALIASES = ("python", "python3", f"python3.{sys.version_info.minor}")
+
+
+def interpreter_path(interpreter: str | Path) -> Path:
+    """The name a hook fragment should use for this interpreter.
+
+    A fragment is matched as an exact string, so the two names above disagree
+    about a hook that is already installed: `install` adds a second one and
+    `doctor` reports the first missing. Answer with the same alias whoever
+    asks, without resolving the symlink, which would leave the environment.
+    """
+    executable = Path(interpreter)
+    if not executable.is_absolute() or not str(executable).isprintable():
+        raise ValueError("hook interpreter must be an absolute safe path")
+    for name in INTERPRETER_ALIASES:
+        try:
+            candidate = executable.with_name(name)
+            if candidate.samefile(executable):
+                return candidate
+        except (OSError, ValueError):
+            continue
+    return executable
 
 
 def _object(pairs: list[tuple[str, object]]) -> dict[str, object]:

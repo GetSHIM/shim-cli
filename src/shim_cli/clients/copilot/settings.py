@@ -6,7 +6,7 @@ import shlex
 import sys
 from pathlib import Path
 
-from shim_cli.clients.hook_settings import MAX_SETTINGS_BYTES
+from shim_cli.clients.hook_settings import MAX_SETTINGS_BYTES, interpreter_path
 
 TESTED_COPILOT_VERSION = "1.0.80"
 MINIMUM_COPILOT_VERSION = "1.0.80"
@@ -40,9 +40,7 @@ def legacy_target_path(home: Path | None = None) -> Path:
 def hook_command(
     interpreter: str | Path = sys.executable, module: str = HOOK_MODULE
 ) -> str:
-    executable = Path(interpreter)
-    if not executable.is_absolute() or not str(executable).isprintable():
-        raise ValueError("hook interpreter must be an absolute safe path")
+    executable = interpreter_path(interpreter)
     return shlex.join((str(executable), "-I", "-B", "-m", module, "copilot"))
 
 
