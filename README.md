@@ -100,16 +100,20 @@ runs after the response has been relayed. Request inspection retains at most
 Larger requests still pass through in full; skipped or unfinished measurements
 are reported as incomplete. Usage can be known, partial, or unavailable.
 
-`shim watch` refuses a non-empty `ANTHROPIC_BASE_URL` (Claude) or
-`OPENAI_BASE_URL` (Codex) before startup. Custom upstreams are not supported.
-Requests need an unambiguous non-negative `Content-Length`; transfer coding
-(including chunked requests) is rejected. Request-body reads have a 30-second
-deadline.
+`shim watch` refuses a non-empty `ANTHROPIC_BASE_URL` before startup. Custom
+upstreams are not supported. Requests need an unambiguous non-negative
+`Content-Length`; transfer coding (including chunked requests) is rejected.
+Request-body reads have a 30-second deadline.
 
-Claude Code is verified. Codex runs with a warning — a ChatGPT sign-in behind a
-third-party proxy is documented but untested. Copilot is out of scope: it
-accepts a custom endpoint only through bring-your-own-key, which removes GitHub
-authentication altogether, so there is nothing to watch.
+**`shim watch` supports Claude Code only.** Codex is refused, because it takes
+its endpoint from its own configuration rather than the environment: a proxy
+would be started and the whole session would run past it, reported as empty.
+That was measured, not assumed — [the September 2026
+probe](https://github.com/GetSHIM/shim-cli/blob/main/docs/probe-2026-09-codex-watch.md)
+also shows the transport itself works, so this is a limitation with a fix
+rather than a dead end. The Codex prompt hook is unaffected. Copilot is out of
+scope: it accepts a custom endpoint only through bring-your-own-key, which
+removes GitHub authentication altogether, so there is nothing to watch.
 
 ## Supported clients
 

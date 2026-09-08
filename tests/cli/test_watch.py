@@ -9,9 +9,7 @@ from shim_cli.cli.app import app
 from shim_cli.watch import proxy
 
 
-@pytest.mark.parametrize(
-    "client,variable", [("claude", "ANTHROPIC_BASE_URL"), ("codex", "OPENAI_BASE_URL")]
-)
+@pytest.mark.parametrize("client,variable", [("claude", "ANTHROPIC_BASE_URL")])
 @pytest.mark.parametrize("as_json", [False, True])
 def test_override_refuses_before_start_without_leaking(
     monkeypatch, client, variable, as_json
@@ -32,9 +30,7 @@ def test_override_refuses_before_start_without_leaking(
     child.assert_not_called()
 
 
-@pytest.mark.parametrize(
-    "client,variable", [("claude", "ANTHROPIC_BASE_URL"), ("codex", "OPENAI_BASE_URL")]
-)
+@pytest.mark.parametrize("client,variable", [("claude", "ANTHROPIC_BASE_URL")])
 @pytest.mark.parametrize("value", [None, ""])
 def test_empty_override_starts_without_mutating_parent(
     monkeypatch, client, variable, value
@@ -93,3 +89,25 @@ def test_the_json_report_carries_both_directions(monkeypatch):
     assert document["response_scan"] == "known"
     assert document["stop_reasons"] == {"max_tokens": 1}
     assert document["exchanges"][0]["response_scan_status"] == "known"
+
+
+@pytest.mark.parametrize("as_json", [False, True])
+def test_codex_is_refused_rather_than_proxied_past(monkeypatch, as_json):
+    """Setting `OPENAI_BASE_URL` reached nothing on Codex 0.151.0, so the old
+    behaviour ran the session unmeasured and still exited 0."""
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.setattr("shutil.which", lambda _: "/synthetic/codex")
+    start = Mock()
+    child = Mock()
+    monkeypatch.setattr(proxy, "start", start)
+    monkeypatch.setattr("subprocess.Popen", child)
+
+    result = CliRunner().invoke(
+        app, ["watch", *(["--json"] if as_json else []), "--", "codex"]
+    )
+
+    assert result.exit_code == 2
+    assert "codex" in result.output
+    start.assert_not_called()
+    child.assert_not_called()
+    assert os.environ.get("OPENAI_BASE_URL") is None

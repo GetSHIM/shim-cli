@@ -12,21 +12,29 @@ import typer
 from shim_cli.cli.output import emit, emit_json, terminal_text
 
 # Copilot proxying requires BYOK.
-BASE_URL_VARIABLES = {
-    "claude": "ANTHROPIC_BASE_URL",
-    "codex": "OPENAI_BASE_URL",
+BASE_URL_VARIABLES = {"claude": "ANTHROPIC_BASE_URL"}
+UPSTREAMS = {"claude": "api.anthropic.com"}
+
+# Measured on Codex 0.151.0, 8 September 2026: the base URL comes from Codex's
+# own configuration and `OPENAI_BASE_URL` reaches nothing, so starting a proxy
+# and setting the variable ran the whole session past it and reported nothing
+# measured, while exiting 0. Refusing is honest; PRD-13 makes it work.
+# docs/probe-2026-09-codex-watch.md
+REFUSED = {
+    "codex": (
+        "shim watch does not support codex. Codex takes its endpoint from its "
+        "own configuration, so the proxy would be bypassed and the session "
+        "measured as empty. The Codex prompt hook is unaffected."
+    )
 }
-UPSTREAMS = {
-    "claude": "api.anthropic.com",
-    "codex": "api.openai.com",
-}
-VERIFIED = frozenset({"claude"})
 
 
 def watch(*, command: tuple, as_json: bool) -> None:
     if not command:
         _fail(as_json, "Nothing to run. Try: shim watch -- claude")
     client = os.path.basename(command[0])
+    if client in REFUSED:
+        _fail(as_json, REFUSED[client])
     variable = BASE_URL_VARIABLES.get(client, "")
     if not variable:
         _fail(
@@ -52,11 +60,6 @@ def watch(*, command: tuple, as_json: bool) -> None:
 
     if not as_json:
         emit("PASS", f"Watching {client} on {running.base_url}. Nothing is modified.")
-        if client not in VERIFIED:
-            emit(
-                "WARN",
-                f"{client} behind a proxy is unverified; sign-in may not work.",
-            )
 
     environment = dict(os.environ)
     environment[variable] = running.base_url
