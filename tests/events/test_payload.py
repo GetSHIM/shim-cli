@@ -4,9 +4,9 @@ import json
 
 import pytest
 
-from shim_guard.events import payload
-from shim_guard.events.payload import PayloadTooLarge, mask, replace, walk
-from shim_guard.guard import evaluate
+from shim_cli.events import payload
+from shim_cli.events.payload import PayloadTooLarge, mask, replace, walk
+from shim_cli.guard import evaluate
 
 NESTED = {
     "tool_response": [

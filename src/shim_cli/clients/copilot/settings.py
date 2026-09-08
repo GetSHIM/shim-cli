@@ -6,7 +6,7 @@ import shlex
 import sys
 from pathlib import Path
 
-from shim_guard.clients.hook_settings import MAX_SETTINGS_BYTES
+from shim_cli.clients.hook_settings import MAX_SETTINGS_BYTES
 
 TESTED_COPILOT_VERSION = "1.0.80"
 MINIMUM_COPILOT_VERSION = "1.0.80"
@@ -33,7 +33,7 @@ def hook_command(interpreter: str | Path = sys.executable) -> str:
     executable = Path(interpreter)
     if not executable.is_absolute() or not str(executable).isprintable():
         raise ValueError("hook interpreter must be an absolute safe path")
-    return shlex.join((str(executable), "-I", "-B", "-m", "shim_guard.hook", "copilot"))
+    return shlex.join((str(executable), "-I", "-B", "-m", "shim_cli.hook", "copilot"))
 
 
 def hook_document(interpreter: str | Path = sys.executable) -> dict[str, object]:

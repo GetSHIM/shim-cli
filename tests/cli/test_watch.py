@@ -5,8 +5,8 @@ from unittest.mock import Mock
 import pytest
 from typer.testing import CliRunner
 
-from shim_guard.cli.app import app
-from shim_guard.watch import proxy
+from shim_cli.cli.app import app
+from shim_cli.watch import proxy
 
 
 @pytest.mark.parametrize(

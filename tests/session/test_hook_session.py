@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from shim_guard.session import SESSION_EVENTS, spool
+from shim_cli.session import SESSION_EVENTS, spool
 
 ROOT = Path(__file__).parents[2]
 SESSION = "0199aa11-2233-4455-6677-889900aabbcc"
@@ -21,7 +21,7 @@ def _isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _run(payload: dict, client: str = "claude") -> bytes:
     result = subprocess.run(
-        (sys.executable, "-I", "-B", "-m", "shim_guard.hook", client),
+        (sys.executable, "-I", "-B", "-m", "shim_cli.hook", client),
         input=json.dumps(payload).encode(),
         capture_output=True,
         cwd=ROOT,
@@ -152,6 +152,6 @@ def test_the_prompt_path_is_recorded_too() -> None:
 
 
 def test_the_installed_session_events_are_the_ones_the_hook_dispatches() -> None:
-    from shim_guard import hook
+    from shim_cli import hook
 
     assert set(SESSION_EVENTS) == {hook._STOP_EVENT, hook._SESSION_END_EVENT}

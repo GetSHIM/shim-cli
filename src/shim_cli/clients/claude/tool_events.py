@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import json
 
-from shim_guard.clients.user_prompt_hook import parse_object
-from shim_guard.events.pipeline import Adapter, Event
-from shim_guard.policy import ALLOW, DENY, MASK, REPORT
+from shim_cli.clients.user_prompt_hook import parse_object
+from shim_cli.events.pipeline import Adapter, Event
+from shim_cli.policy import ALLOW, DENY, MASK, REPORT
 
 MAX_INPUT_BYTES = 1_000_000
 MAX_OUTPUT_BYTES = 1_000_000
-_DENY_REASON = "SHIM Guard: sensitive data detected; this call was not allowed."
+_DENY_REASON = "shim: sensitive data detected; this call was not allowed."
 _ERROR_MESSAGE = "shim: this tool event could not be inspected and was not modified."
 _TARGET_KEYS = ("file_path", "notebook_path", "path", "url")
 _FILE_VIEW_KEYS = ("file_path", "notebook_path", "path")

@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from shim_guard.session import summary
+from shim_cli.session import summary
 
 
 def _record(**changes: object) -> dict:

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from shim_guard.settings_files import (
+from shim_cli.settings_files import (
     Action,
     InstallationError,
     StateKind,
@@ -108,7 +108,7 @@ def test_same_content_on_new_inode_is_refused(tmp_path: Path) -> None:
 def test_hardlink_added_before_publish_is_refused(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from shim_guard.settings_files import files
+    from shim_cli.settings_files import files
 
     target = target_in(tmp_path)
     target.write_bytes(b"old")

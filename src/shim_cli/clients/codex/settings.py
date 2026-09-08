@@ -10,13 +10,13 @@ try:  # pragma: no cover
 except ModuleNotFoundError:
     import tomli as tomllib
 
-from shim_guard.clients.hook_settings import (
+from shim_cli.clients.hook_settings import (
     MAX_SETTINGS_BYTES,
     Registration,
     add_groups,
     remove_groups,
 )
-from shim_guard.settings_files import StateKind, inspect_file
+from shim_cli.settings_files import StateKind, inspect_file
 
 TESTED_CODEX_VERSION = "0.149.0"
 MINIMUM_CODEX_VERSION = "0.149.0"
@@ -63,7 +63,7 @@ def hook_command(interpreter: str | Path = sys.executable) -> str:
     executable = Path(interpreter)
     if not executable.is_absolute() or not str(executable).isprintable():
         raise ValueError("hook interpreter must be an absolute safe path")
-    return shlex.join((str(executable), "-I", "-B", "-m", "shim_guard.hook"))
+    return shlex.join((str(executable), "-I", "-B", "-m", "shim_cli.hook"))
 
 
 def hook_group(interpreter: str | Path = sys.executable) -> dict[str, object]:

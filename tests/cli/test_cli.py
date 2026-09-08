@@ -13,13 +13,13 @@ import pytest
 from click import unstyle
 from typer.testing import CliRunner
 
-from shim_guard import __version__
-from shim_guard.cli import output
-from shim_guard.cli.app import app
-from shim_guard.cli.output import terminal_text
-from shim_guard.config import load_policy
-from shim_guard.events.diet import DEFAULT_TRANSFORMS
-from shim_guard.guard import DEFAULT_ENTITIES
+from shim_cli import __version__
+from shim_cli.cli import output
+from shim_cli.cli.app import app
+from shim_cli.cli.output import terminal_text
+from shim_cli.config import load_policy
+from shim_cli.events.diet import DEFAULT_TRANSFORMS
+from shim_cli.guard import DEFAULT_ENTITIES
 
 runner = CliRunner()
 
@@ -82,7 +82,7 @@ def _guard_config(monkeypatch, tmp_path: Path) -> Path:
 def test_help_does_not_load_detector() -> None:
     script = (
         "import sys; from typer.testing import CliRunner; "
-        "from shim_guard.cli.app import app; "
+        "from shim_cli.cli.app import app; "
         "result = CliRunner().invoke(app, ['--help']); "
         "raise SystemExit(0 if result.exit_code == 0 and 'presidio_analyzer' not in sys.modules else 1)"
     )
@@ -111,12 +111,38 @@ def test_help_remains_readable_at_narrow_terminal_width() -> None:
     assert max(map(len, rendered.splitlines())) <= 20
 
 
+COMMANDS = (
+    "help",
+    "update",
+    "demo",
+    "scan",
+    "redact",
+    "config",
+    "install",
+    "status",
+    "doctor",
+    "revert",
+    "report",
+    "watch",
+    "ledger",
+)
+
+
+def test_no_rendered_help_says_guard() -> None:
+    rendered = {
+        name: unstyle(runner.invoke(app, [*name.split(), "--help"], color=False).output)
+        for name in ("--help", *COMMANDS)
+    }
+
+    assert sorted(name for name, text in rendered.items() if "Guard" in text) == []
+
+
 def test_help_command_lists_a_description_for_every_command() -> None:
     result = runner.invoke(app, ["help"], color=False)
     rendered = unstyle(result.output)
     descriptions = (
         "Show help.",
-        "Update SHIM Guard.",
+        "Update shim.",
         "Run a synthetic detector check.",
         "Scan UTF-8 stdin.",
         "Redact UTF-8 stdin.",
@@ -124,7 +150,7 @@ def test_help_command_lists_a_description_for_every_command() -> None:
         "Preview or install a client hook.",
         "Show hook status.",
         "Check client and hook health.",
-        "Remove SHIM Guard's client hook.",
+        "Remove shim's client hook.",
     )
 
     assert result.exit_code == 0
@@ -149,7 +175,7 @@ def test_update_uses_the_original_package_manager(monkeypatch) -> None:
         calls.append(command)
         return subprocess.CompletedProcess(command, 0)
 
-    monkeypatch.setattr("shim_guard.cli.app.subprocess.run", run)
+    monkeypatch.setattr("shim_cli.cli.app.subprocess.run", run)
     for installer in ("uv", "pip"):
         distribution = SimpleNamespace(
             read_text=lambda _, installer=installer: installer
@@ -159,9 +185,7 @@ def test_update_uses_the_original_package_manager(monkeypatch) -> None:
             packages.append(package)
             return distribution
 
-        monkeypatch.setattr(
-            "shim_guard.cli.app.metadata.distribution", get_distribution
-        )
+        monkeypatch.setattr("shim_cli.cli.app.metadata.distribution", get_distribution)
         assert runner.invoke(app, ["update"]).exit_code == 0
 
     assert packages == ["shim", "shim"]
@@ -316,7 +340,7 @@ def test_install_status_and_revert(monkeypatch, tmp_path: Path) -> None:
 
 
 def test_claude_install_status_doctor_and_revert(monkeypatch, tmp_path: Path) -> None:
-    from shim_guard.clients.claude.settings import hook_group
+    from shim_cli.clients.claude.settings import hook_group
 
     home = _claude_home(monkeypatch, tmp_path)
     _claude(monkeypatch, tmp_path)
@@ -362,7 +386,7 @@ def test_claude_install_status_doctor_and_revert(monkeypatch, tmp_path: Path) ->
 
 
 def test_copilot_install_status_doctor_and_revert(monkeypatch, tmp_path: Path) -> None:
-    from shim_guard.clients.copilot.settings import hook_document
+    from shim_cli.clients.copilot.settings import hook_document
 
     home = _copilot_home(monkeypatch, tmp_path)
     _copilot(monkeypatch, tmp_path)
@@ -414,7 +438,7 @@ def test_confirmation_and_doctor(monkeypatch, tmp_path: Path) -> None:
 def test_install_preserves_shared_hooks_and_preview_hides_them(
     monkeypatch, tmp_path: Path
 ) -> None:
-    from shim_guard.clients.codex.settings import hook_group
+    from shim_cli.clients.codex.settings import hook_group
 
     home = _codex_home(monkeypatch, tmp_path)
     target = home / ".codex" / "hooks.json"
@@ -456,7 +480,7 @@ def test_install_preserves_shared_hooks_and_preview_hides_them(
 def test_repeated_install_does_not_reformat_existing_document(
     monkeypatch, tmp_path: Path
 ) -> None:
-    from shim_guard.clients.codex.settings import hook_group
+    from shim_cli.clients.codex.settings import hook_group
 
     home = _codex_home(monkeypatch, tmp_path)
     target = home / ".codex" / "hooks.json"
@@ -506,7 +530,7 @@ def test_install_refuses_hook_document_changed_during_confirmation(
         target.write_text(json.dumps(changed))
         return True
 
-    monkeypatch.setattr("shim_guard.cli.integrations.typer.confirm", change_hooks)
+    monkeypatch.setattr("shim_cli.cli.integrations.typer.confirm", change_hooks)
     result = runner.invoke(app, ["install", "codex"])
 
     assert result.exit_code == 2
@@ -533,7 +557,7 @@ def test_install_refuses_when_detector_warmup_fails(
     def fail(_: str) -> None:
         raise RuntimeError
 
-    monkeypatch.setattr("shim_guard.guard.evaluate", fail)
+    monkeypatch.setattr("shim_cli.guard.evaluate", fail)
     result = runner.invoke(app, ["install", "codex", "--yes"])
 
     assert result.exit_code == 2
@@ -631,7 +655,7 @@ def test_report_says_so_when_there_is_no_session(monkeypatch, tmp_path: Path) ->
 
 def test_report_renders_the_most_recent_session(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("SHIM_GUARD_SESSION_DIR", str(tmp_path / "spools"))
-    from shim_guard.session import spool
+    from shim_cli.session import spool
 
     spool.append(
         "a-session",
@@ -655,7 +679,7 @@ def test_report_renders_the_most_recent_session(monkeypatch, tmp_path: Path) -> 
 def test_ledger_purge_deletes_only_what_is_retained(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("SHIM_GUARD_STATE_DIR", str(tmp_path / "state"))
     monkeypatch.setenv("SHIM_GUARD_SESSION_DIR", str(tmp_path / "spools"))
-    from shim_guard.session import ledger, spool
+    from shim_cli.session import ledger, spool
 
     ledger.append({"action": "mask", "entities": {"SECRET": 1}})
     spool.append("live", {"action": "mask", "entities": {"SECRET": 1}})
@@ -672,7 +696,7 @@ def test_ledger_purge_deletes_only_what_is_retained(monkeypatch, tmp_path: Path)
 
 
 def test_diet_ships_on_and_can_be_turned_off(monkeypatch, tmp_path: Path) -> None:
-    from shim_guard.events.diet import DEFAULT_TRANSFORMS
+    from shim_cli.events.diet import DEFAULT_TRANSFORMS
 
     target = _guard_config(monkeypatch, tmp_path)
 
@@ -703,7 +727,7 @@ def test_a_single_transform_can_be_named_in_the_config_file(
 
 
 def test_report_reads_the_ledger_once_the_session_has_ended(tmp_path: Path) -> None:
-    from shim_guard.session import ledger
+    from shim_cli.session import ledger
 
     ledger.append(
         {
@@ -727,7 +751,7 @@ def test_report_reads_the_ledger_once_the_session_has_ended(tmp_path: Path) -> N
 
 
 def test_report_prefers_the_live_session_over_the_ledger() -> None:
-    from shim_guard.session import ledger, spool
+    from shim_cli.session import ledger, spool
 
     ledger.append(
         {
@@ -746,7 +770,7 @@ def test_report_prefers_the_live_session_over_the_ledger() -> None:
 
 
 def test_report_shows_one_session_not_the_whole_month() -> None:
-    from shim_guard.session import ledger
+    from shim_cli.session import ledger
 
     for session, when, entity in (
         ("older", "2026-08-29T10:00:00Z", "IBAN"),

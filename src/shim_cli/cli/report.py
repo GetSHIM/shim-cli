@@ -4,12 +4,12 @@ import sys
 
 import typer
 
-from shim_guard.cli.output import emit, emit_json, terminal_text
-from shim_guard.session import spool, summary
+from shim_cli.cli.output import emit, emit_json, terminal_text
+from shim_cli.session import spool, summary
 
 
 def _retained() -> list:
-    from shim_guard.session import ledger
+    from shim_cli.session import ledger
 
     try:
         entries = ledger.entries()
@@ -62,7 +62,7 @@ def report(*, as_json: bool) -> None:
 
 
 def purge(*, yes: bool, as_json: bool) -> None:
-    from shim_guard.session import ledger
+    from shim_cli.session import ledger
 
     try:
         existing = ledger.files()

@@ -5,7 +5,7 @@ from typing import NoReturn
 
 import typer
 
-from shim_guard.cli.output import emit, emit_json, terminal_text
+from shim_cli.cli.output import emit, emit_json, terminal_text
 
 MAX_STDIN_BYTES = 1_000_000
 _DEMO_TEXT = (
@@ -24,8 +24,8 @@ def read_stdin() -> str:
 
 
 def evaluate(text: str):
-    from shim_guard.config import load_entities
-    from shim_guard.guard import evaluate as evaluate_guard
+    from shim_cli.config import load_entities
+    from shim_cli.guard import evaluate as evaluate_guard
 
     return evaluate_guard(text, load_entities())
 
@@ -73,7 +73,7 @@ def redact(*, as_json: bool) -> None:
 
 def demo(*, client: str, as_json: bool) -> None:
     try:
-        from shim_guard.guard import evaluate as evaluate_guard
+        from shim_cli.guard import evaluate as evaluate_guard
 
         decision = evaluate_guard(_DEMO_TEXT)
     except Exception:

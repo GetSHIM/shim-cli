@@ -6,13 +6,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from shim_guard.guard import GuardDecision
+    from shim_cli.guard import GuardDecision
 
 EVENT_NAME = "UserPromptSubmit"
 MAX_REASON_CHARS = 4_000
 MAX_OUTPUT_BYTES = 4_096
 _ERROR_REASON = (
-    "SHIM Guard could not inspect this prompt, so it was withheld. "
+    "shim could not inspect this prompt, so it was withheld. "
     "Run `shim doctor {client}` for the reason."
 )
 
@@ -95,7 +95,7 @@ def block_output(
         raise ValueError("suggestion path is invalid")
     counts = ", ".join(f"{category} ({count})" for category, count in decision.counts)
     reason = (
-        f"SHIM Guard blocked this prompt: {counts}.\n"
+        f"shim blocked this prompt: {counts}.\n"
         "Copy and paste this as your next prompt:\n"
         f"Read this file and use its contents as my prompt: {suggestion_path}"
     )

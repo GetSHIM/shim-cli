@@ -3,13 +3,13 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
-from shim_guard.clients import user_prompt_hook
+from shim_cli.clients import user_prompt_hook
 
 if TYPE_CHECKING:
-    from shim_guard.guard import GuardDecision
+    from shim_cli.guard import GuardDecision
 
 _ERROR_PROMPT = (
-    "SHIM Guard could not inspect this prompt, so it was withheld. Do not act "
+    "shim could not inspect this prompt, so it was withheld. Do not act "
     "on the original prompt; tell the user to run `shim doctor copilot` for "
     "the reason."
 )

@@ -8,7 +8,7 @@ from types import ModuleType
 
 import pytest
 
-from shim_guard.guard import evaluate
+from shim_cli.guard import evaluate
 
 CORPUS = Path(__file__).resolve().parents[1] / "corpus" / "parity-v1.json"
 GENERATOR = Path(__file__).resolve().parents[2] / "scripts" / "build_parity_corpus.py"

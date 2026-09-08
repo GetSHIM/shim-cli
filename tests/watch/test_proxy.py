@@ -13,7 +13,7 @@ import urllib.request
 
 import pytest
 
-from shim_guard.watch import proxy
+from shim_cli.watch import proxy
 
 MESSAGE_START = (
     b"event: message_start\n"
@@ -477,7 +477,7 @@ def test_stopping_twice_is_harmless() -> None:
 def test_measurement_runs_on_a_worker_thread_without_the_signal_deadline(
     watched,
 ) -> None:
-    from shim_guard.guard import evaluate
+    from shim_cli.guard import evaluate
 
     running, _upstream = watched
     running._server.RequestHandlerClass.evaluate = staticmethod(evaluate)
@@ -577,7 +577,7 @@ def test_slow_measurement_does_not_delay_response_or_shutdown(watched, monkeypat
         running.stop()
         assert time.monotonic() - started < 1.5
         assert not running.session.exchanges[0].measured
-        from shim_guard.watch import report
+        from shim_cli.watch import report
 
         assert report.as_json(running.session, 1)["inspection_incomplete"] == 1
     finally:

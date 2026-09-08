@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from shim_guard.clients import user_prompt_hook
+from shim_cli.clients import user_prompt_hook
 
 if TYPE_CHECKING:
-    from shim_guard.guard import GuardDecision
+    from shim_cli.guard import GuardDecision
 
 parse_input = user_prompt_hook.parse_input
 warn_output = user_prompt_hook.warn_output

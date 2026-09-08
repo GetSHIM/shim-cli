@@ -9,7 +9,7 @@ import time
 
 import typer
 
-from shim_guard.cli.output import emit, emit_json, terminal_text
+from shim_cli.cli.output import emit, emit_json, terminal_text
 
 # Copilot proxying requires BYOK.
 BASE_URL_VARIABLES = {
@@ -42,8 +42,8 @@ def watch(*, command: tuple, as_json: bool) -> None:
     if shutil.which(command[0]) is None and not os.path.exists(command[0]):
         _fail(as_json, f"{command[0]} was not found on PATH.")
 
-    from shim_guard.guard import evaluate
-    from shim_guard.watch import proxy, report
+    from shim_cli.guard import evaluate
+    from shim_cli.watch import proxy, report
 
     try:
         running = proxy.start(UPSTREAMS[client], evaluate)

@@ -4,7 +4,7 @@ import sys
 
 import pytest
 
-from shim_guard.session import _files
+from shim_cli.session import _files
 
 
 def test_short_writes_are_completed_and_failed_writes_rolled_back(
@@ -60,7 +60,7 @@ def test_processes_cannot_overrun_cap_or_interleave_records(tmp_path):
     code = """
 import os, sys
 from pathlib import Path
-from shim_guard.session import _files
+from shim_cli.session import _files
 root = _files.open_root(Path(sys.argv[1]))
 count = 0
 try:

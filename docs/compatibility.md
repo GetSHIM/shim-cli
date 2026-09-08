@@ -10,6 +10,22 @@
 | Tool hooks | Claude Code `PreToolUse` and `PostToolUse` only |
 | `shim watch` | Claude Code verified; Codex available with an unverified-proxy warning; Copilot out of scope because a custom endpoint removes GitHub authentication |
 
+## Deprecated names
+
+The package was renamed from `shim_guard` to `shim_cli` in 0.3.0. Three names
+survive so that an install written by 0.2.0 keeps working, and all three are
+removed in **0.5.0**, the second minor release after 0.3.0:
+
+| Name | Replacement |
+| --- | --- |
+| the importable `shim_guard` package, including `python -m shim_guard.hook` | `shim_cli`, `python -m shim_cli.hook` |
+| the `shim-guard-hook` console script | `shim-hook` |
+| the `SHIM_GUARD_CONFIG` variable | `SHIM_CONFIG`, which outranks it |
+
+The compatibility package re-exports and does nothing else. It emits no
+deprecation warning: the hook is a cold-start subprocess whose stderr the
+client shows to the user, and a warning on every event is noise.
+
 Codex and Copilot install prompt hooks only. The repository contains no
 Codex, Copilot, `PostToolUseFailure`, or `PostToolBatch` tool adapter. Tool
 coverage is based on live protocol evidence rather than documentation and is

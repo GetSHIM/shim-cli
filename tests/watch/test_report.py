@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from shim_guard.watch import measure, proxy, report
+from shim_cli.watch import measure, proxy, report
 
 
 def _exchange(**changes):

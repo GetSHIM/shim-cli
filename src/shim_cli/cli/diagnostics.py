@@ -14,13 +14,13 @@ import typer
 from rich import box
 from rich.table import Table
 
-from shim_guard.cli.integrations import client_name, client_plan, plan_status
-from shim_guard.cli.output import console, emit, emit_json
-from shim_guard.cli.resolution import installed_plugin, resolve
-from shim_guard.clients.claude import settings as claude_settings
-from shim_guard.clients.claude.tool_events import coverage as claude_coverage
-from shim_guard.clients.codex import settings as codex_settings
-from shim_guard.clients.copilot import settings as copilot_settings
+from shim_cli.cli.integrations import client_name, client_plan, plan_status
+from shim_cli.cli.output import console, emit, emit_json
+from shim_cli.cli.resolution import installed_plugin, resolve
+from shim_cli.clients.claude import settings as claude_settings
+from shim_cli.clients.claude.tool_events import coverage as claude_coverage
+from shim_cli.clients.codex import settings as codex_settings
+from shim_cli.clients.copilot import settings as copilot_settings
 
 
 @dataclass(frozen=True)
@@ -135,8 +135,8 @@ def _hook_state(client: str) -> Check:
             f"Could not inspect {name} hook configuration.",
         )
     messages = {
-        "installed": f"SHIM Guard's exact {name} hook group is present.",
-        "not_installed": f"SHIM Guard's {name} hook group is not installed.",
+        "installed": f"shim's exact {name} hook group is present.",
+        "not_installed": f"shim's {name} hook group is not installed.",
         "conflict": f"{name} hook configuration needs manual review.",
         "unsafe": f"{name} hook configuration cannot be trusted safely.",
     }
@@ -144,8 +144,8 @@ def _hook_state(client: str) -> Check:
 
 
 def _entity_settings() -> Check:
-    from shim_guard.config import load_entities
-    from shim_guard.guard import ENTITY_TYPES
+    from shim_cli.config import load_entities
+    from shim_cli.guard import ENTITY_TYPES
 
     try:
         enabled = load_entities()
@@ -183,7 +183,7 @@ def _run_hook(
 
 
 def _runner_check(client: str) -> Check:
-    command = [sys.executable, "-I", "-B", "-m", "shim_guard.hook"]
+    command = [sys.executable, "-I", "-B", "-m", "shim_cli.hook"]
     if client == "claude":
         command.append("claude")
         timeout = claude_settings.HOOK_TIMEOUT_SECONDS
@@ -215,7 +215,7 @@ def _runner_check(client: str) -> Check:
             {"hook_event_name": "UserPromptSubmit", "prompt": "email demo@example.com"}
         )
     try:
-        with tempfile.TemporaryDirectory(prefix="shim-guard-doctor-") as directory:
+        with tempfile.TemporaryDirectory(prefix="shim-doctor-") as directory:
             environment = os.environ.copy()
             environment["SHIM_GUARD_CONFIG"] = str(
                 Path(directory).resolve() / "config.toml"
@@ -301,7 +301,7 @@ def _duplicate_check(client: str) -> Check:
 
 
 def _session_record_check() -> Check:
-    from shim_guard.session import spool
+    from shim_cli.session import spool
 
     try:
         spool.append("shim-doctor-probe", {"probe": True})

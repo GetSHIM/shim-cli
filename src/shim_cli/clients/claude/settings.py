@@ -4,14 +4,14 @@ import os
 import sys
 from pathlib import Path
 
-from shim_guard.clients.claude.tool_events import INSTALLED_EVENTS
-from shim_guard.clients.hook_settings import (
+from shim_cli.clients.claude.tool_events import INSTALLED_EVENTS
+from shim_cli.clients.hook_settings import (
     MAX_SETTINGS_BYTES,
     Registration,
     add_groups,
     remove_groups,
 )
-from shim_guard.session import SESSION_EVENTS
+from shim_cli.session import SESSION_EVENTS
 
 TESTED_CLAUDE_VERSION = "2.1.251"
 MINIMUM_CLAUDE_VERSION = "2.1.210"
@@ -41,7 +41,7 @@ def _handler(interpreter: str | Path) -> dict[str, object]:
     if not executable.is_absolute() or not str(executable).isprintable():
         raise ValueError("hook interpreter must be an absolute safe path")
     return {
-        "args": ["-I", "-B", "-m", "shim_guard.hook", "claude"],
+        "args": ["-I", "-B", "-m", "shim_cli.hook", "claude"],
         "command": str(executable),
         "timeout": HOOK_TIMEOUT_SECONDS,
         "type": "command",

@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-import shim_guard
-from shim_guard.clients.claude import settings as claude_settings
-from shim_guard.clients.codex import settings as codex_settings
+import shim_cli
+from shim_cli.clients.claude import settings as claude_settings
+from shim_cli.clients.codex import settings as codex_settings
 
 try:
     import tomllib
@@ -23,7 +23,7 @@ def test_plugin_versions_match_package() -> None:
         (REPOSITORY_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     )
     expected = package["project"]["version"]
-    assert shim_guard.__version__ == expected
+    assert shim_cli.__version__ == expected
 
     for host in ("codex", "claude"):
         manifest = json.loads(

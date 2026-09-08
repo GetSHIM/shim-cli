@@ -16,7 +16,7 @@ SAFE_INPUT = b'{"hook_event_name":"UserPromptSubmit","prompt":"Explain merge sor
 BLOCK_INPUT = (
     b'{"hook_event_name":"UserPromptSubmit","prompt":"Contact alice@example.com"}'
 )
-HOOK_COMMAND = ("-I", "-B", "-m", "shim_guard.hook")
+HOOK_COMMAND = ("-I", "-B", "-m", "shim_cli.hook")
 HOOK_TIMEOUT_SECONDS = 35
 COPY_INSTRUCTION = "Copy and paste this as your next prompt:"
 READ_INSTRUCTION = "Read this file and use its contents as my prompt: "
@@ -43,8 +43,7 @@ def _valid_block(output: bytes, temporary: Path) -> bool:
         path = Path(lines[2].removeprefix(READ_INSTRUCTION))
         return (
             document["decision"] == "block"
-            and lines[:2]
-            == ["SHIM Guard blocked this prompt: EMAIL (1).", COPY_INSTRUCTION]
+            and lines[:2] == ["shim blocked this prompt: EMAIL (1).", COPY_INSTRUCTION]
             and len(lines) == 3
             and lines[2].startswith(READ_INSTRUCTION)
             and path.parent == temporary

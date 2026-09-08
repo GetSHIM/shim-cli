@@ -5,16 +5,16 @@ from pathlib import Path
 
 import pytest
 
-from shim_guard.clients.claude.tool_events import (
+from shim_cli.clients.claude.tool_events import (
     INSTALLED_EVENTS,
     TOOL_EVENTS,
     coverage,
 )
-from shim_guard.events import payload
-from shim_guard.events.diet import DEFAULT_TRANSFORMS, JSON_COMPACTION
-from shim_guard.events.pipeline import process
-from shim_guard.guard import evaluate
-from shim_guard.policy import (
+from shim_cli.events import payload
+from shim_cli.events.diet import DEFAULT_TRANSFORMS, JSON_COMPACTION
+from shim_cli.events.pipeline import process
+from shim_cli.guard import evaluate
+from shim_cli.policy import (
     ALLOW,
     DENY,
     ENFORCE,
@@ -27,7 +27,7 @@ from shim_guard.policy import (
     REPORT,
     WARN,
 )
-from shim_guard.session.record import MAX_DISPLAY_LABEL_CHARS
+from shim_cli.session.record import MAX_DISPLAY_LABEL_CHARS
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "probe" / "claude"
 

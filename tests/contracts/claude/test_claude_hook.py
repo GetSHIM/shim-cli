@@ -8,9 +8,9 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
-COMMAND = (sys.executable, "-I", "-B", "-m", "shim_guard.hook", "claude")
+COMMAND = (sys.executable, "-I", "-B", "-m", "shim_cli.hook", "claude")
 GENERIC_BLOCK = (
-    b'{"decision":"block","reason":"SHIM Guard could not inspect this prompt, '
+    b'{"decision":"block","reason":"shim could not inspect this prompt, '
     b'so it was withheld. Run `shim doctor claude` for the reason.",'
     b'"suppressOriginalPrompt":true}'
 )

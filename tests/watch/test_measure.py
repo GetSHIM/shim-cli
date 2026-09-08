@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from shim_guard.watch import measure
+from shim_cli.watch import measure
 
 MESSAGE_START = (
     "event: message_start\n"
@@ -163,7 +163,7 @@ def test_an_exchange_keeps_counts_and_sizes_but_no_traffic() -> None:
         _request(messages=[{"role": "user", "content": f"deploy with {secret}"}])
     ).encode()
 
-    from shim_guard.guard import evaluate
+    from shim_cli.guard import evaluate
 
     exchange = measure.inspect_request(body, evaluate)
 

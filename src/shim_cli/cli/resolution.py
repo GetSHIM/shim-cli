@@ -35,7 +35,10 @@ class Resolution:
 def archive_version(archive: Path) -> str | None:
     try:
         with zipfile.ZipFile(archive) as bundle:
-            source = bundle.read("shim_guard/__init__.py").decode("utf-8")
+            try:
+                source = bundle.read("shim_cli/__init__.py").decode("utf-8")
+            except KeyError:
+                source = bundle.read("shim_guard/__init__.py").decode("utf-8")
     except (OSError, KeyError, UnicodeDecodeError, zipfile.BadZipFile):
         return None
     found = _VERSION.search(source)
@@ -73,7 +76,7 @@ def resolve(plugin_root: Path | None = None, which=shutil.which) -> Resolution:
     bundled = archive if archive is not None and archive.is_file() else None
     bundled_version = archive_version(bundled) if bundled is not None else None
 
-    from shim_guard import __version__
+    from shim_cli import __version__
 
     if on_path is not None:
         return Resolution(

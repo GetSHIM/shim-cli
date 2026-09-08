@@ -525,7 +525,7 @@
     {
       "id": "no-network-no-filesystem",
       "kind": "offline",
-      "suffix_table": "compiled into shim_guard.guard.suffixes",
+      "suffix_table": "compiled into shim_cli.guard.suffixes",
       "reads": []
     }
   ]

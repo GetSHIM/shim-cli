@@ -7,16 +7,16 @@ from rich import box
 from rich.table import Table
 from rich.text import Text
 
-from shim_guard.cli.output import console, emit, emit_json
-from shim_guard.config import (
+from shim_cli.cli.output import console, emit, emit_json
+from shim_cli.config import (
     MAX_CONFIG_BYTES,
     config_path,
     policy_from_state,
     render_settings,
 )
-from shim_guard.events.diet import DEFAULT_TRANSFORMS
-from shim_guard.guard import DEFAULT_ENTITIES, ENTITY_TYPES, normalize_entities
-from shim_guard.settings_files import (
+from shim_cli.events.diet import DEFAULT_TRANSFORMS
+from shim_cli.guard import DEFAULT_ENTITIES, ENTITY_TYPES, normalize_entities
+from shim_cli.settings_files import (
     InstallationError,
     apply,
     ensure_parent,

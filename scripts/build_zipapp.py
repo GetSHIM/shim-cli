@@ -10,7 +10,7 @@ import zipapp
 from pathlib import Path
 
 SOURCE_ROOT = Path(__file__).resolve().parent.parent / "src"
-PACKAGE = "shim_guard"
+PACKAGE = "shim_cli"
 INCLUDED = (
     "__init__.py",
     "py.typed",
@@ -75,7 +75,7 @@ if sys.version_info[:2] < MINIMUM:
     )
     sys.exit(0)
 
-from shim_guard.hook import main  # noqa: E402
+from shim_cli.hook import main  # noqa: E402
 
 if __name__ == "__main__":
     sys.exit(main())

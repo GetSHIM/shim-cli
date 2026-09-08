@@ -10,15 +10,15 @@ from pathlib import Path
 
 import pytest
 
-from shim_guard.guard import (
+from shim_cli.guard import (
     MAX_SOURCE_CHARACTERS,
     Finding,
     GuardDecision,
     analyze,
     evaluate,
 )
-from shim_guard.guard.normalize import normalize
-from shim_guard.guard.recognizers import Match
+from shim_cli.guard.normalize import normalize
+from shim_cli.guard.recognizers import Match
 
 CORPUS = json.loads(
     (Path(__file__).parents[1] / "corpus" / "guard-v2.json").read_text(encoding="utf-8")
@@ -85,7 +85,7 @@ def test_dense_findings_are_all_maskable() -> None:
 def test_invalid_or_incomplete_analyzer_spans_fail_safely(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    module = importlib.import_module("shim_guard.guard.analyze")
+    module = importlib.import_module("shim_cli.guard.analyze")
 
     def out_of_range(_text: str, _entities: tuple[str, ...]) -> list[Match]:
         return [Match("EMAIL_ADDRESS", 0, 999, 0.9)]
@@ -98,7 +98,7 @@ def test_invalid_or_incomplete_analyzer_spans_fail_safely(
 def test_shared_analysis_deadline_fails_safely(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    module = importlib.import_module("shim_guard.guard.analyze")
+    module = importlib.import_module("shim_cli.guard.analyze")
 
     def slow(_text: str, _entities: tuple[str, ...]) -> list[Match]:
         time.sleep(1)
@@ -113,7 +113,7 @@ def test_shared_analysis_deadline_fails_safely(
 def test_adversarial_punctuation_completes_within_the_detector_budget(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    module = importlib.import_module("shim_guard.guard.analyze")
+    module = importlib.import_module("shim_cli.guard.analyze")
     monkeypatch.setattr(module, "ANALYSIS_DEADLINE_SECONDS", 3)
 
     started = time.monotonic()
@@ -129,7 +129,7 @@ def test_malformed_percent_encoded_utf8_fails_safely() -> None:
 
 
 def test_overlap_tie_is_deterministic_and_covers_the_component() -> None:
-    module = importlib.import_module("shim_guard.guard.analyze")
+    module = importlib.import_module("shim_cli.guard.analyze")
     resolved = module._resolve_overlaps(
         [
             Finding("TR_VKN", 0, 8, 0.8),
@@ -156,7 +156,7 @@ def test_email_validation_reads_neither_the_network_nor_the_filesystem(
 
 
 def test_public_suffix_rules_match_the_behaviour_they_replaced() -> None:
-    from shim_guard.guard.suffixes import is_registrable
+    from shim_cli.guard.suffixes import is_registrable
 
     assert is_registrable("example.com")
     assert is_registrable("a.b.c.example.co.uk")
@@ -181,7 +181,7 @@ def test_results_are_independent_of_python_hash_seed() -> None:
     command = [
         sys.executable,
         "-c",
-        "from shim_guard.guard import evaluate; print(evaluate('alice@example.com 192.168.1.1'))",
+        "from shim_cli.guard import evaluate; print(evaluate('alice@example.com 192.168.1.1'))",
     ]
     outputs = []
     for seed in case["seeds"]:

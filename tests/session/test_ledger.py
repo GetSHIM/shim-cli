@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from shim_guard.session import ledger, remember
+from shim_cli.session import ledger, remember
 
 JANUARY = datetime.datetime(2026, 1, 15, tzinfo=datetime.timezone.utc)
 FEBRUARY = datetime.datetime(2026, 2, 15, tzinfo=datetime.timezone.utc)
@@ -174,8 +174,8 @@ def test_a_symlinked_month_is_not_read(tmp_path: Path) -> None:
 def test_remember_persists_only_a_session_key_and_keeps_storage_best_effort(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from shim_guard.session import spool
-    from shim_guard.session.record import Record
+    from shim_cli.session import spool
+    from shim_cli.session.record import Record
 
     monkeypatch.setenv("SHIM_GUARD_SESSION_DIR", str(tmp_path / "spools"))
     record = Record(

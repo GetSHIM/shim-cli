@@ -34,7 +34,7 @@ def _deadline() -> Iterator[None]:
         return
 
     def expire(_signal_number: int, _frame: object) -> None:
-        raise TimeoutError("SHIM Guard analysis deadline exceeded")
+        raise TimeoutError("shim analysis deadline exceeded")
 
     previous_handler = signal.signal(signal.SIGALRM, expire)
     previous_delay, previous_interval = signal.getitimer(signal.ITIMER_REAL)

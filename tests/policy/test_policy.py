@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from shim_guard import policy
-from shim_guard.policy import (
+from shim_cli import policy
+from shim_cli.policy import (
     ALLOW,
     DENY,
     ENFORCE,

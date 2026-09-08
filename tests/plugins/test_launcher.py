@@ -172,13 +172,13 @@ def test_archive_is_self_contained_and_within_budget(archive: Path) -> None:
     names = zipfile.ZipFile(archive).namelist()
     packaged = {name.split("/")[0] for name in names}
 
-    assert packaged == {"__main__.py", "shim_guard", "phonenumbers", "tomli"}
-    assert not any(name.startswith("shim_guard/cli/") for name in names)
+    assert packaged == {"__main__.py", "shim_cli", "phonenumbers", "tomli"}
+    assert not any(name.startswith("shim_cli/cli/") for name in names)
     assert not any(name.endswith(".pyi") for name in names)
     assert not any(name.endswith((".so", ".pyd", ".dylib")) for name in names)
     for excluded in ("geodata", "carrierdata", "tzdata"):
         assert not any(f"phonenumbers/{excluded}/" in name for name in names)
-    assert "shim_guard/guard/suffixes.py" in names
+    assert "shim_cli/guard/suffixes.py" in names
     assert "tomli/_parser.py" in names
 
 
@@ -207,6 +207,21 @@ def _archive_members(path: Path) -> dict[str, bytes]:
         return {name: packaged.read(name) for name in names}
 
 
+def test_archive_version_reads_the_new_layout_and_the_old_one(tmp_path: Path) -> None:
+    from shim_cli.cli.resolution import archive_version
+
+    for package, expected in (("shim_cli", "9.9.9"), ("shim_guard", "0.2.0")):
+        bundle = tmp_path / f"{package}.pyz"
+        with zipfile.ZipFile(bundle, "w") as archive:
+            archive.writestr(f"{package}/__init__.py", f'__version__ = "{expected}"\n')
+        assert archive_version(bundle) == expected
+
+    empty = tmp_path / "empty.pyz"
+    with zipfile.ZipFile(empty, "w") as archive:
+        archive.writestr("__main__.py", "")
+    assert archive_version(empty) is None
+
+
 def test_committed_archive_matches_a_fresh_build(archive: Path) -> None:
     assert COMMITTED.is_file(), "build plugins/shim-guard/bin/shim.pyz"
     assert os.access(COMMITTED, os.X_OK)
@@ -231,7 +246,7 @@ def test_archive_build_is_reproducible(archive: Path, tmp_path: Path) -> None:
 def test_archive_contains_every_module_the_hook_path_imports(archive: Path) -> None:
     probe = (
         "import json, sys\n"
-        "from shim_guard import hook\n"
+        "from shim_cli import hook\n"
         "for client in ('claude', 'codex', 'copilot'):\n"
         "    payload = json.dumps({'hook_event_name': 'UserPromptSubmit',"
         " 'prompt': 'Contact alice@example.com'}).encode()\n"
@@ -241,7 +256,7 @@ def test_archive_contains_every_module_the_hook_path_imports(archive: Path) -> N
         " 'tool_input': {'file_path': 'x'},"
         " 'tool_response': {'text': 'Contact alice@example.com'}}).encode()\n"
         "    hook._output(payload, 'claude')\n"
-        "print(json.dumps(sorted(m for m in sys.modules if m.startswith('shim_guard'))))"
+        "print(json.dumps(sorted(m for m in sys.modules if m.startswith('shim_cli'))))"
     )
     result = subprocess.run(
         (sys.executable, "-I", "-B", "-c", probe),
@@ -255,7 +270,7 @@ def test_archive_contains_every_module_the_hook_path_imports(archive: Path) -> N
     packaged = {
         name[: -len(".py")].replace("/", ".")
         for name in zipfile.ZipFile(archive).namelist()
-        if name.startswith("shim_guard/") and name.endswith(".py")
+        if name.startswith("shim_cli/") and name.endswith(".py")
     }
     packaged |= {
         name.rsplit(".", 1)[0] for name in list(packaged) if name.endswith(".__init__")

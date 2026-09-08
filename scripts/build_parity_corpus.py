@@ -458,7 +458,7 @@ def cases() -> list[tuple[str, str]]:
 
 
 def build() -> dict[str, object]:
-    from shim_guard.guard import evaluate
+    from shim_cli.guard import evaluate
 
     records = []
     for identifier, text in cases():

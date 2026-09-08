@@ -2,14 +2,14 @@ from pathlib import Path
 
 import pytest
 
-from shim_guard.config import (
+from shim_cli.config import (
     config_path,
     load_entities,
     load_policy,
     parse_settings,
     render_entities,
 )
-from shim_guard.guard import DEFAULT_ENTITIES
+from shim_cli.guard import DEFAULT_ENTITIES
 
 
 def test_entity_settings_default_preset_and_round_trip_a_selection(
@@ -66,7 +66,24 @@ def test_unsafe_or_relative_settings_paths_are_rejected(
     with pytest.raises(ValueError, match="path"):
         config_path()
 
-    monkeypatch.setenv("SHIM_GUARD_CONFIG", "~shim_guard_missing_user/config.toml")
+    monkeypatch.setenv("SHIM_GUARD_CONFIG", "~shim_cli_missing_user/config.toml")
+    with pytest.raises(ValueError, match="path"):
+        config_path()
+
+
+def test_the_new_configuration_variable_outranks_the_old_one(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    new = tmp_path / "new.toml"
+    old = tmp_path / "old.toml"
+
+    monkeypatch.setenv("SHIM_GUARD_CONFIG", str(old))
+    assert config_path() == old
+
+    monkeypatch.setenv("SHIM_CONFIG", str(new))
+    assert config_path() == new
+
+    monkeypatch.setenv("SHIM_CONFIG", "relative/config.toml")
     with pytest.raises(ValueError, match="path"):
         config_path()
 
@@ -151,7 +168,7 @@ def test_a_file_without_an_entity_list_still_parses(document: str) -> None:
 def test_a_missing_config_file_means_the_shipped_defaults_not_empty_ones(
     tmp_path: Path,
 ) -> None:
-    from shim_guard.events.diet import DEFAULT_TRANSFORMS
+    from shim_cli.events.diet import DEFAULT_TRANSFORMS
 
     policy = load_policy(tmp_path / "absent" / "config.toml")
 

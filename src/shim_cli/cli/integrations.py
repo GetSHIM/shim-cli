@@ -5,11 +5,11 @@ from typing import Literal, NoReturn
 
 import typer
 
-from shim_guard.cli.output import emit, emit_json
-from shim_guard.clients.claude import settings as claude_settings
-from shim_guard.clients.codex import settings as codex_settings
-from shim_guard.clients.copilot import settings as copilot_settings
-from shim_guard.settings_files import (
+from shim_cli.cli.output import emit, emit_json
+from shim_cli.clients.claude import settings as claude_settings
+from shim_cli.clients.codex import settings as codex_settings
+from shim_cli.clients.copilot import settings as copilot_settings
+from shim_cli.settings_files import (
     Action,
     InstallationError,
     Plan,
@@ -147,12 +147,12 @@ def install(*, client: str, dry_run: bool, yes: bool) -> None:
         )
         raise typer.Exit(2)
     if action is Action.NOOP:
-        emit("PASS", f"SHIM Guard is already installed for {name}.")
+        emit("PASS", f"shim is already installed for {name}.")
         return
     if action is Action.UPDATE:
         emit(
             "WARN",
-            f"Existing {name} hooks will be preserved; SHIM Guard will be appended last.",
+            f"Existing {name} hooks will be preserved; shim will be appended last.",
         )
     _inline_hooks_notice(client)
     if dry_run:
@@ -161,9 +161,9 @@ def install(*, client: str, dry_run: bool, yes: bool) -> None:
         print(json.dumps(_hook_fragment(client), ensure_ascii=False, indent=2))
         return
     prompt = (
-        f"Create SHIM Guard's {name} hook?"
+        f"Create shim's {name} hook?"
         if action is Action.CREATE
-        else f"Append SHIM Guard after existing {name} hooks?"
+        else f"Append shim after existing {name} hooks?"
     )
     if not yes and not typer.confirm(prompt, default=False):
         emit("WARN", "Installation cancelled.")
@@ -176,7 +176,7 @@ def install(*, client: str, dry_run: bool, yes: bool) -> None:
             emit("FAIL", f"{name} hook configuration was not changed.", error=True)
             raise typer.Exit(2) from None
         if plan.action is Action.NOOP:
-            emit("PASS", f"SHIM Guard is already installed for {name}.")
+            emit("PASS", f"shim is already installed for {name}.")
             return
         if plan.action is not Action.CREATE:
             emit(
@@ -184,11 +184,11 @@ def install(*, client: str, dry_run: bool, yes: bool) -> None:
             )
             raise typer.Exit(2)
     try:
-        from shim_guard.guard import evaluate
+        from shim_cli.guard import evaluate
 
         evaluate("Synthetic safe prompt")
     except Exception:
-        emit("FAIL", "SHIM Guard detector could not start.", error=True)
+        emit("FAIL", "shim detector could not start.", error=True)
         raise typer.Exit(2) from None
     try:
         apply(plan)
@@ -197,9 +197,9 @@ def install(*, client: str, dry_run: bool, yes: bool) -> None:
         raise typer.Exit(2) from None
     emit(
         "PASS",
-        f"Appended SHIM Guard after existing {name} hooks."
+        f"Appended shim after existing {name} hooks."
         if action is Action.UPDATE
-        else f"Installed SHIM Guard for {name}.",
+        else f"Installed shim for {name}.",
     )
 
 
@@ -221,7 +221,7 @@ def status(*, client: str, as_json: bool) -> None:
     else:
         emit(
             "FAIL",
-            f"{name} hook configuration is unsafe or differs from SHIM Guard.",
+            f"{name} hook configuration is unsafe or differs from shim.",
             error=True,
         )
     if label == "WARN":
@@ -245,15 +245,13 @@ def revert(*, client: str, yes: bool) -> None:
         )
         raise typer.Exit(2)
     if plan.action is Action.NOOP:
-        emit("PASS", f"SHIM Guard is not installed for {name}.")
+        emit("PASS", f"shim is not installed for {name}.")
         return
     emit(
         "WARN",
-        "Only SHIM Guard's exact hook group will be removed; other hooks will be preserved.",
+        "Only shim's exact hook group will be removed; other hooks will be preserved.",
     )
-    if not yes and not typer.confirm(
-        f"Remove SHIM Guard's {name} hook?", default=False
-    ):
+    if not yes and not typer.confirm(f"Remove shim's {name} hook?", default=False):
         emit("WARN", "Revert cancelled.")
         raise typer.Exit(1)
     try:
@@ -261,4 +259,4 @@ def revert(*, client: str, yes: bool) -> None:
     except (InstallationError, OSError):
         emit("FAIL", f"{name} hook configuration was not changed.", error=True)
         raise typer.Exit(2) from None
-    emit("PASS", f"Removed SHIM Guard and preserved the {name} settings file.")
+    emit("PASS", f"Removed shim and preserved the {name} settings file.")

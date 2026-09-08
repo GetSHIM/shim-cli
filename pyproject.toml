@@ -33,8 +33,9 @@ Issues = "https://github.com/GetSHIM/shim-cli/issues"
 Documentation = "https://github.com/GetSHIM/shim-cli#readme"
 
 [project.scripts]
-shim = "shim_guard.cli.app:main"
-shim-guard-hook = "shim_guard.hook:main"
+shim = "shim_cli.cli.app:main"
+shim-hook = "shim_cli.hook:main"
+shim-guard-hook = "shim_cli.hook:main"
 
 [dependency-groups]
 dev = [
@@ -54,7 +55,7 @@ build-backend = "uv_build"
 required-version = ">=0.12.5,<0.13"
 
 [tool.uv.build-backend]
-module-name = "shim_guard"
+module-name = ["shim_cli", "shim_guard"]
 module-root = "src"
 
 [tool.pytest.ini_options]

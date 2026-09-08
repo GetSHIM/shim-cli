@@ -46,6 +46,7 @@ jobs:
           uv venv --python 3.13 /tmp/shim-guard-wheel
           uv pip install --python /tmp/shim-guard-wheel --require-hashes -r dist/requirements.lock -r /tmp/shim-dev.lock
           uv pip install --python /tmp/shim-guard-wheel --no-deps "dist/tested/shim-${GITHUB_REF_NAME#v}-py3-none-any.whl"
+          test -x /tmp/shim-guard-wheel/bin/shim-hook
           test -x /tmp/shim-guard-wheel/bin/shim-guard-hook
           test -z "$(printf '%s' '{"hook_event_name":"UserPromptSubmit","prompt":"Synthetic safe prompt"}' | /tmp/shim-guard-wheel/bin/shim-guard-hook codex 2>&1)"
           /tmp/shim-guard-wheel/bin/shim demo codex --json
@@ -57,6 +58,7 @@ jobs:
           uv venv --python 3.13 /tmp/shim-guard-sdist
           uv pip install --python /tmp/shim-guard-sdist --require-hashes -r dist/requirements.lock -r /tmp/shim-dev.lock
           uv pip install --python /tmp/shim-guard-sdist --no-deps --no-build-isolation "dist/tested/shim-${GITHUB_REF_NAME#v}.tar.gz"
+          test -x /tmp/shim-guard-sdist/bin/shim-hook
           test -x /tmp/shim-guard-sdist/bin/shim-guard-hook
           test -z "$(printf '%s' '{"hook_event_name":"UserPromptSubmit","prompt":"Synthetic safe prompt"}' | /tmp/shim-guard-sdist/bin/shim-guard-hook codex 2>&1)"
           /tmp/shim-guard-sdist/bin/shim demo codex --json

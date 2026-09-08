@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from shim_guard.guard import ENTITY_TYPES, evaluate
+from shim_cli.guard import ENTITY_TYPES, evaluate
 
 CORPUS_DIR = Path(__file__).resolve().parents[1] / "corpus"
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "probe"

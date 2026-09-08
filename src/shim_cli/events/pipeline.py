@@ -4,7 +4,7 @@ import json
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from shim_guard.policy import (
+from shim_cli.policy import (
     ALLOW,
     DENY,
     INBOUND,
@@ -14,7 +14,7 @@ from shim_guard.policy import (
     decide,
     direction_for,
 )
-from shim_guard.session.record import (
+from shim_cli.session.record import (
     UNKNOWN_TOOL_LABEL,
     Record,
     display_label,

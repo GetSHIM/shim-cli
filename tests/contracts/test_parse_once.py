@@ -3,8 +3,8 @@ from contextlib import nullcontext
 
 import pytest
 
-from shim_guard import hook
-from shim_guard.clients import user_prompt_hook
+from shim_cli import hook
+from shim_cli.clients import user_prompt_hook
 
 
 @pytest.mark.parametrize(

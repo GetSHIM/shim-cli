@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from shim_guard.clients.codex.hook import (
+from shim_cli.clients.codex.hook import (
     MAX_OUTPUT_BYTES,
     MAX_REASON_CHARS,
     block_output,
@@ -55,13 +55,13 @@ def test_safe_decision_emits_nothing() -> None:
 def test_block_is_exact_compact_native_json() -> None:
     output = block_output(
         Decision(True, (("EMAIL", 1), ("SECRET", 2))),
-        "/tmp/shim-guard-redacted-test.txt",
+        "/tmp/shim-redacted-test.txt",
     )
     assert output == (
-        b'{"decision":"block","reason":"SHIM Guard blocked this prompt: '
+        b'{"decision":"block","reason":"shim blocked this prompt: '
         b"EMAIL (1), SECRET (2).\\nCopy and paste this as your next prompt:\\n"
         b"Read this file and use its contents as my prompt: "
-        b'/tmp/shim-guard-redacted-test.txt"}'
+        b'/tmp/shim-redacted-test.txt"}'
     )
 
 
@@ -84,6 +84,6 @@ def test_block_output_remains_bounded() -> None:
 
 def test_error_block_is_generic_and_compact() -> None:
     assert error_output() == (
-        b'{"decision":"block","reason":"SHIM Guard could not inspect this '
+        b'{"decision":"block","reason":"shim could not inspect this '
         b'prompt, so it was withheld. Run `shim doctor codex` for the reason."}'
     )

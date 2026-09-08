@@ -49,7 +49,7 @@ jobs:
           uv export --locked --only-dev --no-emit-project --output-file /tmp/shim-dev.lock
       - name: Check wheel contents
         run: |
-          python -c 'from pathlib import Path; from zipfile import ZipFile; wheel = next(Path("dist").glob("*.whl")); names = ZipFile(wheel).namelist(); assert "shim_guard/__init__.py" in names; assert "shim_guard/guard/suffixes.py" in names; assert any(name.endswith(".dist-info/METADATA") for name in names)'
+          python -c 'from pathlib import Path; from zipfile import ZipFile; wheel = next(Path("dist").glob("*.whl")); names = ZipFile(wheel).namelist(); assert "shim_cli/__init__.py" in names; assert "shim_cli/guard/suffixes.py" in names; assert "shim_guard/hook.py" in names; assert any(name.endswith(".dist-info/METADATA") for name in names)'
       - name: Verify no NLP dependency is declared
         run: |
           python - <<'PY'
@@ -69,6 +69,7 @@ jobs:
           uv pip install --python /tmp/shim-guard-wheel --require-hashes -r /tmp/shim-runtime.lock -r /tmp/shim-dev.lock
           uv pip install --python /tmp/shim-guard-wheel --no-deps dist/*.whl
           /tmp/shim-guard-wheel/bin/shim --help
+          test -x /tmp/shim-guard-wheel/bin/shim-hook
           test -x /tmp/shim-guard-wheel/bin/shim-guard-hook
           test -z "$(printf '%s' '{"hook_event_name":"UserPromptSubmit","prompt":"Synthetic safe prompt"}' | /tmp/shim-guard-wheel/bin/shim-guard-hook codex 2>&1)"
           /tmp/shim-guard-wheel/bin/shim demo codex --json
@@ -83,6 +84,7 @@ jobs:
           uv venv --python ${{ matrix.python-version }} /tmp/shim-guard-sdist
           uv pip install --python /tmp/shim-guard-sdist --require-hashes -r /tmp/shim-runtime.lock -r /tmp/shim-dev.lock
           uv pip install --python /tmp/shim-guard-sdist --no-deps --no-build-isolation dist/*.tar.gz
+          test -x /tmp/shim-guard-sdist/bin/shim-hook
           test -x /tmp/shim-guard-sdist/bin/shim-guard-hook
           test -z "$(printf '%s' '{"hook_event_name":"UserPromptSubmit","prompt":"Synthetic safe prompt"}' | /tmp/shim-guard-sdist/bin/shim-guard-hook codex 2>&1)"
           /tmp/shim-guard-sdist/bin/shim demo codex --json

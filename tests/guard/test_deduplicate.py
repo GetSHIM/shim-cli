@@ -1,6 +1,6 @@
 import random
 
-from shim_guard.guard.recognizers import Match, deduplicate
+from shim_cli.guard.recognizers import Match, deduplicate
 
 
 def test_index_preserves_reference_order_and_containment():

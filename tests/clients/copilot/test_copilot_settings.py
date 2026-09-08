@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from shim_guard.clients.copilot.settings import (
+from shim_cli.clients.copilot.settings import (
     HOOK_TIMEOUT_SECONDS,
     MINIMUM_COPILOT_VERSION,
     TESTED_COPILOT_VERSION,
@@ -43,7 +43,7 @@ def test_copilot_1080_hook_file_is_exact(tmp_path: Path) -> None:
         "-I",
         "-B",
         "-m",
-        "shim_guard.hook",
+        "shim_cli.hook",
         "copilot",
     ]
     assert HOOK_TIMEOUT_SECONDS == 30
