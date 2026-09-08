@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 USER_PROMPT = "user-prompt"
 OUTBOUND = "outbound"
@@ -68,6 +68,7 @@ class Policy:
     ledger: bool = False
     diet: tuple = ()
     custom: tuple = ()
+    reveal: dict = field(default_factory=dict)
 
     def mode_for(self, direction: str, tool: str = "", event: str = "") -> str:
         for key in (tool, event, direction):

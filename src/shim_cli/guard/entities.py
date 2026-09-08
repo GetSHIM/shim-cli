@@ -23,6 +23,11 @@ CUSTOM = "CUSTOM"
 ENTITY_TYPES = (*BUILT_IN_TYPES, CUSTOM)
 DEFAULT_ENTITIES = ENTITY_TYPES
 
+# The three types where a trailing digit group answers "which one" without
+# giving the value back, as card issuers and banks already print them.
+REVEALABLE = ("IBAN", "CREDIT_CARD", "PHONE")
+MAX_REVEAL_DIGITS = 4
+
 MAX_CUSTOM_PATTERNS = 32
 MAX_PATTERN_CHARS = 256
 MIN_LITERAL_CHARS = 3
@@ -55,6 +60,21 @@ def normalize_entities(entities: Iterable[object]) -> tuple[str, ...]:
     if unknown:
         raise ValueError("unsupported entity name")
     return tuple(entity for entity in ENTITY_TYPES if entity in selected)
+
+
+def normalize_reveal(section: object) -> dict:
+    if not isinstance(section, dict):
+        raise ValueError("a reveal table is invalid")
+    reveal: dict = {}
+    for key, value in section.items():
+        if key not in REVEALABLE:
+            raise ValueError("that entity cannot reveal a tail")
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError("a reveal length is invalid")
+        if not 1 <= value <= MAX_REVEAL_DIGITS:
+            raise ValueError("a reveal length is invalid")
+        reveal[key] = value
+    return dict(sorted(reveal.items()))
 
 
 def _literal_source(text: str, whole_word: bool) -> str:

@@ -391,7 +391,7 @@ def _tool_output(
     policy = load_policy()
 
     def scan(text: str, entities: tuple = ENTITY_TYPES):
-        return evaluate(text, entities, policy.custom)
+        return evaluate(text, entities, policy.custom, policy.reveal)
 
     def mode_for(direction: str, tool: str) -> str:
         return policy.mode_for(direction, tool, event)
@@ -469,7 +469,9 @@ def _output(raw: bytes, client: str = "codex") -> bytes:
                 from shim_cli.session import remember
 
                 policy = load_policy()
-                decision = evaluate(prompt, policy.entities, policy.custom)
+                decision = evaluate(
+                    prompt, policy.entities, policy.custom, policy.reveal
+                )
                 mode = policy.mode_for("user-prompt", event=event or _PROMPT_EVENT)
 
                 def keep(action: str) -> None:

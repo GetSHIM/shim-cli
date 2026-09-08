@@ -973,3 +973,30 @@ def test_doctor_reports_a_pattern_that_is_already_in_the_file(
 
     checks = {item["name"]: item for item in json.loads(result.output)["checks"]}
     assert checks["custom_patterns"]["status"] == "FAIL"
+
+
+def test_reveal_is_written_honoured_and_removed(monkeypatch, tmp_path) -> None:
+    target = _guard_config(monkeypatch, tmp_path)
+    iban = "TR330006100519786457841326"
+
+    runner.invoke(app, ["config", "--reveal", "IBAN=4", "--yes"])
+    revealed = runner.invoke(app, ["redact"], input=f"pay {iban}")
+    runner.invoke(app, ["config", "--no-reveal", "IBAN", "--yes"])
+    plain = runner.invoke(app, ["redact"], input=f"pay {iban}")
+
+    assert "<IBAN_1:1326>" in revealed.output
+    assert "<IBAN_1>" in plain.output and ":1326" not in plain.output
+    assert "reveal" not in target.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("value", ("SECRET=4", "IBAN=9", "IBAN=x", "EMAIL=2"))
+def test_a_reveal_that_is_not_allowed_is_refused(
+    monkeypatch, tmp_path, value: str
+) -> None:
+    target = _guard_config(monkeypatch, tmp_path)
+    before = target.read_bytes() if target.exists() else None
+
+    result = runner.invoke(app, ["config", "--reveal", value, "--yes"], color=False)
+
+    assert result.exit_code == 2
+    assert (target.read_bytes() if target.exists() else None) == before

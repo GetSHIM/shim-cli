@@ -248,7 +248,7 @@ def parse_input(raw):
     noisy("parse")
     return "safe"
 
-def evaluate(prompt, enabled_entities, custom=()):
+def evaluate(prompt, enabled_entities, custom=(), reveal=None):
     noisy("evaluate")
     return types.SimpleNamespace(blocked=False)
 
@@ -307,7 +307,7 @@ adapter.parse_input = lambda raw: "safe"
 adapter.warn_output = lambda decision: b""
 adapter.error_output = lambda: runner._ERROR_OUTPUT
 
-def evaluate(prompt, enabled_entities, custom=()):
+def evaluate(prompt, enabled_entities, custom=(), reveal=None):
     if os.environ["SHIM_TEST_STAGE"] == "detector":
         raise RuntimeError(os.environ["SHIM_TEST_SECRET"])
     return types.SimpleNamespace(blocked=True, redacted_text="redacted")

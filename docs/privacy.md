@@ -143,6 +143,20 @@ These records are never transmitted. The hook and detector add no network
 destination, account, API key, or telemetry. The opt-in `shim watch` proxy
 forwards only to the provider the client already uses.
 
+### The last few digits, if you ask for them
+
+`[reveal]` is off by default. Turned on for `IBAN`, `CREDIT_CARD` or `PHONE`,
+the placeholder becomes `<IBAN_1:1326>` and **those digits reach the model**,
+because that is the point: they say which of three accounts a line refers to.
+Nothing else changes — the same spans are found, the same counts are recorded,
+and the value itself is still replaced.
+
+Four digits of a mobile number identify a person within a small team, so
+`PHONE` is the least conservative of the three; it is allowed, off by default,
+and worth a deliberate decision. Session records never quote a placeholder
+today, so a revealed tail does not reach the record or the ledger; if that ever
+changes, this sentence is the boundary it would cross.
+
 ### Patterns you named yourself
 
 A `[[custom]]` entry is configuration, not prompt-derived data, so its **name**

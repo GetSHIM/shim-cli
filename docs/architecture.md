@@ -126,8 +126,15 @@ overlap. A pattern is checked for catastrophic backtracking when `shim config`
 writes it and again by `shim doctor`, never on the hook path: `re` has no
 per-match timeout and the hook is what a user is waiting on.
 
+Substitution is the one place a policy setting changes the output text.
+`[reveal]` keeps the last one to four digits of an `IBAN`, `CREDIT_CARD` or
+`PHONE` span, separators skipped, as `<TYPE_n:tail>`; `guard/evaluate.py`
+holds the single definition of what a placeholder looks like in either form.
+Detection, counting and spans are untouched, so with no table the output is
+byte-identical to a build without the feature.
+
 The detector contracts are `guard-v2.json`, `guard-tools-v1.json`,
-`custom-v1.json`, and `parity-v1.json`. The last is generated migration evidence and is never
+`custom-v1.json`, `reveal-v1.json`, and `parity-v1.json`. The last is generated migration evidence and is never
 regenerated to make a test pass; intentional differences are recorded in
 `DELIBERATE_DIVERGENCES`. Detailed evidence belongs in
 [Compatibility](compatibility.md), not in this module map.

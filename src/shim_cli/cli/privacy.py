@@ -28,7 +28,7 @@ def evaluate(text: str):
     from shim_cli.guard import evaluate as evaluate_guard
 
     policy = load_policy()
-    return evaluate_guard(text, policy.entities, policy.custom)
+    return evaluate_guard(text, policy.entities, policy.custom, policy.reveal)
 
 
 def _read_and_evaluate(command: str, as_json: bool):

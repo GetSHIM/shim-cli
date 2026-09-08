@@ -328,3 +328,34 @@ def test_a_backtracking_pattern_is_named_before_it_can_run() -> None:
         "pattern BROKEN is not a valid regular expression"
     )
     assert unsafe_pattern("FINE", r"\bATLAS-[0-9]{4}\b") == ""
+
+
+def test_a_tail_shorter_than_asked_for_is_what_there_is() -> None:
+    from shim_cli.guard.evaluate import _tail
+
+    assert _tail("TR33 0006 1005 1978 6457 8413 26", 4) == "1326"
+    assert _tail("ab1", 4) == "1"
+    assert _tail("no digits here", 4) == ""
+
+
+def test_a_span_with_no_digits_keeps_the_whole_placeholder() -> None:
+    from shim_cli.guard import evaluate
+    from shim_cli.guard.entities import compile_custom
+
+    patterns = compile_custom([{"name": "CODENAME", "literal": "atlas"}])
+
+    decision = evaluate("atlas ships", custom=patterns, reveal={"CUSTOM": 4})
+
+    assert decision.redacted_text == "<CUSTOM_1> ships"
+
+
+def test_the_one_placeholder_pattern_matches_both_forms_and_nothing_else() -> None:
+    from shim_cli.guard import PLACEHOLDER
+
+    assert PLACEHOLDER.fullmatch("<IBAN_1>")
+    assert PLACEHOLDER.fullmatch("<IBAN_12:1326>")
+    assert PLACEHOLDER.fullmatch("<CREDIT_CARD_1:4>")
+    assert not PLACEHOLDER.fullmatch("<IBAN_1:12345>")
+    assert not PLACEHOLDER.fullmatch("<iban_1>")
+    assert not PLACEHOLDER.fullmatch("<IBAN>")
+    assert not PLACEHOLDER.fullmatch("<IBAN_1:abcd>")

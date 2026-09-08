@@ -99,6 +99,7 @@ def test_a_version_one_file_is_a_valid_version_two_file() -> None:
         "ledger": False,
         "diet": ("json",),
         "custom": [],
+        "reveal": {},
     }
 
 
@@ -266,3 +267,41 @@ def test_exactly_the_cap_is_accepted() -> None:
     )
 
     assert len(parse_settings(body)["custom"]) == MAX_CUSTOM_PATTERNS
+
+
+@pytest.mark.parametrize(
+    "body",
+    (
+        "[reveal]\nIBAN = 1\n",
+        "[reveal]\nPHONE = 4\n",
+        "[reveal]\nIBAN = 4\nCREDIT_CARD = 2\n",
+    ),
+)
+def test_an_allowed_reveal_is_accepted(body: str) -> None:
+    assert parse_settings(body)["reveal"]
+
+
+@pytest.mark.parametrize(
+    "body",
+    (
+        "[reveal]\nSECRET = 4\n",
+        "[reveal]\nEMAIL = 4\n",
+        "[reveal]\nCUSTOM = 4\n",
+        "[reveal]\nIBAN = 0\n",
+        "[reveal]\nIBAN = 5\n",
+        "[reveal]\nIBAN = true\n",
+        '[reveal]\nIBAN = "4"\n',
+        "reveal = 4\n",
+    ),
+)
+def test_a_reveal_that_is_not_allowed_fails_closed(body: str) -> None:
+    with pytest.raises(ValueError, match="shim settings are invalid"):
+        parse_settings(body)
+
+
+def test_a_reveal_table_survives_a_settings_round_trip() -> None:
+    parsed = parse_settings("[reveal]\nIBAN = 4\nPHONE = 2\n")
+
+    rendered = render_settings(DEFAULT_ENTITIES, reveal=parsed["reveal"])
+
+    assert parse_settings(rendered.decode())["reveal"] == {"IBAN": 4, "PHONE": 2}

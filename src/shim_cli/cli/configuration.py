@@ -16,7 +16,12 @@ from shim_cli.config import (
 )
 from shim_cli.events.diet import DEFAULT_TRANSFORMS
 from shim_cli.guard import DEFAULT_ENTITIES, ENTITY_TYPES, normalize_entities
-from shim_cli.guard.entities import compile_custom, entry_source, unsafe_pattern
+from shim_cli.guard.entities import (
+    compile_custom,
+    entry_source,
+    normalize_reveal,
+    unsafe_pattern,
+)
 from shim_cli.settings_files import (
     InstallationError,
     apply,
@@ -56,12 +61,25 @@ def _with_custom(
     return entries
 
 
+def _with_reveal(existing: dict, added: tuple[str, ...], removed: tuple[str, ...]):
+    reveal = dict(existing)
+    for text in added:
+        name, value = _pair(text)
+        if not value.isdecimal():
+            raise ValueError("a reveal length must be a number")
+        reveal[name] = int(value)
+    for name in removed:
+        reveal.pop(name.strip(), None)
+    return normalize_reveal(reveal)
+
+
 def _show(
     enabled: tuple[str, ...],
     title: str,
     ledger: bool,
     diet: tuple[str, ...],
     custom: list | None = None,
+    reveal: dict | None = None,
 ) -> None:
     selected = set(enabled)
     output = console()
@@ -98,6 +116,9 @@ def _show(
     if custom:
         names = ", ".join(str(entry.get("name")) for entry in custom)
         output.print(Text(f"Custom: {names}", style="dim"))
+    if reveal:
+        shown = ", ".join(f"{name} {count}" for name, count in reveal.items())
+        output.print(Text(f"Reveal: last {shown} digits", style="dim"))
     if not enabled:
         emit("WARN", "All sensitive-data detection is disabled.")
 
@@ -140,6 +161,8 @@ def configure(
     custom: tuple[str, ...] = (),
     custom_literal: tuple[str, ...] = (),
     remove_custom: tuple[str, ...] = (),
+    reveal: tuple[str, ...] = (),
+    no_reveal: tuple[str, ...] = (),
     yes: bool,
     as_json: bool,
 ) -> None:
@@ -160,6 +183,8 @@ def configure(
         or custom
         or custom_literal
         or remove_custom
+        or reveal
+        or no_reveal
     )
     if reset and (only or enable or disable):
         _fail(as_json, "--reset cannot be combined with entity options.")
@@ -190,6 +215,7 @@ def configure(
             enabled, modes, tool_entities = DEFAULT_ENTITIES, {}, {}
             keep_ledger, keep_diet = False, DEFAULT_TRANSFORMS
             keep_custom: list = []
+            keep_reveal: dict = {}
         else:
             assert policy is not None or only
             modes = policy.modes if policy else {}
@@ -206,6 +232,9 @@ def configure(
                 custom_literal,
                 remove_custom,
             )
+            keep_reveal = _with_reveal(
+                policy.reveal if policy else {}, reveal, no_reveal
+            )
             if only:
                 enabled = normalize_entities(set(only))
             else:
@@ -215,7 +244,8 @@ def configure(
                 selected.difference_update(disable)
                 enabled = normalize_entities(selected)
     except ValueError as error:
-        _fail(as_json, str(error) if custom or custom_literal else _INVALID)
+        specific = bool(custom or custom_literal or reveal)
+        _fail(as_json, str(error) if specific else _INVALID)
     except OSError:
         _fail(as_json, _INVALID)
 
@@ -226,9 +256,17 @@ def configure(
                 ledger=keep_ledger,
                 diet=list(keep_diet),
                 custom=keep_custom,
+                reveal=keep_reveal,
             )
             return
-        _show(enabled, "Current detection", keep_ledger, keep_diet, keep_custom)
+        _show(
+            enabled,
+            "Current detection",
+            keep_ledger,
+            keep_diet,
+            keep_custom,
+            keep_reveal,
+        )
         emit("PASS", f"File: {target}")
         return
 
@@ -236,13 +274,26 @@ def configure(
         target,
         state,
         render_settings(
-            enabled, modes, tool_entities, keep_ledger, keep_diet, keep_custom
+            enabled,
+            modes,
+            tool_entities,
+            keep_ledger,
+            keep_diet,
+            keep_custom,
+            keep_reveal,
         ),
     )
     if as_json and not yes:
         _fail(True)
     if not as_json:
-        _show(enabled, "New detection", keep_ledger, keep_diet, keep_custom)
+        _show(
+            enabled,
+            "New detection",
+            keep_ledger,
+            keep_diet,
+            keep_custom,
+            keep_reveal,
+        )
         emit("WARN", f"File: {target}")
         if not yes and not typer.confirm("Save these settings?", default=False):
             emit("WARN", "Settings unchanged.")
@@ -260,6 +311,7 @@ def configure(
             ledger=keep_ledger,
             diet=list(keep_diet),
             custom=keep_custom,
+            reveal=keep_reveal,
         )
     else:
         emit(

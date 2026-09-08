@@ -273,3 +273,43 @@ def test_a_configured_pattern_masks_a_tool_result_and_names_itself(
 
 def test_the_same_result_is_untouched_without_the_pattern() -> None:
     assert _run(_codename_event()) == b""
+
+
+@pytest.fixture
+def _revealing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    target = tmp_path / "settings" / "config.toml"
+    target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    target.write_text("[reveal]\nIBAN = 4\n", encoding="utf-8")
+    target.chmod(0o600)
+    monkeypatch.setenv("SHIM_CONFIG", str(target))
+
+
+def _iban_event() -> dict:
+    return {
+        "hook_event_name": "PostToolUse",
+        "session_id": SESSION,
+        "tool_name": "Read",
+        "tool_input": {"file_path": "/work/accounts.txt"},
+        "tool_response": {
+            "type": "text",
+            "file": {
+                "content": (
+                    "one TR330006100519786457841326\ntwo GB29NWBK60161331926819\n"
+                )
+            },
+        },
+    }
+
+
+def test_a_revealed_tail_reaches_the_masked_tool_result(_revealing) -> None:
+    document = json.loads(_run(_iban_event()))
+
+    content = document["hookSpecificOutput"]["updatedToolOutput"]["file"]["content"]
+    assert content == "one <IBAN_1:1326>\ntwo <IBAN_2:6819>\n"
+
+
+def test_the_same_result_is_fully_masked_without_the_table() -> None:
+    document = json.loads(_run(_iban_event()))
+
+    content = document["hookSpecificOutput"]["updatedToolOutput"]["file"]["content"]
+    assert content == "one <IBAN_1>\ntwo <IBAN_2>\n"

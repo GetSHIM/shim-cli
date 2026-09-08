@@ -395,6 +395,29 @@ $ shim config --custom BAD='(a+)+$'
 FAIL pattern BAD backtracks on repeated input; simplify it
 ```
 
+### Keep the last few digits
+
+Every finding is replaced whole, so three masked accounts on three lines read
+the same and neither you nor the model can tell which is which. Opt in per
+entity and shim keeps the trailing digits banks and card issuers already print
+for exactly that purpose:
+
+```console
+shim config --reveal IBAN=4
+shim config --no-reveal IBAN
+```
+
+```diff
+- move <IBAN_1> to <IBAN_2>
++ move <IBAN_1:1326> to <IBAN_2:6819>
+```
+
+Only `IBAN`, `CREDIT_CARD` and `PHONE` may reveal a tail, one to four digits;
+anything else is refused. Separators are skipped, so a value printed as
+`TR33 0006 1005 1978 6457 8413 26` still reveals `1326`. It is off by default
+and changes nothing else: the same spans are found and the same counts are
+reported.
+
 ## Privacy limitations
 
 - The host client receives the raw prompt before its hook runs, and other hooks

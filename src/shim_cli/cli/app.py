@@ -173,6 +173,22 @@ def config_command(
             help="Remove a named pattern; repeatable.",
         ),
     ] = None,
+    reveal: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--reveal",
+            metavar="ENTITY=N",
+            help="Keep the last N digits of IBAN, CREDIT_CARD or PHONE; repeatable.",
+        ),
+    ] = None,
+    no_reveal: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--no-reveal",
+            metavar="ENTITY",
+            help="Stop revealing a tail for this entity; repeatable.",
+        ),
+    ] = None,
     reset: bool = typer.Option(False, "--reset", help="Restore all defaults."),
     yes: bool = typer.Option(False, "--yes", help="Apply without confirmation."),
     json_output: bool = typer.Option(False, "--json", help="Write a JSON result."),
@@ -190,6 +206,8 @@ def config_command(
         custom=tuple(custom or ()),
         custom_literal=tuple(custom_literal or ()),
         remove_custom=tuple(remove_custom or ()),
+        reveal=tuple(reveal or ()),
+        no_reveal=tuple(no_reveal or ()),
         yes=yes,
         as_json=json_output,
     )
