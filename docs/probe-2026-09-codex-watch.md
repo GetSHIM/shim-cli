@@ -30,10 +30,16 @@ the open question was whether that client's TLS handshake would be rejected.
 Requests carrying `ChatGPT-Account-ID` go to `chatgpt.com`; the rest would go to
 `api.openai.com` with `/backend-api/codex/` rewritten to `/v1/`.
 
-Recorded per exchange: method, path, header *names*, whether the account header
-was present, upstream host and status, whether `cf-ray` came back, content type,
-SSE event names in order, and the key names of any `usage` object. No token, no
-account id, no request or response body.
+Recorded per exchange: method, path, request header *names*, whether the account
+header was present, upstream host and status, whether `cf-ray` came back, content
+type, SSE event names in order, and the key names of any `usage` object. No
+token, no account id, no request or response body.
+
+The committed capture keeps `cf-ray` as a boolean rather than the response
+header list it came from: `tests/contracts/test_no_local_leakage.py` refuses a
+provider organisation identifier anywhere in the tree, and the response headers
+carry one of the names it watches for. The verdict needs the boolean, so the
+list is not worth loosening the guard for.
 
 ## T1 — Routing
 
