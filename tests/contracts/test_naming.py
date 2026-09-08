@@ -5,6 +5,11 @@ from pathlib import Path
 
 import pytest
 
+try:
+    import tomllib
+except ModuleNotFoundError:  # the 3.10 floor CI also runs
+    import tomli as tomllib
+
 ROOT = Path(__file__).resolve().parents[2]
 SCANNED = ("src/shim_cli", "scripts")
 OLD_NAMES = ("SHIM Guard", "shim Guard", "shim_guard")
@@ -111,8 +116,6 @@ def test_the_allowlisted_prose_only_mentions_the_old_name_as_a_migration() -> No
 
 
 def test_the_release_notes_exist_for_the_declared_version() -> None:
-    import tomllib
-
     version = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["version"]
     notes = ROOT / "docs" / "releases" / f"{version}.md"
 
