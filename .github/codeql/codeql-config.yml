@@ -1,0 +1,7 @@
+name: shim-cli
+
+# The analysed Python is src/ and scripts/. Everything under tests/ is fixtures
+# and corpora: every credential in them is synthetic by rule (AGENTS.md), so a
+# hard-coded-credential alert there would be noise the scanner cannot tell apart.
+paths-ignore:
+  - tests
