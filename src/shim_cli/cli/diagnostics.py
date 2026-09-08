@@ -124,6 +124,66 @@ def _codex_hooks_feature() -> Check:
     return Check("hooks_feature", "PASS", "Codex hook support is enabled.")
 
 
+def _legacy_state(client: str) -> Check:
+    """R7: name every 0.2.0 shape that is still on disk. Changes nothing."""
+    from shim_cli.clients.copilot import settings as copilot_settings
+    from shim_cli.config import legacy_config_path
+    from shim_cli.session import ledger
+    from shim_cli.settings_files import StateKind, inspect_file
+
+    found: list[str] = []
+    if client == "copilot":
+        legacy = copilot_settings.legacy_target_path()
+        state = inspect_file(legacy, copilot_settings.MAX_CONFIG_BYTES)
+        if state.kind is StateKind.FILE and state.content is not None:
+            if copilot_settings.is_ours(state.content):
+                found.append(f"hook file uses the old name at {legacy}")
+    if _has_legacy_fragment(client):
+        found.append("the installed hook fragment names the old module")
+    settings_file = legacy_config_path()
+    if settings_file is not None and settings_file.is_file():
+        found.append(f"settings are still at {settings_file}")
+    try:
+        directory = ledger.legacy_root_path()
+    except ledger.LedgerError:
+        directory = None
+    if directory is not None and any(
+        directory.glob(f"{ledger.FILE_PREFIX}*{ledger.FILE_SUFFIX}")
+    ):
+        found.append(f"ledger files are still in {directory}")
+    if not found:
+        return Check("legacy_names", "PASS", "No 0.2.0 names are left on disk.")
+    return Check(
+        "legacy_names",
+        "WARN",
+        "; ".join(found) + f"; run shim install {client}",
+    )
+
+
+def _has_legacy_fragment(client: str) -> bool:
+    """Claude and Codex carry the fragment in their own settings document."""
+    from shim_cli.clients.claude import settings as claude_settings
+    from shim_cli.clients.codex import settings as codex_settings
+    from shim_cli.clients.hook_settings import remove_groups
+    from shim_cli.settings_files import StateKind, inspect_file
+
+    if client == "claude":
+        module = claude_settings
+    elif client == "codex":
+        module = codex_settings
+    else:
+        return False
+    state = inspect_file(module.target_path(), module.MAX_CONFIG_BYTES)
+    if state.kind is not StateKind.FILE or state.content is None:
+        return False
+    try:
+        return (
+            remove_groups(state.content, module.legacy_hook_groups()) != state.content
+        )
+    except ValueError:
+        return False
+
+
 def _hook_state(client: str) -> Check:
     name = client_name(client)
     try:
@@ -403,6 +463,7 @@ def doctor(*, client: str, as_json: bool) -> None:
     checks.extend(
         (
             _hook_state(client),
+            _legacy_state(client),
             _entity_settings(),
             _session_record_check(),
             _runner_check(client),

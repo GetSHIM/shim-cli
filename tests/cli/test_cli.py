@@ -372,6 +372,7 @@ def test_claude_install_status_doctor_and_revert(monkeypatch, tmp_path: Path) ->
     assert {item["name"] for item in doctor_payload["checks"]} == {
         "claude",
         "hook_configuration",
+        "legacy_names",
         "entity_settings",
         "session_record",
         "runner",
@@ -390,7 +391,7 @@ def test_copilot_install_status_doctor_and_revert(monkeypatch, tmp_path: Path) -
 
     home = _copilot_home(monkeypatch, tmp_path)
     _copilot(monkeypatch, tmp_path)
-    target = home / ".copilot" / "hooks" / "shim-guard.json"
+    target = home / ".copilot" / "hooks" / "shim.json"
 
     missing = runner.invoke(app, ["status", "copilot", "--json"])
     preview = runner.invoke(app, ["install", "copilot", "--dry-run"])
@@ -424,6 +425,7 @@ def test_confirmation_and_doctor(monkeypatch, tmp_path: Path) -> None:
         "codex",
         "hooks_feature",
         "hook_configuration",
+        "legacy_names",
         "entity_settings",
         "session_record",
         "runner",
@@ -817,7 +819,7 @@ def test_config_shows_whether_records_are_being_kept() -> None:
     (
         ("claude", ".claude/settings.json"),
         ("codex", ".codex/hooks.json"),
-        ("copilot", ".copilot/hooks/shim-guard.json"),
+        ("copilot", ".copilot/hooks/shim.json"),
     ),
 )
 def test_install_creates_a_config_directory_that_does_not_exist_yet(

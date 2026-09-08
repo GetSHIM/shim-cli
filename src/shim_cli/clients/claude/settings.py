@@ -36,36 +36,57 @@ def target_path(home: Path | None = None) -> Path:
     return _claude_home(home) / "settings.json"
 
 
-def _handler(interpreter: str | Path) -> dict[str, object]:
+HOOK_MODULE = "shim_cli.hook"
+LEGACY_HOOK_MODULE = "shim_guard.hook"
+
+
+def _handler(interpreter: str | Path, module: str = HOOK_MODULE) -> dict[str, object]:
     executable = Path(interpreter)
     if not executable.is_absolute() or not str(executable).isprintable():
         raise ValueError("hook interpreter must be an absolute safe path")
     return {
-        "args": ["-I", "-B", "-m", "shim_cli.hook", "claude"],
+        "args": ["-I", "-B", "-m", module, "claude"],
         "command": str(executable),
         "timeout": HOOK_TIMEOUT_SECONDS,
         "type": "command",
     }
 
 
-def hook_group(interpreter: str | Path = sys.executable) -> dict[str, object]:
-    return {"hooks": [_handler(interpreter)]}
+def hook_group(
+    interpreter: str | Path = sys.executable, module: str = HOOK_MODULE
+) -> dict[str, object]:
+    return {"hooks": [_handler(interpreter, module)]}
 
 
-def tool_hook_group(interpreter: str | Path = sys.executable) -> dict[str, object]:
-    return {"matcher": TOOL_MATCHER, "hooks": [_handler(interpreter)]}
+def tool_hook_group(
+    interpreter: str | Path = sys.executable, module: str = HOOK_MODULE
+) -> dict[str, object]:
+    return {"matcher": TOOL_MATCHER, "hooks": [_handler(interpreter, module)]}
 
 
-def hook_groups(interpreter: str | Path = sys.executable) -> tuple[Registration, ...]:
-    groups: list[Registration] = [(PROMPT_EVENT, hook_group(interpreter))]
-    groups.extend((event, tool_hook_group(interpreter)) for event in INSTALLED_EVENTS)
-    groups.extend((event, hook_group(interpreter)) for event in SESSION_EVENTS)
+def hook_groups(
+    interpreter: str | Path = sys.executable, module: str = HOOK_MODULE
+) -> tuple[Registration, ...]:
+    groups: list[Registration] = [(PROMPT_EVENT, hook_group(interpreter, module))]
+    groups.extend(
+        (event, tool_hook_group(interpreter, module)) for event in INSTALLED_EVENTS
+    )
+    groups.extend((event, hook_group(interpreter, module)) for event in SESSION_EVENTS)
     return tuple(groups)
 
 
+def legacy_hook_groups(
+    interpreter: str | Path = sys.executable,
+) -> tuple[Registration, ...]:
+    return hook_groups(interpreter, LEGACY_HOOK_MODULE)
+
+
 def add_hook(content: bytes | None, interpreter: str | Path = sys.executable) -> bytes:
+    if content is not None:
+        content = remove_groups(content, legacy_hook_groups(interpreter))
     return add_groups(content, hook_groups(interpreter))
 
 
 def remove_hook(content: bytes, interpreter: str | Path = sys.executable) -> bytes:
+    content = remove_groups(content, legacy_hook_groups(interpreter))
     return remove_groups(content, hook_groups(interpreter))

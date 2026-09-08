@@ -96,6 +96,9 @@ def configure(
     yes: bool,
     as_json: bool,
 ) -> None:
+    from shim_cli.cli import migration
+
+    migration.announce(migration.settings(), as_json=as_json)
     try:
         target = config_path()
     except ValueError:

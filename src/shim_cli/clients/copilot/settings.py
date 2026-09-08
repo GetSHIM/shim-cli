@@ -25,25 +25,37 @@ def _copilot_home(home: Path | None = None) -> Path:
         raise ValueError("GitHub Copilot CLI home path is invalid") from error
 
 
+HOOK_MODULE = "shim_cli.hook"
+LEGACY_HOOK_MODULE = "shim_guard.hook"
+
+
 def target_path(home: Path | None = None) -> Path:
+    return _copilot_home(home) / "hooks" / "shim.json"
+
+
+def legacy_target_path(home: Path | None = None) -> Path:
     return _copilot_home(home) / "hooks" / "shim-guard.json"
 
 
-def hook_command(interpreter: str | Path = sys.executable) -> str:
+def hook_command(
+    interpreter: str | Path = sys.executable, module: str = HOOK_MODULE
+) -> str:
     executable = Path(interpreter)
     if not executable.is_absolute() or not str(executable).isprintable():
         raise ValueError("hook interpreter must be an absolute safe path")
-    return shlex.join((str(executable), "-I", "-B", "-m", "shim_cli.hook", "copilot"))
+    return shlex.join((str(executable), "-I", "-B", "-m", module, "copilot"))
 
 
-def hook_document(interpreter: str | Path = sys.executable) -> dict[str, object]:
+def hook_document(
+    interpreter: str | Path = sys.executable, module: str = HOOK_MODULE
+) -> dict[str, object]:
     return {
         "version": 1,
         "hooks": {
             "userPromptTransformed": [
                 {
                     "type": "command",
-                    "command": hook_command(interpreter),
+                    "command": hook_command(interpreter, module),
                     "timeoutSec": HOOK_TIMEOUT_SECONDS,
                 }
             ]
@@ -57,18 +69,33 @@ def _dump(document: dict[str, object]) -> bytes:
 
 def add_hook(content: bytes | None, interpreter: str | Path = sys.executable) -> bytes:
     expected = _dump(hook_document(interpreter))
+    legacy = _dump(hook_document(interpreter, LEGACY_HOOK_MODULE))
     empty = _dump({"version": 1, "hooks": {}})
-    if content is None or content == empty:
+    if content is None or content in (empty, legacy):
         return expected
     if content == expected:
         return content
     raise ValueError("SHIM's Copilot hook file contains unexpected content")
 
 
+def is_legacy(content: bytes, interpreter: str | Path = sys.executable) -> bool:
+    return content == _dump(hook_document(interpreter, LEGACY_HOOK_MODULE))
+
+
+def is_ours(content: bytes, interpreter: str | Path = sys.executable) -> bool:
+    """True for a file this tool wrote, under either module spelling."""
+    return content in (
+        _dump(hook_document(interpreter)),
+        _dump(hook_document(interpreter, LEGACY_HOOK_MODULE)),
+        _dump({"version": 1, "hooks": {}}),
+    )
+
+
 def remove_hook(content: bytes, interpreter: str | Path = sys.executable) -> bytes:
     expected = _dump(hook_document(interpreter))
+    legacy = _dump(hook_document(interpreter, LEGACY_HOOK_MODULE))
     empty = _dump({"version": 1, "hooks": {}})
-    if content == expected:
+    if content in (expected, legacy):
         return empty
     if content == empty:
         return content

@@ -19,21 +19,38 @@ except ModuleNotFoundError:
 MAX_CONFIG_BYTES = 16_384
 
 
+def _default_path(directory: str, home: Path | None) -> Path:
+    if home is not None:
+        return Path(home) / ".config" / directory / "config.toml"
+    if configured := os.environ.get("XDG_CONFIG_HOME"):
+        return Path(configured).expanduser() / directory / "config.toml"
+    return Path.home() / ".config" / directory / "config.toml"
+
+
 def config_path(home: Path | None = None) -> Path:
     try:
-        if home is not None:
-            target = Path(home) / ".config" / "shim-guard" / "config.toml"
-        elif configured := os.environ.get("SHIM_CONFIG") or os.environ.get(
-            "SHIM_GUARD_CONFIG"
+        if home is None and (
+            configured := os.environ.get("SHIM_CONFIG")
+            or os.environ.get("SHIM_GUARD_CONFIG")
         ):
             target = Path(configured).expanduser()
-        elif configured := os.environ.get("XDG_CONFIG_HOME"):
-            target = Path(configured).expanduser() / "shim-guard" / "config.toml"
         else:
-            target = Path.home() / ".config" / "shim-guard" / "config.toml"
+            target = _default_path("shim", home)
     except RuntimeError as error:
         raise ValueError("shim settings path is invalid") from error
     return _validated_path(target)
+
+
+def legacy_config_path(home: Path | None = None) -> Path | None:
+    """The 0.2.0 location, or None when a variable pins the path."""
+    if home is None and (
+        os.environ.get("SHIM_CONFIG") or os.environ.get("SHIM_GUARD_CONFIG")
+    ):
+        return None
+    try:
+        return _validated_path(_default_path("shim-guard", home))
+    except (RuntimeError, ValueError):
+        return None
 
 
 def _validated_path(path: Path) -> Path:
@@ -144,10 +161,14 @@ def parse_settings(text: str) -> dict:
 
 
 def load_policy(path: Path | None = None) -> policy.Policy:
-    target = config_path() if path is None else _validated_path(path)
-    from shim_cli.settings_files import inspect_file
+    from shim_cli.settings_files import StateKind, inspect_file
 
-    state = inspect_file(target, MAX_CONFIG_BYTES)
+    if path is not None:
+        return policy_from_state(inspect_file(_validated_path(path), MAX_CONFIG_BYTES))
+    state = inspect_file(config_path(), MAX_CONFIG_BYTES)
+    # The hook reads the 0.2.0 file until a CLI command moves it. It never writes.
+    if state.kind is StateKind.ABSENT and (legacy := legacy_config_path()) is not None:
+        state = inspect_file(legacy, MAX_CONFIG_BYTES)
     return policy_from_state(state)
 
 

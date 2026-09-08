@@ -10,23 +10,20 @@ from . import _files
 
 RETENTION_DAYS = 30
 MAX_LEDGER_BYTES = 5_000_000
-_PREFIX = "ledger-"
-_SUFFIX = ".jsonl"
+FILE_PREFIX = "ledger-"
+FILE_SUFFIX = ".jsonl"
 
 
 class LedgerError(RuntimeError):
     pass
 
 
-def root_path() -> Path:
-    configured = os.environ.get("SHIM_GUARD_STATE_DIR")
-    if configured:
-        root = Path(configured).expanduser()
-    elif xdg := os.environ.get("XDG_STATE_HOME"):
-        root = Path(xdg).expanduser() / "shim-guard"
+def _root_for(directory: str) -> Path:
+    if xdg := os.environ.get("XDG_STATE_HOME"):
+        root = Path(xdg).expanduser() / directory
     else:
         try:
-            root = Path.home() / ".local" / "state" / "shim-guard"
+            root = Path.home() / ".local" / "state" / directory
         except RuntimeError as error:
             raise LedgerError("ledger directory is invalid") from error
     if not root.is_absolute() or ".." in root.parts:
@@ -34,8 +31,28 @@ def root_path() -> Path:
     return root
 
 
+def root_path() -> Path:
+    configured = os.environ.get("SHIM_GUARD_STATE_DIR")
+    if not configured:
+        return _root_for("shim")
+    root = Path(configured).expanduser()
+    if not root.is_absolute() or ".." in root.parts:
+        raise LedgerError("ledger directory is invalid")
+    return root
+
+
+def legacy_root_path() -> Path | None:
+    """The 0.2.0 directory, or None when a variable pins the location."""
+    if os.environ.get("SHIM_GUARD_STATE_DIR"):
+        return None
+    try:
+        return _root_for("shim-guard")
+    except LedgerError:
+        return None
+
+
 def _month(when: datetime.datetime) -> str:
-    return f"{_PREFIX}{when.year:04d}-{when.month:02d}{_SUFFIX}"
+    return f"{FILE_PREFIX}{when.year:04d}-{when.month:02d}{FILE_SUFFIX}"
 
 
 def _open_root() -> int:
@@ -52,7 +69,7 @@ def files() -> list:
     try:
         return sorted(
             path
-            for path in root_path().glob(f"{_PREFIX}*{_SUFFIX}")
+            for path in root_path().glob(f"{FILE_PREFIX}*{FILE_SUFFIX}")
             if not path.is_symlink() and path.is_file()
         )
     except OSError as error:
@@ -62,7 +79,7 @@ def files() -> list:
 
 
 def _month_end(path: Path) -> datetime.datetime | None:
-    stem = path.name[len(_PREFIX) : -len(_SUFFIX)]
+    stem = path.name[len(FILE_PREFIX) : -len(FILE_SUFFIX)]
     try:
         year, month = (int(part) for part in stem.split("-", 1))
         start = datetime.datetime(year, month, 1, tzinfo=datetime.timezone.utc)

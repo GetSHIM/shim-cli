@@ -55,10 +55,8 @@ def test_copilot_target_respects_home_and_copilot_home(
 ) -> None:
     monkeypatch.setenv("COPILOT_HOME", str(tmp_path / "configured"))
 
-    assert target_path() == tmp_path / "configured" / "hooks" / "shim-guard.json"
-    assert target_path(tmp_path) == (
-        tmp_path / ".copilot" / "hooks" / "shim-guard.json"
-    )
+    assert target_path() == tmp_path / "configured" / "hooks" / "shim.json"
+    assert target_path(tmp_path) == (tmp_path / ".copilot" / "hooks" / "shim.json")
 
 
 def test_copilot_hook_file_install_and_revert_are_exact(tmp_path: Path) -> None:

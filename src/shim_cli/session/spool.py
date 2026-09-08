@@ -32,7 +32,7 @@ def root_path() -> Path:
         if not root.is_absolute() or ".." in root.parts:
             raise SpoolError("session directory is invalid")
         return root
-    return Path(tempfile.gettempdir()) / f"shim-guard-session-{_identity()}"
+    return Path(tempfile.gettempdir()) / f"shim-session-{_identity()}"
 
 
 @contextlib.contextmanager

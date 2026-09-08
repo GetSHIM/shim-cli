@@ -9,13 +9,18 @@ ROOT = Path(__file__).resolve().parents[2]
 SCANNED = ("src/shim_cli", "scripts")
 OLD_NAMES = ("SHIM Guard", "shim Guard", "shim_guard")
 
-# The only references that may name the old package: the alias console script,
-# the fallback read of a 0.2.0 archive, and the old configuration variable.
+# The only references that may name the old package: the fallback read of a
+# 0.2.0 archive, the old configuration variable, and the module spelling each
+# client matcher recognises so `install` replaces a 0.2.0 fragment in place.
+_LEGACY_MODULE = 'LEGACY_HOOK_MODULE = "shim_guard.hook"'
 ALLOWED = {
     "src/shim_cli/cli/resolution.py": ('bundle.read("shim_guard/__init__.py")',),
     "src/shim_cli/config.py": (
         'os.environ.get(\n            "SHIM_GUARD_CONFIG"\n        )',
     ),
+    "src/shim_cli/clients/claude/settings.py": (_LEGACY_MODULE,),
+    "src/shim_cli/clients/codex/settings.py": (_LEGACY_MODULE,),
+    "src/shim_cli/clients/copilot/settings.py": (_LEGACY_MODULE,),
 }
 
 

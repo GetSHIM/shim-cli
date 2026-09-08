@@ -4,6 +4,7 @@ import sys
 
 import typer
 
+from shim_cli.cli import migration
 from shim_cli.cli.output import emit, emit_json, terminal_text
 from shim_cli.session import spool, summary
 
@@ -23,6 +24,7 @@ def _retained() -> list:
 
 
 def report(*, as_json: bool) -> None:
+    migration.announce(migration.ledger_files(), as_json=as_json)
     try:
         stem = spool.newest()
         records = spool.entries_for_stem(stem) if stem else []
@@ -63,6 +65,8 @@ def report(*, as_json: bool) -> None:
 
 def purge(*, yes: bool, as_json: bool) -> None:
     from shim_cli.session import ledger
+
+    migration.announce(migration.ledger_files(), as_json=as_json)
 
     try:
         existing = ledger.files()

@@ -36,6 +36,10 @@ def _codex_home(home: Path | None = None) -> Path:
         raise ValueError("Codex home path is invalid") from error
 
 
+HOOK_MODULE = "shim_cli.hook"
+LEGACY_HOOK_MODULE = "shim_guard.hook"
+
+
 def target_path(home: Path | None = None) -> Path:
     return _codex_home(home) / "hooks.json"
 
@@ -59,18 +63,22 @@ def has_inline_hooks(path: Path | None = None) -> bool:
     return "hooks" in config
 
 
-def hook_command(interpreter: str | Path = sys.executable) -> str:
+def hook_command(
+    interpreter: str | Path = sys.executable, module: str = HOOK_MODULE
+) -> str:
     executable = Path(interpreter)
     if not executable.is_absolute() or not str(executable).isprintable():
         raise ValueError("hook interpreter must be an absolute safe path")
-    return shlex.join((str(executable), "-I", "-B", "-m", "shim_cli.hook"))
+    return shlex.join((str(executable), "-I", "-B", "-m", module))
 
 
-def hook_group(interpreter: str | Path = sys.executable) -> dict[str, object]:
+def hook_group(
+    interpreter: str | Path = sys.executable, module: str = HOOK_MODULE
+) -> dict[str, object]:
     return {
         "hooks": [
             {
-                "command": hook_command(interpreter),
+                "command": hook_command(interpreter, module),
                 "timeout": HOOK_TIMEOUT_SECONDS,
                 "type": "command",
             }
@@ -78,13 +86,24 @@ def hook_group(interpreter: str | Path = sys.executable) -> dict[str, object]:
     }
 
 
-def hook_groups(interpreter: str | Path = sys.executable) -> tuple[Registration, ...]:
-    return ((PROMPT_EVENT, hook_group(interpreter)),)
+def hook_groups(
+    interpreter: str | Path = sys.executable, module: str = HOOK_MODULE
+) -> tuple[Registration, ...]:
+    return ((PROMPT_EVENT, hook_group(interpreter, module)),)
+
+
+def legacy_hook_groups(
+    interpreter: str | Path = sys.executable,
+) -> tuple[Registration, ...]:
+    return hook_groups(interpreter, LEGACY_HOOK_MODULE)
 
 
 def add_hook(content: bytes | None, interpreter: str | Path = sys.executable) -> bytes:
+    if content is not None:
+        content = remove_groups(content, legacy_hook_groups(interpreter))
     return add_groups(content, hook_groups(interpreter))
 
 
 def remove_hook(content: bytes, interpreter: str | Path = sys.executable) -> bytes:
+    content = remove_groups(content, legacy_hook_groups(interpreter))
     return remove_groups(content, hook_groups(interpreter))

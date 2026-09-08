@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import contextlib
 import json
+from pathlib import Path
 from typing import Literal, NoReturn
 
 import typer
@@ -121,7 +123,31 @@ def _plan_error(client: str, command: str, as_json: bool = False) -> NoReturn:
     raise typer.Exit(2)
 
 
+def _legacy_copilot_file() -> Path | None:
+    """The 0.2.0 file when it is ours; a stranger's file of that name is not."""
+    legacy = copilot_settings.legacy_target_path()
+    state = inspect_file(legacy, copilot_settings.MAX_CONFIG_BYTES)
+    if state.kind is not StateKind.FILE or state.content is None:
+        return None
+    return legacy if copilot_settings.is_ours(state.content) else None
+
+
+def _remove_legacy_copilot_file() -> None:
+    legacy = _legacy_copilot_file()
+    if legacy is None:
+        return
+    with contextlib.suppress(OSError):
+        legacy.unlink()
+    emit("PASS", f"removed the old hook file at {legacy}")
+
+
 def install(*, client: str, dry_run: bool, yes: bool) -> None:
+    from shim_cli.cli import migration
+
+    if not dry_run:
+        migration.announce(
+            migration.settings() + migration.ledger_files(), as_json=False
+        )
     name = client_name(client)
     try:
         plan = client_plan(client, "install")
@@ -195,6 +221,8 @@ def install(*, client: str, dry_run: bool, yes: bool) -> None:
     except (InstallationError, OSError):
         emit("FAIL", f"{name} hook configuration was not changed.", error=True)
         raise typer.Exit(2) from None
+    if client == "copilot":
+        _remove_legacy_copilot_file()
     emit(
         "PASS",
         f"Appended shim after existing {name} hooks."
@@ -244,7 +272,8 @@ def revert(*, client: str, yes: bool) -> None:
             error=True,
         )
         raise typer.Exit(2)
-    if plan.action is Action.NOOP:
+    legacy = client == "copilot" and _legacy_copilot_file() is not None
+    if plan.action is Action.NOOP and not legacy:
         emit("PASS", f"shim is not installed for {name}.")
         return
     emit(
@@ -254,9 +283,12 @@ def revert(*, client: str, yes: bool) -> None:
     if not yes and not typer.confirm(f"Remove shim's {name} hook?", default=False):
         emit("WARN", "Revert cancelled.")
         raise typer.Exit(1)
-    try:
-        apply(plan)
-    except (InstallationError, OSError):
-        emit("FAIL", f"{name} hook configuration was not changed.", error=True)
-        raise typer.Exit(2) from None
+    if plan.action is not Action.NOOP:
+        try:
+            apply(plan)
+        except (InstallationError, OSError):
+            emit("FAIL", f"{name} hook configuration was not changed.", error=True)
+            raise typer.Exit(2) from None
+    if client == "copilot":
+        _remove_legacy_copilot_file()
     emit("PASS", f"Removed shim and preserved the {name} settings file.")
