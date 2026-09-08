@@ -27,6 +27,11 @@ were in it — and masks what it can before the model sees it. The hook and
 detector add no network destination, account, API key, or telemetry. The opt-in
 `shim watch` proxy forwards only to the provider the client already uses.
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/GetSHIM/shim-cli/main/docs/assets/shots/masked-tool-result.png" width="880"
+       alt="A terminal: the agent runs Read on a .env file holding an AWS key, an IBAN and an email; the model is handed AWS_ACCESS_KEY_ID=&lt;SECRET_1&gt;, BILLING_IBAN=&lt;IBAN_1&gt; and &lt;EMAIL_1&gt; instead.">
+</p>
+
 Two commands, two different questions:
 
 | Command | Answers |
@@ -50,28 +55,10 @@ shim watch -- claude
 shim watch -- claude -p "explain this repo"
 ```
 
-```text
-shim watch — 16s, 2 requests
-  input     257,661 tokens  (exact)
-    cache read   118,048   46%
-    cache write  139,609
-  output    281 tokens  (exact)
-  where the input went  (approximate — split by byte share)
-    tools     ~     226,781   88%
-    system    ~       6,938    3%
-    messages  ~      23,680    9%
-    other     ~         262    0%
-  request   3 IBAN, 2 EMAIL in messages
-  also      4 EMAIL, 2 PHONE in system prompt and tool definitions
-  response  3 IBAN in model text
-            model-generated content is counted here, not leaks
-  compare   EMAIL  6 in request, 0 in response
-            IBAN   3 in request, 3 in response
-            PHONE  2 in request, 0 in response
-  spend     ~$2.82  (approximate, 2026-08-30 prices)
-  largest   one request was 346,350 bytes, tools 91% of it
-  nothing was modified, and no request body was written to disk
-```
+<p align="center">
+  <img src="https://raw.githubusercontent.com/GetSHIM/shim-cli/main/docs/assets/shots/shim-watch.png" width="880"
+       alt="shim watch — 16s, 2 requests. Input 257,661 tokens, 46% cache read; output 281. Where the input went: tools ~226,781 (88%), system 3%, messages 9%. Request 3 IBAN and 2 EMAIL in messages; response 3 IBAN in model text. Spend ~$2.82. Nothing was modified, and no request body was written to disk.">
+</p>
 
 On the session above, **the tools array was 88% of the input tokens** — before
 a single line of the user's own code. That is one session on one repository,
@@ -239,6 +226,14 @@ arguments, where they may be recorded in shell history or process listings.
 > `user-prompt = "enforce"` in `[mode]` to block instead. Copilot's
 > `userPromptTransformed` event does support a model-facing replacement. Claude
 > tool results are masked at the verified installed events.
+
+Under `enforce`, the prompt is withheld and you are handed a redacted copy to
+resend:
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/GetSHIM/shim-cli/main/docs/assets/shots/blocked-prompt.png" width="880"
+       alt="shim's verbatim answer to the client: decision block, reason &quot;shim blocked this prompt: EMAIL (1)&quot;, and a path to a redacted copy of the prompt to send instead, with suppressOriginalPrompt true.">
+</p>
 
 ## See what it did
 
@@ -460,6 +455,11 @@ Every figure here was measured on the released build, not estimated.
 | Hook cost | **67 ms** median end to end, interpreter start included; **41 ms** for a session summary |
 | With 32 custom patterns | **+0.8 ms** median against the same prompt with none |
 | Detector corpus | **570 cases**, graded on exact redacted output rather than category presence |
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/GetSHIM/shim-cli/main/docs/assets/shots/shim-doctor.png" width="880"
+       alt="shim doctor claude: twelve checks, each PASS or WARN — the hook group is present, no 0.2.0 names are left, 12 of 12 entities are enabled, the runner protected a sensitive fixture, and coverage is 5 of 5 events.">
+</p>
 
 Hook output is asserted byte for byte, not by shape: a safe event must produce
 exactly zero bytes on stdout and stderr. 312 contract tests hold that, plus the

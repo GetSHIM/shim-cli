@@ -72,10 +72,14 @@ def test_there_is_something_to_check() -> None:
 def test_no_committed_file_names_the_machine_it_was_written_on(
     relative: str,
 ) -> None:
+    raw = (ROOT / relative).read_bytes()
     try:
-        content = (ROOT / relative).read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
-        pytest.skip("not readable as text")
+        content = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        # A screenshot is committed evidence like any other file, and carries
+        # metadata a text decode would never see. Match the markers as bytes
+        # rather than skipping the file.
+        content = raw.decode("latin-1")
 
     hits = sorted({marker for marker in MARKERS if marker in content})
 
@@ -84,6 +88,20 @@ def test_no_committed_file_names_the_machine_it_was_written_on(
         "examples come from real sessions; replace the value with a synthetic "
         "one rather than trimming it."
     )
+
+
+def test_the_guard_reads_a_marker_planted_in_a_binary_file(tmp_path: Path) -> None:
+    """A PNG carries text in its metadata chunks; a text decode would skip it."""
+    planted = tmp_path / "shot.png"
+    planted.write_bytes(
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\x0btEXtComment\x00"
+        + f"captured in {Path.home()}/repo".encode()
+        + b"\xff\xfe\x00"
+    )
+
+    content = planted.read_bytes().decode("latin-1")
+
+    assert [marker for marker in MARKERS if marker in content]
 
 
 def test_the_guard_catches_a_planted_marker() -> None:
