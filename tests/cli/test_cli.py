@@ -1016,3 +1016,49 @@ def test_the_doctor_fixture_ignores_the_user_s_own_settings(
     monkeypatch.delenv("SHIM_GUARD_CONFIG", raising=False)
 
     assert _runner_check("claude").status == "PASS"
+
+
+def test_a_venv_install_is_not_reported_as_no_hook(monkeypatch, tmp_path) -> None:
+    """`shim install` writes an absolute interpreter path, so PATH is irrelevant."""
+    from shim_cli.cli import diagnostics
+    from shim_cli.cli.resolution import Resolution
+
+    monkeypatch.setattr(
+        diagnostics,
+        "resolve",
+        lambda: Resolution(
+            "none",
+            "No hook is runnable; prompts are passing through uninspected.",
+            None,
+            None,
+        ),
+    )
+    monkeypatch.setattr(
+        diagnostics, "_installed_hook_runs_this_package", lambda _client: True
+    )
+
+    check = diagnostics._resolution_check("codex")
+
+    assert check.status == "PASS"
+    assert "nothing is needed on PATH" in check.detail
+
+
+def test_no_hook_anywhere_is_still_a_failure(monkeypatch, tmp_path) -> None:
+    from shim_cli.cli import diagnostics
+    from shim_cli.cli.resolution import Resolution
+
+    monkeypatch.setattr(
+        diagnostics,
+        "resolve",
+        lambda: Resolution(
+            "none",
+            "No hook is runnable; prompts are passing through uninspected.",
+            None,
+            None,
+        ),
+    )
+    monkeypatch.setattr(
+        diagnostics, "_installed_hook_runs_this_package", lambda _client: False
+    )
+
+    assert diagnostics._resolution_check("codex").status == "FAIL"

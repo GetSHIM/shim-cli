@@ -346,9 +346,29 @@ def _runner_check(client: str) -> Check:
     )
 
 
-def _resolution_check() -> Check:
+def _installed_hook_runs_this_package(client: str) -> bool:
+    """`shim install` writes this interpreter's absolute path into the client.
+
+    So a fragment that matches what this package would write names an
+    interpreter that is, by definition, the one running right now — no PATH
+    entry required, and none written.
+    """
+    try:
+        return plan_status(client_plan(client, "install"))[1] == "installed"
+    except (OSError, ValueError):
+        return False
+
+
+def _resolution_check(client: str) -> Check:
     resolution = resolve()
     if resolution.source == "none":
+        if _installed_hook_runs_this_package(client):
+            return Check(
+                "hook_resolution",
+                "PASS",
+                f"The installed {client_name(client)} hook runs this package "
+                f"directly ({sys.executable}); nothing is needed on PATH.",
+            )
         return Check("hook_resolution", "FAIL", resolution.detail)
     if resolution.skewed:
         return Check(
@@ -504,7 +524,7 @@ def doctor(*, client: str, as_json: bool) -> None:
             _custom_patterns(),
             _session_record_check(),
             _runner_check(client),
-            _resolution_check(),
+            _resolution_check(client),
             _duplicate_check(client),
             _coverage_check(client),
             _activation_check(client),
