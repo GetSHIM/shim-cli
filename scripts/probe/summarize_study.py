@@ -38,9 +38,29 @@ def _rows(series: list[dict]) -> list[dict]:
                 "created": created,
                 "read": read,
                 "total_input": usage["input_tokens"] + created + read,
+                "stop_reason": usage.get("stop_reason", ""),
             }
         )
     return rows
+
+
+def _turn(rows: list[dict]) -> list[dict]:
+    """The conversation that grows, which is the only thing a prefix can cache.
+
+    Claude Code issues a last request that is *smaller* than the one before it
+    — 87,000 bytes shorter in one session, 133,000 in another — and reads a
+    static prefix of about 117,000 tokens rather than the conversation's. It is
+    a separate call that shares only the system prompt and tool definitions.
+    Counting it reports a broken prefix that never broke, so the run is cut at
+    the first request that does not grow. How many were dropped is reported,
+    because a rule that silently discards data is not a measurement.
+    """
+    kept = rows[:1]
+    for previous, row in zip(rows, rows[1:], strict=False):
+        if row["request_bytes"] < previous["request_bytes"]:
+            break
+        kept.append(row)
+    return kept
 
 
 def _monotonic(rows: list[dict]) -> bool:
@@ -77,13 +97,15 @@ def _prefix_preserved(rows: list[dict]) -> bool:
 
 
 def describe(label: str, series: list[dict]) -> dict:
-    rows = _rows(series)
+    every = _rows(series)
+    rows = _turn(every)
     if not rows:
         return {"label": label, "requests": 0}
     after_first = rows[1:]
     return {
         "label": label,
         "requests": len(rows),
+        "trailing_requests": len(every) - len(rows),
         "rows": rows,
         "created_total": sum(row["created"] for row in rows),
         "read_total": sum(row["read"] for row in rows),
@@ -101,12 +123,33 @@ def describe(label: str, series: list[dict]) -> dict:
     }
 
 
+def read_series(root: Path) -> dict:
+    """Straight from the saved reports, so a rerun of this script sees every
+    field the proxy recorded rather than whatever `series.json` was written
+    with at the time."""
+    series = {}
+    for path in sorted((root / "reports").glob("*.json")):
+        document = json.loads(path.read_text(encoding="utf-8"))
+        report = document.get("report")
+        if not report:
+            continue
+        series[document["label"]] = [
+            {
+                "request_bytes": exchange["request_bytes"],
+                "stop_reason": exchange["stop_reason"],
+                **exchange["usage"],
+            }
+            for exchange in report["exchanges"]
+        ]
+    return series
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", required=True, type=Path)
     arguments = parser.parse_args(argv)
 
-    series = json.loads((arguments.root / "series.json").read_text())
+    series = read_series(arguments.root)
     summaries = [describe(label, rows) for label, rows in series.items()]
 
     for summary in summaries:

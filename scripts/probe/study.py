@@ -260,7 +260,11 @@ def series(document: dict) -> list[dict]:
     if not report:
         return []
     return [
-        {"request_bytes": exchange["request_bytes"], **exchange["usage"]}
+        {
+            "request_bytes": exchange["request_bytes"],
+            "stop_reason": exchange["stop_reason"],
+            **exchange["usage"],
+        }
         for exchange in report["exchanges"]
     ]
 

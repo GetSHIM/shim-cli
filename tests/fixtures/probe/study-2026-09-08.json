@@ -1,0 +1,123 @@
+{
+  "recorded": "2026-09-08",
+  "client": "Claude Code",
+  "model": "claude-sonnet-5",
+  "sessions": [
+    {
+      "label": "diet-on-1",
+      "requests": 10,
+      "created_after_first": 36742,
+      "median_created_after_first": 5773,
+      "cold_start_requests": 0,
+      "reads_never_fall": true,
+      "prefix_preserved": true
+    },
+    {
+      "label": "diet-on-2",
+      "requests": 11,
+      "created_after_first": 44313,
+      "median_created_after_first": 5756,
+      "cold_start_requests": 0,
+      "reads_never_fall": true,
+      "prefix_preserved": true
+    },
+    {
+      "label": "diet-off-1",
+      "requests": 6,
+      "created_after_first": 33622,
+      "median_created_after_first": 8190,
+      "cold_start_requests": 0,
+      "reads_never_fall": true,
+      "prefix_preserved": true
+    },
+    {
+      "label": "diet-off-2",
+      "requests": 12,
+      "created_after_first": 43015,
+      "median_created_after_first": 1028,
+      "cold_start_requests": 0,
+      "reads_never_fall": true,
+      "prefix_preserved": true
+    },
+    {
+      "label": "flip-mid-session",
+      "requests": 9,
+      "created_after_first": 39432,
+      "median_created_after_first": 6421,
+      "cold_start_requests": 0,
+      "reads_never_fall": true,
+      "prefix_preserved": true
+    },
+    {
+      "label": "ledger-on",
+      "requests": 14,
+      "created_after_first": 27432,
+      "median_created_after_first": 254,
+      "cold_start_requests": 0,
+      "reads_never_fall": true,
+      "prefix_preserved": true
+    },
+    {
+      "label": "ledger-off",
+      "requests": 11,
+      "created_after_first": 32817,
+      "median_created_after_first": 181,
+      "cold_start_requests": 0,
+      "reads_never_fall": true,
+      "prefix_preserved": true
+    }
+  ],
+  "diet": {
+    "records_per_file": 50,
+    "file_bytes": 19495,
+    "compacted_bytes": 12082,
+    "transforms": [
+      "json"
+    ],
+    "truncated_source_records": 120,
+    "client_truncates_at_bytes": 34388,
+    "transforms_on_truncated": []
+  },
+  "ledger": {
+    "ledger-on": {
+      "records": 28,
+      "large_tool_results": 4,
+      "transformed": 4,
+      "in_bytes": [
+        22199,
+        22199,
+        22199,
+        22199
+      ],
+      "out_bytes": [
+        13374,
+        13374,
+        13374,
+        13374
+      ],
+      "repeated_targets": 1
+    },
+    "ledger-off": {
+      "records": 23,
+      "large_tool_results": 6,
+      "transformed": 0,
+      "in_bytes": [
+        22199,
+        22199,
+        22199,
+        22199,
+        22199,
+        22199
+      ],
+      "out_bytes": [
+        21690,
+        21690,
+        21690,
+        21690,
+        21690,
+        21690
+      ],
+      "repeated_targets": 1
+    }
+  }
+}
