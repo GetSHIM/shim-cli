@@ -5,6 +5,8 @@ import os
 import stat
 from pathlib import Path
 
+_CREATE_ATTEMPTS = 3
+
 
 def open_root(path: Path) -> int:
     path.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -52,13 +54,19 @@ def read(root: int, name: str, limit: int) -> bytes:
         os.close(descriptor)
 
 
+def _open_for_append(root: int, name: str) -> int:
+    flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW | os.O_NONBLOCK
+    for _ in range(_CREATE_ATTEMPTS - 1):
+        try:
+            return os.open(name, flags, 0o600, dir_fd=root)
+        except FileNotFoundError:
+            # Darwin returns ENOENT when concurrent O_CREAT opens race.
+            pass
+    return os.open(name, flags, 0o600, dir_fd=root)
+
+
 def append(root: int, name: str, line: bytes, limit: int) -> bool:
-    descriptor = os.open(
-        name,
-        os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW | os.O_NONBLOCK,
-        0o600,
-        dir_fd=root,
-    )
+    descriptor = _open_for_append(root, name)
     try:
         validate(descriptor)
         fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
