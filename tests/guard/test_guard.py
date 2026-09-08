@@ -468,3 +468,27 @@ def test_a_piece_that_fails_leaves_the_others_masked() -> None:
     assert decision.partial is True
     assert decision.findings, "one bad piece must not cost every other piece"
     assert "<EMAIL_1>" in decision.redacted_text
+
+
+def test_a_config_line_keeps_its_variable_name() -> None:
+    """The email local part accepted `=`, so `SUPPORT_EMAIL=ops@x.com` masked to
+    a bare `<EMAIL_1>` while `AWS_ACCESS_KEY_ID=` kept its name. One `.env` came
+    back in two shapes and the model lost which address belonged to which
+    setting."""
+    text = (
+        "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE\n"
+        "SUPPORT_EMAIL=ops@example.com\n"
+        "CONTACT = alice@example.com\n"
+    )
+
+    assert evaluate(text).redacted_text == (
+        "AWS_ACCESS_KEY_ID=<SECRET_1>\nSUPPORT_EMAIL=<EMAIL_1>\nCONTACT = <EMAIL_2>\n"
+    )
+
+
+def test_a_url_carrying_an_address_keeps_its_url() -> None:
+    """Same cause: `?e=` was read as part of the local part, so the host and
+    path vanished into the placeholder."""
+    decision = evaluate("See https://example.com/u?e=alice@example.com now")
+
+    assert decision.redacted_text == "See https://example.com/u?e=<EMAIL_1> now"

@@ -507,6 +507,7 @@ it edits nothing, so there is nothing to undo.
 - [Architecture](https://github.com/GetSHIM/shim-cli/blob/main/docs/architecture.md)
 - [Compatibility](https://github.com/GetSHIM/shim-cli/blob/main/docs/compatibility.md)
 - [Privacy](https://github.com/GetSHIM/shim-cli/blob/main/docs/privacy.md)
+- [0.3.0 release notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/0.3.0.md)
 - [0.2.0 release notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/0.2.0.md)
 - [Contributing](https://github.com/GetSHIM/shim-cli/blob/main/CONTRIBUTING.md)
 - [Security policy](https://github.com/GetSHIM/shim-cli/blob/main/SECURITY.md)

@@ -118,11 +118,16 @@ def _trim_trailing_prose(text: str, start: int, end: int) -> int:
     return end
 
 
+# No `=` in the local part, though RFC 5322 allows it. `SUPPORT_EMAIL=ops@x.com`
+# is overwhelmingly a config line, not an address, and swallowing the `=` masked
+# the variable name too — so a `.env` came back with `AWS_ACCESS_KEY_ID=<SECRET_1>`
+# on one line and a bare `<EMAIL_1>` on the next. The cost is that a genuine
+# address with `=` before the `@` is missed.
 _EMAIL_PATTERNS = _compile(
     (
         (
-            r"\b((([!#$%&'*+\-/=?^_`{|}~\w])|([!#$%&'*+\-/=?^_`{|}~\w]"
-            r"[!#$%&'*+\-/=?^_`{|}~\.\w]{0,}[!#$%&'*+\-/=?^_`{|}~\w]))"
+            r"\b((([!#$%&'*+\-/?^_`{|}~\w])|([!#$%&'*+\-/?^_`{|}~\w]"
+            r"[!#$%&'*+\-/?^_`{|}~\.\w]{0,}[!#$%&'*+\-/?^_`{|}~\w]))"
             r"[@]\w+(?:-+\w+)*(?:\.\w+(?:-+\w+)*)+)\b",
             0.5,
         ),
