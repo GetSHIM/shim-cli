@@ -49,30 +49,44 @@ shim watch -- claude -p "explain this repo"
 ```
 
 ```text
-shim watch — 17s, 2 requests
-  input     189,706 tokens  (exact)
-    cache read   118,048   62%
-    cache write  71,654
-  output    610 tokens  (exact)
+shim watch — 16s, 2 requests
+  input     257,661 tokens  (exact)
+    cache read   118,048   46%
+    cache write  139,609
+  output    281 tokens  (exact)
   where the input went  (approximate — split by byte share)
-    tools     ~     158,949   84%
-    system    ~       6,821    4%
-    messages  ~      23,678   12%
-    other     ~         258    0%
-  found     3 EMAIL, 1 IBAN, 1 SECRET in request messages
+    tools     ~     226,781   88%
+    system    ~       6,938    3%
+    messages  ~      23,680    9%
+    other     ~         262    0%
+  request   3 IBAN, 2 EMAIL in messages
   also      4 EMAIL, 2 PHONE in system prompt and tool definitions
-  spend     ~$1.57  (approximate, 2026-08-30 prices)
-  largest   one request was 347,649 bytes, tools 90% of it
+  response  3 IBAN in model text
+            model-generated content is counted here, not leaks
+  compare   EMAIL  6 in request, 0 in response
+            IBAN   3 in request, 3 in response
+            PHONE  2 in request, 0 in response
+  spend     ~$2.82  (approximate, 2026-08-30 prices)
+  largest   one request was 346,350 bytes, tools 91% of it
   nothing was modified, and no request body was written to disk
 ```
 
-On the session above, **the tools array was 84% of the input tokens** — before
-a single line of the user's own code. The `IBAN` and the `SECRET` came from a
-file the agent read with a tool: shim scans every text field the model reads,
-including tool results, and says which part of the request each finding was in.
-A response that stopped at the provider's output limit adds a `cut off` line. That is one session on one repository,
+On the session above, **the tools array was 88% of the input tokens** — before
+a single line of the user's own code. That is one session on one repository,
 not a universal figure, which is the point: it is your number and you have no
 other way to get it.
+
+The three `IBAN`s came from a file the agent read with a tool: shim scans every
+text field the model reads, including tool results, and says which part of the
+request each finding was in.
+
+The `response` line is the other direction — what the model wrote back, with
+its `thinking` counted apart from its answer. It is a recall measurement, not a
+leak report: on your own key there is no other tenant to leak from, and a coding
+agent invents plausible values all day. `compare` puts the two sides next to
+each other: three account numbers went in through a tool result and the same
+three came back, which is the round trip made visible. A response that stopped
+at the provider's output limit adds a `cut off` line.
 
 Token counts come from the provider's own `usage` block and are exact. How
 they divide between sections has no ground truth on the wire, so it is

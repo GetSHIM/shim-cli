@@ -23,6 +23,10 @@ MAX_BODY_BYTES = 8_000_000
 MAX_MODEL_CHARS = 120
 UNKNOWN_MODEL = "unknown"
 
+MAX_RESPONSE_CHARACTERS = 1_000_000
+RESPONSE_KINDS = ("text", "thinking")
+_DELTA_KINDS = {"text_delta": "text", "thinking_delta": "thinking"}
+
 MAX_STOP_REASON_CHARS = 40
 UNKNOWN_REASON = "unknown"
 # Every provider spelling for "the answer stopped at the output limit".
@@ -134,6 +138,11 @@ class UsageReader:
         self._data: list[str] = []
         self._data_chars = 0
         self._failed = False
+        self._blocks: dict[tuple[str, object], list[str]] = {}
+        self._characters = 0
+        self._capped = False
+        self._framed = 0
+        self._unframed = False
         media_type = content_type.split(";", 1)[0].strip().lower()
         self._json = media_type == "application/json"
         self._supported = self._json or media_type == "text/event-stream"
@@ -145,6 +154,7 @@ class UsageReader:
         self._pending += text
         if len(self._pending) + self._data_chars > self.MAX_PENDING:
             self._failed = True
+            self._unframed = True
             self._pending = ""
             self._data.clear()
             self.status = "partial" if self._fields else "unavailable"
@@ -169,7 +179,56 @@ class UsageReader:
             self._consume(self._pending)
             self._pending = ""
         elif self._pending or self._data:
+            self._unframed = True
             self.status = "partial" if self._fields else "unavailable"
+
+    @property
+    def response_status(self) -> str:
+        if not self._supported:
+            return "unavailable"
+        if self._unframed:
+            return "partial" if self._framed else "unavailable"
+        return "partial" if self._capped else "known"
+
+    def response_texts(self) -> list[tuple[str, str]]:
+        return [
+            (kind, "".join(parts)) for (kind, _index), parts in self._blocks.items()
+        ]
+
+    def forget(self) -> None:
+        """The counts outlive the response; the response does not."""
+        self._blocks.clear()
+
+    def _absorb(self, document: dict) -> None:
+        if document.get("type") == "content_block_delta":
+            delta = document.get("delta")
+            if isinstance(delta, dict):
+                kind = _DELTA_KINDS.get(delta.get("type"))
+                if kind is not None:
+                    self._keep(kind, document.get("index"), delta.get(kind))
+            return
+        content = document.get("content")
+        if not isinstance(content, list):
+            message = document.get("message")
+            content = message.get("content") if isinstance(message, dict) else None
+        if not isinstance(content, list):
+            return
+        for position, block in enumerate(content):
+            if isinstance(block, dict) and block.get("type") in RESPONSE_KINDS:
+                kind = block["type"]
+                self._keep(kind, position, block.get(kind))
+
+    def _keep(self, kind: str, index: object, text: object) -> None:
+        if not isinstance(text, str) or not text:
+            return
+        room = MAX_RESPONSE_CHARACTERS - self._characters
+        if len(text) >= room:
+            text = text[: max(0, room)]
+            self._capped = True
+            if not text:
+                return
+        self._characters += len(text)
+        self._blocks.setdefault((kind, index), []).append(text)
 
     def _consume(self, text: str) -> None:
         if text == "[DONE]":
@@ -177,10 +236,13 @@ class UsageReader:
         try:
             document = json.loads(text)
         except (ValueError, RecursionError):
+            self._unframed = True
             self.status = "partial" if self._fields else "unavailable"
             return
         if not isinstance(document, dict):
             return
+        self._framed += 1
+        self._absorb(document)
         if not self.stop_reason:
             self.stop_reason = stop_reason_from(document)
         nested = document.get("message") or document.get("response") or document
@@ -310,6 +372,15 @@ def _tally(leaves: list, evaluate) -> dict:
     return counts
 
 
+def scan_response(reader: UsageReader, evaluate) -> dict:
+    counts: dict[str, dict] = {}
+    for kind, text in reader.response_texts():
+        found = counts.setdefault(kind, {})
+        for entity, count in getattr(evaluate(text), "counts", ()):
+            found[entity] = found.get(entity, 0) + count
+    return {kind: found for kind, found in counts.items() if found}
+
+
 def _flatten(by_section: dict) -> dict:
     counts: dict = {}
     for section in by_section.values():
@@ -359,6 +430,8 @@ class Exchange:
     sections: dict = field(default_factory=dict)
     entities: dict = field(default_factory=dict)
     entities_by_section: dict = field(default_factory=dict)
+    response_entities: dict = field(default_factory=dict)
+    response_scan_status: str = "unavailable"
     stop_reason: str = ""
     at_files: AtFiles = field(default_factory=AtFiles)
     measured: bool = True
@@ -425,12 +498,14 @@ __all__ = [
     "AT_FILE_MARKER",
     "MAX_BODY_BYTES",
     "MAX_MODEL_CHARS",
+    "MAX_RESPONSE_CHARACTERS",
     "MAX_STOP_REASON_CHARS",
     "MAX_SCAN_DEPTH",
     "MAX_SCAN_LEAVES",
     "MEMOISED",
     "MEMO_LIMIT",
     "OTHER",
+    "RESPONSE_KINDS",
     "SECTIONS",
     "TRUNCATED",
     "UNKNOWN_MODEL",
@@ -443,6 +518,7 @@ __all__ = [
     "at_files",
     "attribute",
     "inspect_request",
+    "scan_response",
     "sections",
     "stop_reason_from",
     "usage_from",

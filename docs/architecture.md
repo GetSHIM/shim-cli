@@ -174,6 +174,16 @@ unmeasured.
 Findings are held per section, and the `tools` and `system` results are memoised
 per session by content hash, sixteen entries, first in first out.
 
+The same reader accumulates the response. Anthropic `content_block_delta`
+payloads are joined per block index — `text_delta` into `text`, `thinking_delta`
+into `thinking`, `input_json_delta` ignored because the hook already scans tool
+arguments at `PreToolUse` — and a plain JSON body yields its content blocks
+directly. Accumulation is capped at 1 MB per exchange. The detector runs only
+after the terminating chunk has been written and flushed, and only for an
+exchange holding a measurement slot, so the client never waits on it; the text
+is dropped before the handler returns. The report keeps the two directions on
+separate lines and never sums them.
+
 The usage reader also keeps the provider's stop reason, in whichever shape it
 arrives: an Anthropic `delta.stop_reason`, a Responses `status: incomplete`
 with its `incomplete_details.reason`, or a chat-completions `finish_reason`.

@@ -145,7 +145,7 @@ def test_the_prompt_and_the_scaffolding_are_reported_apart() -> None:
         9.0,
     )
 
-    assert "found     2 SECRET in request messages" in text
+    assert "request   2 SECRET in messages" in text
     assert "also      1 EMAIL in tool definitions" in text
 
 
@@ -154,7 +154,7 @@ def test_a_finding_only_outside_the_prompt_still_reads_as_found() -> None:
         _session(_exchange(entities_by_section={"system": {"EMAIL": 1}})), 9.0
     )
 
-    assert "found     1 EMAIL in system prompt" in text
+    assert "request   1 EMAIL in system prompt" in text
     assert "also" not in text
 
 
@@ -263,3 +263,78 @@ def test_every_stop_reason_reaches_the_json_totals() -> None:
     document = report.as_json(session, 5.0)
 
     assert document["stop_reasons"] == {"max_tokens": 1, "end_turn": 1}
+
+
+def _both_ways(**changes):
+    values = {
+        "entities_by_section": {"messages": {"IBAN": 60, "EMAIL": 3}},
+        "response_entities": {"text": {"EMAIL": 2}, "thinking": {"IBAN": 1}},
+        "response_scan_status": "known",
+    }
+    values.update(changes)
+    return _exchange(**values)
+
+
+def test_the_two_directions_are_reported_apart_and_compared() -> None:
+    text = report.render(_session(_both_ways()), 9.0)
+
+    assert "request   60 IBAN, 3 EMAIL in messages" in text
+    assert "response  2 EMAIL in model text; 1 IBAN in thinking" in text
+    assert "IBAN   60 in request, 1 in response (thinking)" in text
+    assert "EMAIL  3 in request, 2 in response" in text
+
+
+def test_the_report_never_calls_a_model_s_own_words_a_leak() -> None:
+    text = report.render(_session(_both_ways()), 9.0)
+
+    assert report.NOT_LEAKS in text
+    for word in ("leaked", "exposed", "was sent", "leak of"):
+        assert word not in text
+
+
+def test_a_clean_response_says_so_rather_than_saying_nothing() -> None:
+    text = report.render(_session(_both_ways(response_entities={})), 9.0)
+
+    assert "response  nothing found in model text or thinking" in text
+    assert report.NOT_LEAKS not in text
+
+
+def test_an_unscanned_response_is_counted_rather_than_assumed_clean() -> None:
+    session = _session(
+        _both_ways(),
+        _both_ways(response_scan_status="unavailable", response_entities={}),
+    )
+
+    text = report.render(session, 9.0)
+
+    assert "response scan unavailable or partial for 1 request(s)" in text
+
+
+def test_a_response_only_finding_still_appears_in_the_comparison() -> None:
+    exchange = _exchange(
+        entities_by_section={},
+        response_entities={"text": {"EMAIL": 2}},
+        response_scan_status="known",
+    )
+
+    text = report.render(_session(exchange), 9.0)
+
+    assert "EMAIL  0 in request, 2 in response" in text
+
+
+def test_the_json_report_carries_both_directions_and_each_request() -> None:
+    document = report.as_json(_session(_both_ways()), 5.0)
+
+    assert document["response_entities"] == {
+        "text": {"EMAIL": 2},
+        "thinking": {"IBAN": 1},
+    }
+    assert document["response_scan"] == "known"
+    assert document["exchanges"] == [
+        {
+            "entities_by_section": {"messages": {"IBAN": 60, "EMAIL": 3}},
+            "response_entities": {"text": {"EMAIL": 2}, "thinking": {"IBAN": 1}},
+            "response_scan_status": "known",
+            "stop_reason": "",
+        }
+    ]

@@ -251,9 +251,18 @@ section and the entity counts it produced, at most sixteen of them, oldest
 evicted first. The remembered value is a hash and a tally; the text that
 produced it is not kept.
 
+The response is scanned too, and on the same terms. Its text and `thinking`
+blocks are held in memory for the length of one response, up to 1 MB, scanned
+only after the last byte has been relayed to the client, and discarded before
+the request returns. `thinking` is counted separately from the answer, because
+a value the model reasoned about is not the same fact as one it wrote down.
+The arguments of a tool call are not counted here; the hook already scans them
+at `PreToolUse`. Findings on this side are counted, not judged: the model wrote
+them, so they are not called a leak.
+
 What survives one request is a count and a size: bytes per section, entity
-counts by type and by section, a token count from the provider, the model name
-and the request path. **No request or response body is ever written to disk**, and
+counts by type and by section, response counts by kind, the provider's stop
+reason, a token count from the provider, the model name and the request path. **No request or response body is ever written to disk**, and
 `tests/watch/test_proxy.py` asserts it by sending a unique marker through the
 proxy and then searching every file written anywhere beneath the temporary root
 for it.

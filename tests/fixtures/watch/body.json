@@ -1,0 +1,1 @@
+{"id":"msg_0123456789abcdef","type":"message","role":"assistant","model":"claude-sonnet-5","content":[{"type":"thinking","thinking":"the ledger says TR330006100519786457841326"},{"type":"text","text":"Confirmed. Reach me at user@example.com."}],"stop_reason":"end_turn","usage":{"input_tokens":11,"output_tokens":24}}

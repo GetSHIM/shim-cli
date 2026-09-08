@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .measure import OTHER, SECTIONS, TRUNCATED, Usage
+from .measure import OTHER, RESPONSE_KINDS, SECTIONS, TRUNCATED, Usage
 
 SECTION_WORDS = {
     "system": "system prompt",
@@ -8,6 +8,8 @@ SECTION_WORDS = {
     OTHER: "other fields",
 }
 BESIDES = ("system", "tools", OTHER)
+KIND_WORDS = {"text": "model text", "thinking": "thinking"}
+NOT_LEAKS = "model-generated content is counted here, not leaks"
 
 PRICES = (
     ("claude-opus-4", (15.0, 75.0, 18.75, 1.5)),
@@ -98,9 +100,57 @@ def _listed(counts: dict) -> str:
     return ", ".join(f"{count} {entity}" for entity, count in ordered)
 
 
+def _compared(by_section: dict, by_kind: dict) -> list:
+    """Every entity seen on either side, most frequent first."""
+    request: dict = {}
+    for counts in by_section.values():
+        for entity, count in counts.items():
+            request[entity] = request.get(entity, 0) + count
+    response: dict = {}
+    kinds: dict = {}
+    for kind, counts in by_kind.items():
+        for entity, count in counts.items():
+            response[entity] = response.get(entity, 0) + count
+            kinds.setdefault(entity, []).append(kind)
+    if not request and not response:
+        return []
+    names = sorted(
+        set(request) | set(response),
+        key=lambda name: (-(request.get(name, 0) + response.get(name, 0)), name),
+    )
+    width = max(len(name) for name in names)
+    rows = []
+    for name in names:
+        seen = [kind for kind in RESPONSE_KINDS if kind in kinds.get(name, ())]
+        where = f" ({', '.join(seen)})" if seen and seen != ["text"] else ""
+        rows.append(
+            f"{name:<{width}}  {request.get(name, 0)} in request, "
+            f"{response.get(name, 0)} in response{where}"
+        )
+    return rows
+
+
 def _words(names: list) -> str:
     said = [SECTION_WORDS[name] for name in names]
     return " and ".join([", ".join(said[:-1]), said[-1]] if len(said) > 2 else said)
+
+
+def response_totals(exchanges: list) -> dict:
+    combined: dict = {}
+    for exchange in exchanges:
+        for kind, counts in exchange.response_entities.items():
+            found = combined.setdefault(kind, {})
+            for entity, count in counts.items():
+                found[entity] = found.get(entity, 0) + count
+    return combined
+
+
+def response_scan(exchanges: list) -> str:
+    if exchanges and all(e.response_scan_status == "known" for e in exchanges):
+        return "known"
+    if any(e.response_scan_status != "unavailable" for e in exchanges):
+        return "partial"
+    return "unavailable"
 
 
 def stop_reason_totals(exchanges: list) -> dict:
@@ -200,11 +250,32 @@ def render(session, seconds: float) -> str:
         for entity, count in by_section[name].items():
             elsewhere[entity] = elsewhere.get(entity, 0) + count
     if in_messages:
-        lines.append(f"  found     {_listed(in_messages)} in request messages")
+        lines.append(f"  request   {_listed(in_messages)} in messages")
         if elsewhere:
             lines.append(f"  also      {_listed(elsewhere)} in {_words(besides)}")
     elif elsewhere:
-        lines.append(f"  found     {_listed(elsewhere)} in {_words(besides)}")
+        lines.append(f"  request   {_listed(elsewhere)} in {_words(besides)}")
+
+    by_kind = response_totals(exchanges)
+    scanned = [e for e in exchanges if e.response_scan_status != "unavailable"]
+    if scanned:
+        said = "; ".join(
+            f"{_listed(by_kind[kind])} in {KIND_WORDS[kind]}"
+            for kind in RESPONSE_KINDS
+            if by_kind.get(kind)
+        )
+        lines.append(f"  response  {said or 'nothing found in model text or thinking'}")
+        if said:
+            lines.append(f"            {NOT_LEAKS}")
+    unscanned = len(exchanges) - sum(
+        exchange.response_scan_status == "known" for exchange in exchanges
+    )
+    if unscanned:
+        lines.append(
+            f"  response scan unavailable or partial for {unscanned} request(s)"
+        )
+    for index, line in enumerate(_compared(by_section, by_kind)):
+        lines.append(f"  compare   {line}" if not index else f"            {line}")
 
     dollars, priced, unpriced = spend(exchanges)
     if priced:
@@ -266,6 +337,17 @@ def as_json(session, seconds: float) -> dict:
         "entities": entity_totals(exchanges),
         "entities_by_section": entity_section_totals(exchanges),
         "stop_reasons": stop_reason_totals(exchanges),
+        "response_entities": response_totals(exchanges),
+        "response_scan": response_scan(exchanges),
+        "exchanges": [
+            {
+                "entities_by_section": exchange.entities_by_section,
+                "response_entities": exchange.response_entities,
+                "response_scan_status": exchange.response_scan_status,
+                "stop_reason": exchange.stop_reason,
+            }
+            for exchange in exchanges
+        ],
     }
 
 
@@ -276,6 +358,8 @@ __all__ = [
     "at_file_totals",
     "entity_section_totals",
     "entity_totals",
+    "response_scan",
+    "response_totals",
     "render",
     "section_totals",
     "spend",

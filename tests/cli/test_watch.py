@@ -55,3 +55,41 @@ def test_empty_override_starts_without_mutating_parent(
     assert child.call_args.kwargs["env"][variable] == running.base_url
     assert os.environ.get(variable) == value
     running.stop.assert_called_once()
+
+
+def test_the_json_report_carries_both_directions(monkeypatch):
+    import json
+
+    from shim_cli.watch import measure
+
+    monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
+    monkeypatch.setattr("shutil.which", lambda _: "/synthetic/client")
+    session = proxy.Session()
+    session.record(
+        measure.Exchange(
+            path="/v1/messages",
+            model="claude-sonnet-5",
+            status=200,
+            entities_by_section={"messages": {"IBAN": 2}},
+            response_entities={"thinking": {"IBAN": 1}},
+            response_scan_status="known",
+            stop_reason="max_tokens",
+        )
+    )
+    running = SimpleNamespace(
+        base_url="http://127.0.0.1:1234", session=session, stop=Mock()
+    )
+    monkeypatch.setattr(proxy, "start", lambda *_: running)
+    monkeypatch.setattr(
+        "subprocess.Popen", Mock(return_value=SimpleNamespace(wait=lambda: 0))
+    )
+
+    result = CliRunner().invoke(app, ["watch", "--json", "--", "claude"])
+
+    document = json.loads(result.stdout)
+    assert document["entities"] == {"IBAN": 2}
+    assert document["entities_by_section"] == {"messages": {"IBAN": 2}}
+    assert document["response_entities"] == {"thinking": {"IBAN": 1}}
+    assert document["response_scan"] == "known"
+    assert document["stop_reasons"] == {"max_tokens": 1}
+    assert document["exchanges"][0]["response_scan_status"] == "known"

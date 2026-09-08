@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -576,3 +577,109 @@ def test_a_stream_that_never_states_a_reason_leaves_it_empty() -> None:
 
     assert reader.stop_reason == ""
     assert measure.Exchange().stop_reason == ""
+
+
+FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "watch"
+
+
+def _read(name: str) -> str:
+    return (FIXTURES / name).read_text(encoding="utf-8")
+
+
+def _fed(name: str, content_type: str = "text/event-stream") -> measure.UsageReader:
+    reader = measure.UsageReader(content_type)
+    reader.feed(_read(name))
+    reader.finish()
+    return reader
+
+
+def test_a_value_split_across_two_deltas_is_rejoined_before_it_is_scanned() -> None:
+    from shim_cli.guard import evaluate
+
+    reader = _fed("split-iban.sse")
+
+    assert reader.response_texts() == [
+        ("text", "the account is TR330006100519786457841326 as recorded")
+    ]
+    assert measure.scan_response(reader, evaluate) == {"text": {"IBAN": 1}}
+    assert reader.response_status == "known"
+
+
+def test_thinking_is_counted_apart_from_the_answer() -> None:
+    from shim_cli.guard import evaluate
+
+    reader = _fed("thinking.sse")
+
+    assert measure.scan_response(reader, evaluate) == {"thinking": {"IBAN": 1}}
+    assert dict(reader.response_texts())["text"] == "I removed the duplicate."
+
+
+def test_a_tool_call_the_model_wrote_is_not_counted_here() -> None:
+    from shim_cli.guard import evaluate
+
+    reader = _fed("tool-input.sse")
+
+    assert reader.response_texts() == []
+    assert measure.scan_response(reader, evaluate) == {}
+    assert reader.stop_reason == "tool_use"
+
+
+def test_an_address_the_model_wrote_is_counted_as_model_text() -> None:
+    from shim_cli.guard import evaluate
+
+    reader = _fed("email-in-text.sse")
+
+    assert measure.scan_response(reader, evaluate) == {"text": {"EMAIL": 1}}
+
+
+def test_a_plain_json_response_yields_its_blocks_directly() -> None:
+    from shim_cli.guard import evaluate
+
+    reader = _fed("body.json", "application/json")
+
+    assert measure.scan_response(reader, evaluate) == {
+        "thinking": {"IBAN": 1},
+        "text": {"EMAIL": 1},
+    }
+    assert reader.response_status == "known"
+
+
+def test_a_response_past_the_cap_is_partial_and_stays_bounded() -> None:
+    reader = measure.UsageReader()
+    delta = (
+        'data: {"type":"content_block_delta","index":0,'
+        '"delta":{"type":"text_delta","text":"%s"}}\n\n'
+    )
+    for _ in range(12):
+        reader.feed(delta % ("x" * 100_000))
+    reader.finish()
+
+    kept = sum(len(text) for _kind, text in reader.response_texts())
+    assert kept == measure.MAX_RESPONSE_CHARACTERS
+    assert reader.response_status == "partial"
+
+
+def test_a_body_that_cannot_be_framed_reports_no_response_scan() -> None:
+    reader = measure.UsageReader("text/html")
+    reader.feed("<html>TR330006100519786457841326</html>")
+    reader.finish()
+
+    assert reader.response_texts() == []
+    assert reader.response_status == "unavailable"
+
+
+def test_an_event_that_will_not_parse_leaves_the_scan_partial() -> None:
+    reader = measure.UsageReader()
+    reader.feed(_read("email-in-text.sse"))
+    reader.feed("data: {not json\n\n")
+    reader.finish()
+
+    assert reader.response_status == "partial"
+
+
+def test_the_accumulated_response_is_dropped_on_request() -> None:
+    reader = _fed("split-iban.sse")
+
+    reader.forget()
+
+    assert reader.response_texts() == []

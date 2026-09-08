@@ -17,6 +17,7 @@ from .measure import (
     SectionMemo,
     UsageReader,
     inspect_request,
+    scan_response,
 )
 
 # Preserve provider auth headers.
@@ -157,7 +158,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             exchange.status = upstream.status
             responded = True
             self.session.record(exchange)
-            self._stream(upstream, exchange)
+            self._stream(upstream, exchange, measuring)
             if measuring:
                 self._measure(capture, exchange)
         except (OSError, ValueError, http.client.HTTPException):
@@ -186,7 +187,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         exchange.at_files = measured.at_files
         exchange.measured = measured.measured
 
-    def _stream(self, upstream, exchange: Exchange) -> None:
+    def _stream(self, upstream, exchange: Exchange, measuring: bool = False) -> None:
         self.send_response(upstream.status)
         for name, value in upstream.getheaders():
             lowered = name.lower()
@@ -221,6 +222,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 self.session.failed()
                 exchange.usage = reader.usage
                 exchange.stop_reason = reader.stop_reason
+                reader.forget()
                 exchange.usage_status = (
                     "partial" if reader.status != "unavailable" else "unavailable"
                 )
@@ -274,6 +276,18 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             pass
         exchange.usage = reader.usage
         exchange.stop_reason = reader.stop_reason
+        # The client has its last byte; only now does the detector run.
+        if measuring and self.evaluate is not None:
+            exchange.response_scan_status = (
+                reader.response_status if readable else "unavailable"
+            )
+            if exchange.response_scan_status != "unavailable":
+                try:
+                    exchange.response_entities = scan_response(reader, self.evaluate)
+                except Exception:
+                    exchange.response_entities = {}
+                    exchange.response_scan_status = "unavailable"
+        reader.forget()
 
     do_POST = _relay
     do_GET = _relay
