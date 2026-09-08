@@ -320,16 +320,19 @@ def test_session_end_sweeps_stale_redacted_prompts(tmp_path, monkeypatch) -> Non
 
     monkeypatch.setattr(hook.tempfile, "gettempdir", lambda: str(tmp_path))
     stale = tmp_path / "shim-redacted-old.txt"
+    stale_020 = tmp_path / "shim-guard-redacted-old.txt"
     fresh = tmp_path / "shim-redacted-new.txt"
     other = tmp_path / "someone-elses-file.txt"
-    for path in (stale, fresh, other):
+    for path in (stale, stale_020, fresh, other):
         path.write_text("redacted", encoding="utf-8")
     old_enough = time.time() - hook.SUGGESTION_MAX_AGE_SECONDS - 60
     os.utime(stale, (old_enough, old_enough))
+    os.utime(stale_020, (old_enough, old_enough))
     os.utime(other, (old_enough, old_enough))
 
     hook._forget("any-session")
 
     assert not stale.exists()
+    assert not stale_020.exists()
     assert fresh.exists()
     assert other.exists()

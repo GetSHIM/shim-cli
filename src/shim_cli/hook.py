@@ -171,16 +171,19 @@ def _deadline() -> Iterator[None]:
 SUGGESTION_MAX_AGE_SECONDS = 24 * 60 * 60
 _SUGGESTION_PREFIX = "shim-redacted-"
 _SUGGESTION_SUFFIX = ".txt"
+# 0.2.0 wrote the same file under its own name; sweep those too.
+_SWEPT_PREFIXES = (_SUGGESTION_PREFIX, "shim-guard-redacted-")
 
 
 def _sweep_suggestions() -> None:
     now = time.time()
     with contextlib.suppress(OSError):
         root = Path(tempfile.gettempdir())
-        for path in root.glob(f"{_SUGGESTION_PREFIX}*{_SUGGESTION_SUFFIX}"):
-            with contextlib.suppress(OSError):
-                if now - path.stat().st_mtime > SUGGESTION_MAX_AGE_SECONDS:
-                    path.unlink()
+        for prefix in _SWEPT_PREFIXES:
+            for path in root.glob(f"{prefix}*{_SUGGESTION_SUFFIX}"):
+                with contextlib.suppress(OSError):
+                    if now - path.stat().st_mtime > SUGGESTION_MAX_AGE_SECONDS:
+                        path.unlink()
 
 
 def _write_redacted_prompt(text: str) -> str:
