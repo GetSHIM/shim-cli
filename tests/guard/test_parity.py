@@ -8,7 +8,7 @@ from types import ModuleType
 
 import pytest
 
-from shim_guard.guard import evaluate
+from shim_cli.guard import evaluate
 
 CORPUS = Path(__file__).resolve().parents[1] / "corpus" / "parity-v1.json"
 GENERATOR = Path(__file__).resolve().parents[2] / "scripts" / "build_parity_corpus.py"
@@ -42,9 +42,24 @@ DELIBERATE_DIVERGENCES = {
     ),
 }
 
+# A divergence that still masks, but over fewer characters. Kept apart from
+# DELIBERATE_DIVERGENCES because those assert nothing is masked at all.
+NARROWED_SPANS = {
+    "email-in-url": (
+        "The local part no longer accepts `=`, so a query string stops being "
+        "read as part of an address. The URL survives with only the address "
+        "masked, instead of the host and path disappearing into the "
+        "placeholder.",
+        [["EMAIL", 28, 45, 1.0]],
+        "See https://example.com/u?e=<EMAIL_1> now",
+    ),
+}
+
 
 def test_every_divergence_is_still_a_real_case() -> None:
-    assert set(DELIBERATE_DIVERGENCES) <= {case["id"] for case in _CASES}
+    known = set(DELIBERATE_DIVERGENCES) | set(NARROWED_SPANS)
+    assert known <= {case["id"] for case in _CASES}
+    assert not set(DELIBERATE_DIVERGENCES) & set(NARROWED_SPANS)
 
 
 def test_divergences_only_ever_relax_detection() -> None:
@@ -52,6 +67,19 @@ def test_divergences_only_ever_relax_detection() -> None:
     for identifier, (_reason, expected) in DELIBERATE_DIVERGENCES.items():
         case = by_id[identifier]
         assert len(expected) < len(case["findings"]), identifier
+
+
+def test_narrowed_spans_only_ever_shrink() -> None:
+    """The mechanism must not become a way to quietly widen what shim masks."""
+    by_id = {case["id"]: case for case in _CASES}
+    for identifier, (_reason, expected, _redacted) in NARROWED_SPANS.items():
+        frozen = by_id[identifier]["findings"]
+        assert len(expected) == len(frozen), identifier
+        for new_span, old_span in zip(expected, frozen, strict=True):
+            assert new_span[0] == old_span[0], identifier
+            assert new_span[1] >= old_span[1], identifier
+            assert new_span[2] <= old_span[2], identifier
+            assert new_span[1:3] != old_span[1:3], identifier
 
 
 def test_the_frozen_corpus_is_substantial() -> None:
@@ -74,6 +102,11 @@ def test_detection_is_unchanged(case: dict) -> None:
         [finding.entity_type, finding.start, finding.end, finding.score]
         for finding in decision.findings
     ]
+    if case["id"] in NARROWED_SPANS:
+        reason, expected, redacted = NARROWED_SPANS[case["id"]]
+        assert actual == expected, f"{case['id']} narrows on purpose: {reason}"
+        assert decision.redacted_text == redacted
+        return
     if case["id"] in DELIBERATE_DIVERGENCES:
         reason, expected = DELIBERATE_DIVERGENCES[case["id"]]
         assert actual == expected, f"{case['id']} diverges on purpose: {reason}"

@@ -1,0 +1,31 @@
+{
+  "name": "shim-cli",
+  "version": "0.3.0",
+  "description": "Detect and report sensitive prompt data locally; prompt blocking is opt in.",
+  "author": {
+    "name": "shim Engineering"
+  },
+  "homepage": "https://github.com/GetSHIM/shim-cli",
+  "repository": "https://github.com/GetSHIM/shim-cli",
+  "license": "Apache-2.0",
+  "keywords": [
+    "privacy",
+    "security",
+    "prompt-hook"
+  ],
+  "interface": {
+    "displayName": "shim-cli",
+    "shortDescription": "Local sensitive-data reporting",
+    "longDescription": "Detects and reports sensitive prompt data locally. Blocking is available only when enforcement is explicitly enabled.",
+    "developerName": "shim Engineering",
+    "category": "Security",
+    "capabilities": [
+      "Hooks"
+    ],
+    "websiteURL": "https://github.com/GetSHIM/shim-cli",
+    "privacyPolicyURL": "https://github.com/GetSHIM/shim-cli/blob/main/docs/privacy.md",
+    "defaultPrompt": [
+      "Check whether shim is installed and active."
+    ]
+  }
+}

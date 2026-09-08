@@ -10,9 +10,9 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
-COMMAND = (sys.executable, "-I", "-B", "-m", "shim_guard.hook")
+COMMAND = (sys.executable, "-I", "-B", "-m", "shim_cli.hook")
 GENERIC_BLOCK = (
-    b'{"decision":"block","reason":"SHIM Guard could not inspect this prompt, '
+    b'{"decision":"block","reason":"shim could not inspect this prompt, '
     b'so it was withheld. Run `shim doctor codex` for the reason."}'
 )
 COPY_INSTRUCTION = "Copy and paste this as your next prompt:"
@@ -105,7 +105,7 @@ def test_safe_prompt_is_byte_for_byte_silent() -> None:
 def test_finding_writes_a_secure_redacted_prompt(tmp_path: Path) -> None:
     environment = _enforcing(tmp_path)
     result = _run(_payload("Contact alice@example.com"), env=environment)
-    path = _suggestion_path(result, "SHIM Guard blocked this prompt: EMAIL (1).")
+    path = _suggestion_path(result, "shim blocked this prompt: EMAIL (1).")
 
     assert b"alice@example.com" not in result.stdout
     assert path.parent == tmp_path
@@ -116,7 +116,7 @@ def test_finding_writes_a_secure_redacted_prompt(tmp_path: Path) -> None:
 def test_hook_honors_entity_settings_and_rejects_invalid_settings(
     tmp_path: Path,
 ) -> None:
-    from shim_guard.config import render_entities
+    from shim_cli.config import render_entities
 
     target = tmp_path / "settings" / "config.toml"
     target.parent.mkdir()
@@ -128,7 +128,7 @@ def test_hook_honors_entity_settings_and_rejects_invalid_settings(
 
     _assert_output(_run(_payload("Contact alice@example.com"), env=environment), b"")
     phone = _run(_payload("Call +90 532 123 45 67"), env=environment)
-    path = _suggestion_path(phone, "SHIM Guard blocked this prompt: PHONE (1).")
+    path = _suggestion_path(phone, "shim blocked this prompt: PHONE (1).")
     assert path.read_text() == "Call <PHONE_1>"
 
     target.write_bytes(b"invalid")
@@ -212,7 +212,7 @@ def test_block_output_is_bounded_and_contains_no_raw_values(tmp_path: Path) -> N
     raw_values = [f"person{index}@example.com" for index in range(50)]
     environment = _enforcing(tmp_path)
     result = _run(_payload(" ".join(raw_values)), env=environment)
-    path = _suggestion_path(result, "SHIM Guard blocked this prompt: EMAIL (50).")
+    path = _suggestion_path(result, "shim blocked this prompt: EMAIL (50).")
 
     assert len(result.stdout) <= 4_096
     assert all(value.encode() not in result.stdout for value in raw_values)
@@ -226,15 +226,15 @@ import os
 import sys
 import types
 import warnings
-import shim_guard.guard as guard
-from shim_guard import hook as runner
-from shim_guard.clients import user_prompt_hook
+import shim_cli.guard as guard
+from shim_cli import hook as runner
+from shim_cli.clients import user_prompt_hook
 
-clients = types.ModuleType("shim_guard.clients")
+clients = types.ModuleType("shim_cli.clients")
 clients.__path__ = []
-codex = types.ModuleType("shim_guard.clients.codex")
+codex = types.ModuleType("shim_cli.clients.codex")
 codex.__path__ = []
-adapter = types.ModuleType("shim_guard.clients.codex.hook")
+adapter = types.ModuleType("shim_cli.clients.codex.hook")
 
 def noisy(label):
     secret = os.environ["SHIM_TEST_SECRET"]
@@ -248,7 +248,7 @@ def parse_input(raw):
     noisy("parse")
     return "safe"
 
-def evaluate(prompt, enabled_entities):
+def evaluate(prompt, enabled_entities, custom=(), reveal=None):
     noisy("evaluate")
     return types.SimpleNamespace(blocked=False)
 
@@ -262,10 +262,10 @@ adapter.warn_output = lambda decision: b""
 adapter.error_output = lambda: b"unreachable"
 guard.evaluate = evaluate
 sys.modules.update({
-    "shim_guard.clients": clients,
-    "shim_guard.clients.user_prompt_hook": user_prompt_hook,
-    "shim_guard.clients.codex": codex,
-    "shim_guard.clients.codex.hook": adapter,
+    "shim_cli.clients": clients,
+    "shim_cli.clients.user_prompt_hook": user_prompt_hook,
+    "shim_cli.clients.codex": codex,
+    "shim_cli.clients.codex.hook": adapter,
 })
 runner.main()
 """
@@ -293,21 +293,21 @@ def test_dependency_errors_use_the_same_generic_block(
 import os
 import sys
 import types
-from shim_guard import hook as runner
-from shim_guard.clients import user_prompt_hook
+from shim_cli import hook as runner
+from shim_cli.clients import user_prompt_hook
 
-clients = types.ModuleType("shim_guard.clients")
+clients = types.ModuleType("shim_cli.clients")
 clients.__path__ = []
-codex = types.ModuleType("shim_guard.clients.codex")
+codex = types.ModuleType("shim_cli.clients.codex")
 codex.__path__ = []
-adapter = types.ModuleType("shim_guard.clients.codex.hook")
-guard = types.ModuleType("shim_guard.guard")
+adapter = types.ModuleType("shim_cli.clients.codex.hook")
+guard = types.ModuleType("shim_cli.guard")
 
 adapter.parse_input = lambda raw: "safe"
 adapter.warn_output = lambda decision: b""
 adapter.error_output = lambda: runner._ERROR_OUTPUT
 
-def evaluate(prompt, enabled_entities):
+def evaluate(prompt, enabled_entities, custom=(), reveal=None):
     if os.environ["SHIM_TEST_STAGE"] == "detector":
         raise RuntimeError(os.environ["SHIM_TEST_SECRET"])
     return types.SimpleNamespace(blocked=True, redacted_text="redacted")
@@ -320,11 +320,11 @@ def block_output(decision, suggestion_path=None):
 adapter.block_output = block_output
 guard.evaluate = evaluate
 sys.modules.update({
-    "shim_guard.clients": clients,
-    "shim_guard.clients.user_prompt_hook": user_prompt_hook,
-    "shim_guard.clients.codex": codex,
-    "shim_guard.clients.codex.hook": adapter,
-    "shim_guard.guard": guard,
+    "shim_cli.clients": clients,
+    "shim_cli.clients.user_prompt_hook": user_prompt_hook,
+    "shim_cli.clients.codex": codex,
+    "shim_cli.clients.codex.hook": adapter,
+    "shim_cli.guard": guard,
 })
 runner.main()
 """
@@ -354,12 +354,12 @@ def test_adapter_import_error_uses_the_same_generic_block() -> None:
     code = r"""
 import builtins
 import os
-from shim_guard import hook as runner
+from shim_cli import hook as runner
 
 real_import = builtins.__import__
 
 def fail_adapter_import(name, *args, **kwargs):
-    if name == "shim_guard.clients.codex.hook":
+    if name == "shim_cli.clients.codex.hook":
         raise ImportError(os.environ["SHIM_TEST_SECRET"])
     return real_import(name, *args, **kwargs)
 
@@ -387,25 +387,25 @@ def test_hook_processing_deadline_uses_the_generic_block() -> None:
 import sys
 import time
 import types
-from shim_guard import hook as runner
-from shim_guard.clients import user_prompt_hook
+from shim_cli import hook as runner
+from shim_cli.clients import user_prompt_hook
 
-clients = types.ModuleType("shim_guard.clients")
+clients = types.ModuleType("shim_cli.clients")
 clients.__path__ = []
-codex = types.ModuleType("shim_guard.clients.codex")
+codex = types.ModuleType("shim_cli.clients.codex")
 codex.__path__ = []
-adapter = types.ModuleType("shim_guard.clients.codex.hook")
-guard = types.ModuleType("shim_guard.guard")
+adapter = types.ModuleType("shim_cli.clients.codex.hook")
+guard = types.ModuleType("shim_cli.guard")
 adapter.parse_input = lambda raw: "safe"
 adapter.block_output = lambda decision, suggestion_path=None: b""
 adapter.error_output = lambda: runner._ERROR_OUTPUT
 guard.evaluate = lambda prompt, enabled_entities: time.sleep(1)
 sys.modules.update({
-    "shim_guard.clients": clients,
-    "shim_guard.clients.user_prompt_hook": user_prompt_hook,
-    "shim_guard.clients.codex": codex,
-    "shim_guard.clients.codex.hook": adapter,
-    "shim_guard.guard": guard,
+    "shim_cli.clients": clients,
+    "shim_cli.clients.user_prompt_hook": user_prompt_hook,
+    "shim_cli.clients.codex": codex,
+    "shim_cli.clients.codex.hook": adapter,
+    "shim_cli.guard": guard,
 })
 runner.HOOK_DEADLINE_SECONDS = 0.05
 runner.main()
@@ -424,7 +424,7 @@ runner.main()
 
 def test_hook_deadline_includes_waiting_for_stdin_eof() -> None:
     code = (
-        "from shim_guard import hook as runner; "
+        "from shim_cli import hook as runner; "
         "runner.HOOK_DEADLINE_SECONDS = 0.05; runner.main()"
     )
     with subprocess.Popen(
@@ -448,7 +448,7 @@ def test_hook_deadline_includes_waiting_for_stdin_eof() -> None:
 
 def test_isolated_mode_ignores_a_hostile_working_directory(tmp_path: Path) -> None:
     marker = tmp_path / "imported"
-    package = tmp_path / "shim_guard"
+    package = tmp_path / "shim_cli"
     package.mkdir()
     (package / "__init__.py").write_text(
         f"from pathlib import Path\nPath({str(marker)!r}).write_text('bad')\n"
@@ -482,7 +482,7 @@ def test_hook_persists_only_the_redacted_prompt_in_os_temp(tmp_path: Path) -> No
     before = {item for item in tmp_path.rglob("*") if item.is_file()}
 
     result = _run(_payload(prompt), cwd=work, env=env)
-    path = _suggestion_path(result, "SHIM Guard blocked this prompt: EMAIL (1).")
+    path = _suggestion_path(result, "shim blocked this prompt: EMAIL (1).")
     written = {item for item in tmp_path.rglob("*") if item.is_file()} - before
     spools = {item for item in written if item.suffix in (".jsonl", ".mark")}
 
@@ -517,7 +517,7 @@ socket.socket.connect = no_network
 socket.create_connection = no_network
 socket.getaddrinfo = no_network
 
-from shim_guard import hook
+from shim_cli import hook
 hook.main()
 """
     environment = _enforcing(tmp_path)
@@ -531,5 +531,5 @@ hook.main()
         timeout=60,
     )
 
-    path = _suggestion_path(result, "SHIM Guard blocked this prompt: EMAIL (1).")
+    path = _suggestion_path(result, "shim blocked this prompt: EMAIL (1).")
     assert path.read_text() == "Contact <EMAIL_1>"

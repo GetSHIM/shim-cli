@@ -10,7 +10,7 @@ import zipapp
 from pathlib import Path
 
 SOURCE_ROOT = Path(__file__).resolve().parent.parent / "src"
-PACKAGE = "shim_guard"
+PACKAGE = "shim_cli"
 INCLUDED = (
     "__init__.py",
     "py.typed",
@@ -60,12 +60,12 @@ VENDORED_EXCLUDES = (
     *COMPILED,
 )
 VENDORED_PRUNE = ("shortdata/region_*.py",)
-MAIN = """# Must parse before Python 3.10 so unsupported interpreters fail open.
+MAIN = """# Must parse before Python 3.9 so unsupported interpreters fail open.
 import sys
 
-MINIMUM = (3, 10)
+MINIMUM = (3, 9)
 NOTICE = (
-    "shim-guard: needs Python %d.%d or newer; found %s. "
+    "shim: needs Python %d.%d or newer; found %s. "
     "The prompt was not inspected.\\n"
 )
 
@@ -75,7 +75,7 @@ if sys.version_info[:2] < MINIMUM:
     )
     sys.exit(0)
 
-from shim_guard.hook import main  # noqa: E402
+from shim_cli.hook import main  # noqa: E402
 
 if __name__ == "__main__":
     sys.exit(main())

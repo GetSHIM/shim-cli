@@ -2,7 +2,7 @@
 
 ## What this does and does not prevent
 
-**With the default configuration, shim Guard does not prevent a secret typed
+**With the default configuration, shim does not prevent a secret typed
 into a Codex or Claude Code prompt from reaching the model.** It detects the
 value, reports what it found, and lets the prompt through. Those clients offer
 no prompt-rewrite field, so the only available alternative is refusing the
@@ -124,8 +124,10 @@ that is where the numbers came from.
 
 `shim config --ledger` opts in to keeping the same records after the session
 ends. It is off unless you turn it on, and `shim config --no-ledger` turns it
-back off. Files live under `$XDG_STATE_HOME/shim-guard` (or
-`~/.local/state/shim-guard`), one per month, `0600`, capped at 5 MB each.
+back off. Files live under `$XDG_STATE_HOME/shim` (or `~/.local/state/shim`),
+one per month, `0600`, capped at 5 MB each. A 0.2.0 install kept them under
+`shim-guard/`; those files are read and moved once, by the first `shim report`,
+`shim ledger purge` or `shim install` after the upgrade.
 
 Retention uses whole months. A month becomes eligible for deletion 30 days
 after its end, and the next ledger write prunes every eligible file. An entry
@@ -140,6 +142,41 @@ Turning the ledger off stops new records but does not delete existing files.
 These records are never transmitted. The hook and detector add no network
 destination, account, API key, or telemetry. The opt-in `shim watch` proxy
 forwards only to the provider the client already uses.
+
+### The last few digits, if you ask for them
+
+`[reveal]` is off by default. Turned on for `IBAN`, `CREDIT_CARD` or `PHONE`,
+the placeholder becomes `<IBAN_1:1326>` and **those digits reach the model**,
+because that is the point: they say which of three accounts a line refers to.
+Nothing else changes — the same spans are found, the same counts are recorded,
+and the value itself is still replaced.
+
+Four digits of a mobile number identify a person within a small team, so
+`PHONE` is the least conservative of the three; it is allowed, off by default,
+and worth a deliberate decision. Session records never quote a placeholder
+today, so a revealed tail does not reach the record or the ledger; if that ever
+changes, this sentence is the boundary it would cross.
+
+### Patterns you named yourself
+
+A `[[custom]]` entry is configuration, not prompt-derived data, so its **name**
+appears where an entity type does: in the session summary, in the session
+record, and in the opt-in ledger. The text that matched it never does, exactly
+as with a built-in type, and the placeholder is `<CUSTOM_n>` so the name does
+not reach the model either. Names are bounded to 32 characters and there are at
+most 32 of them.
+
+### What the model wrote back
+
+At `Stop`, Claude Code hands the hook the final assistant text of the turn.
+shim counts the entities in it and keeps the counts; the text is scanned in
+memory and stored nowhere, exactly as a prompt is. Nothing is changed, because
+the client has already shown it — the `model-output` direction can only
+observe, and a settings file that asks it to warn or enforce is refused. Text
+beyond the detector's 100,000-character limit is not scanned and the record
+says `truncated` rather than reporting a short count as a whole one. Only the
+turn's last text block reaches the hook, so anything the model said before a
+tool call in the same turn is not counted.
 
 ### When shim cannot inspect something
 
@@ -158,6 +195,20 @@ inspection, with bounded reason codes and skipped field or subtree counts.
 Commands and local writes are never rewritten. If no inspection is possible,
 the event passes through unchanged and unmasked with a visible warning; prompt
 errors still fail closed.
+
+**A large field is scanned in pieces, and the seams are the residual risk.**
+The detector works on at most 100,000 characters at a time. A longer field is
+cut at the last newline before each boundary and each piece scanned separately,
+with placeholder numbering continuing across them, so a 400 KB file read comes
+back masked rather than passing through whole. The pieces do not overlap, so a
+value written across a line break — a PEM block, a wrapped key — can fall in a
+seam and go unreported. Values that live on one line, which is every type shim
+detects, are unaffected. If one piece fails, the others are still masked and
+the summary counts the event as partially inspected.
+
+A field so large that the whole event exceeds shim's 1 MB input bound is not
+scanned at all. It passes through unchanged and is now counted in the session
+summary by tool and file, so a skipped read is visible rather than absent.
 
 ## What is changed on the way in
 
@@ -235,9 +286,32 @@ The proxy sees the whole wire body — the system prompt, the tools array, the
 full message history and every file the client inlined for an `@` reference.
 None of it is kept.
 
+Every text field of that body is offered to the detector: message content in
+either form, the text inside a tool result, the arguments of a tool call, the
+system prompt and the tool definitions. Two kinds of field are skipped because
+they are opaque rather than prose — the `data` of a base64 attachment and a
+thinking block's `signature`. Findings are attributed to the section they came
+from, so the summary can say what was in your prompt separately from what the
+client's own scaffolding carried.
+
+The tools and system sections repeat verbatim on every request of a session, so
+their result is remembered for the length of the run: the SHA-256 of the
+section and the entity counts it produced, at most sixteen of them, oldest
+evicted first. The remembered value is a hash and a tally; the text that
+produced it is not kept.
+
+The response is scanned too, and on the same terms. Its text and `thinking`
+blocks are held in memory for the length of one response, up to 1 MB, scanned
+only after the last byte has been relayed to the client, and discarded before
+the request returns. `thinking` is counted separately from the answer, because
+a value the model reasoned about is not the same fact as one it wrote down.
+The arguments of a tool call are not counted here; the hook already scans them
+at `PreToolUse`. Findings on this side are counted, not judged: the model wrote
+them, so they are not called a leak.
+
 What survives one request is a count and a size: bytes per section, entity
-counts by type, a token count from the provider, the model name and the request
-path. **No request or response body is ever written to disk**, and
+counts by type and by section, response counts by kind, the provider's stop
+reason, a token count from the provider, the model name and the request path. **No request or response body is ever written to disk**, and
 `tests/watch/test_proxy.py` asserts it by sending a unique marker through the
 proxy and then searching every file written anywhere beneath the temporary root
 for it.

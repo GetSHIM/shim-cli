@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import io
 import json
 import os
@@ -13,13 +14,13 @@ import pytest
 from click import unstyle
 from typer.testing import CliRunner
 
-from shim_guard import __version__
-from shim_guard.cli import output
-from shim_guard.cli.app import app
-from shim_guard.cli.output import terminal_text
-from shim_guard.config import load_policy
-from shim_guard.events.diet import DEFAULT_TRANSFORMS
-from shim_guard.guard import DEFAULT_ENTITIES
+from shim_cli import __version__
+from shim_cli.cli import output
+from shim_cli.cli.app import app
+from shim_cli.cli.output import terminal_text
+from shim_cli.config import load_policy
+from shim_cli.events.diet import DEFAULT_TRANSFORMS
+from shim_cli.guard import DEFAULT_ENTITIES
 
 runner = CliRunner()
 
@@ -82,7 +83,7 @@ def _guard_config(monkeypatch, tmp_path: Path) -> Path:
 def test_help_does_not_load_detector() -> None:
     script = (
         "import sys; from typer.testing import CliRunner; "
-        "from shim_guard.cli.app import app; "
+        "from shim_cli.cli.app import app; "
         "result = CliRunner().invoke(app, ['--help']); "
         "raise SystemExit(0 if result.exit_code == 0 and 'presidio_analyzer' not in sys.modules else 1)"
     )
@@ -111,12 +112,38 @@ def test_help_remains_readable_at_narrow_terminal_width() -> None:
     assert max(map(len, rendered.splitlines())) <= 20
 
 
+COMMANDS = (
+    "help",
+    "update",
+    "demo",
+    "scan",
+    "redact",
+    "config",
+    "install",
+    "status",
+    "doctor",
+    "revert",
+    "report",
+    "watch",
+    "ledger",
+)
+
+
+def test_no_rendered_help_says_guard() -> None:
+    rendered = {
+        name: unstyle(runner.invoke(app, [*name.split(), "--help"], color=False).output)
+        for name in ("--help", *COMMANDS)
+    }
+
+    assert sorted(name for name, text in rendered.items() if "Guard" in text) == []
+
+
 def test_help_command_lists_a_description_for_every_command() -> None:
     result = runner.invoke(app, ["help"], color=False)
     rendered = unstyle(result.output)
     descriptions = (
         "Show help.",
-        "Update SHIM Guard.",
+        "Update shim.",
         "Run a synthetic detector check.",
         "Scan UTF-8 stdin.",
         "Redact UTF-8 stdin.",
@@ -124,7 +151,7 @@ def test_help_command_lists_a_description_for_every_command() -> None:
         "Preview or install a client hook.",
         "Show hook status.",
         "Check client and hook health.",
-        "Remove SHIM Guard's client hook.",
+        "Remove shim's client hook.",
     )
 
     assert result.exit_code == 0
@@ -149,7 +176,7 @@ def test_update_uses_the_original_package_manager(monkeypatch) -> None:
         calls.append(command)
         return subprocess.CompletedProcess(command, 0)
 
-    monkeypatch.setattr("shim_guard.cli.app.subprocess.run", run)
+    monkeypatch.setattr("shim_cli.cli.app.subprocess.run", run)
     for installer in ("uv", "pip"):
         distribution = SimpleNamespace(
             read_text=lambda _, installer=installer: installer
@@ -159,9 +186,7 @@ def test_update_uses_the_original_package_manager(monkeypatch) -> None:
             packages.append(package)
             return distribution
 
-        monkeypatch.setattr(
-            "shim_guard.cli.app.metadata.distribution", get_distribution
-        )
+        monkeypatch.setattr("shim_cli.cli.app.metadata.distribution", get_distribution)
         assert runner.invoke(app, ["update"]).exit_code == 0
 
     assert packages == ["shim", "shim"]
@@ -245,7 +270,7 @@ def test_config_selects_entities_for_privacy_commands(
     assert json.loads(path_scan.output)["status"] == "safe"
     assert initial.exit_code == saved.exit_code == current.exit_code == 0
     assert adjusted.exit_code == final.exit_code == 0
-    assert "Current detection: 11/11 enabled" in initial.output
+    assert "Current detection: 12/12 enabled" in initial.output
     assert "ON" in saved.output and "OFF" in saved.output
     assert stat.S_IMODE(target.stat().st_mode) == 0o600
     assert json.loads(scan.output)["counts"] == {"EMAIL": 1}
@@ -316,7 +341,7 @@ def test_install_status_and_revert(monkeypatch, tmp_path: Path) -> None:
 
 
 def test_claude_install_status_doctor_and_revert(monkeypatch, tmp_path: Path) -> None:
-    from shim_guard.clients.claude.settings import hook_group
+    from shim_cli.clients.claude.settings import hook_group
 
     home = _claude_home(monkeypatch, tmp_path)
     _claude(monkeypatch, tmp_path)
@@ -348,7 +373,9 @@ def test_claude_install_status_doctor_and_revert(monkeypatch, tmp_path: Path) ->
     assert {item["name"] for item in doctor_payload["checks"]} == {
         "claude",
         "hook_configuration",
+        "legacy_names",
         "entity_settings",
+        "custom_patterns",
         "session_record",
         "runner",
         "hook_resolution",
@@ -362,11 +389,11 @@ def test_claude_install_status_doctor_and_revert(monkeypatch, tmp_path: Path) ->
 
 
 def test_copilot_install_status_doctor_and_revert(monkeypatch, tmp_path: Path) -> None:
-    from shim_guard.clients.copilot.settings import hook_document
+    from shim_cli.clients.copilot.settings import hook_document
 
     home = _copilot_home(monkeypatch, tmp_path)
     _copilot(monkeypatch, tmp_path)
-    target = home / ".copilot" / "hooks" / "shim-guard.json"
+    target = home / ".copilot" / "hooks" / "shim.json"
 
     missing = runner.invoke(app, ["status", "copilot", "--json"])
     preview = runner.invoke(app, ["install", "copilot", "--dry-run"])
@@ -381,7 +408,9 @@ def test_copilot_install_status_doctor_and_revert(monkeypatch, tmp_path: Path) -
     assert json.loads(missing.output)["state"] == "not_installed"
     assert json.loads(current.output)["state"] == "installed"
     assert json.loads(doctor.output)["status"] == "warning"
-    assert json.loads(target.read_bytes()) == {"version": 1, "hooks": {}}
+    # The file is shim's own, so revert deletes it rather than leaving an
+    # empty `{"version": 1, "hooks": {}}` shell behind.
+    assert not target.exists()
     assert json.loads(preview.output[preview.output.index("{") :]) == hook_document()
 
 
@@ -400,7 +429,9 @@ def test_confirmation_and_doctor(monkeypatch, tmp_path: Path) -> None:
         "codex",
         "hooks_feature",
         "hook_configuration",
+        "legacy_names",
         "entity_settings",
+        "custom_patterns",
         "session_record",
         "runner",
         "hook_resolution",
@@ -414,7 +445,7 @@ def test_confirmation_and_doctor(monkeypatch, tmp_path: Path) -> None:
 def test_install_preserves_shared_hooks_and_preview_hides_them(
     monkeypatch, tmp_path: Path
 ) -> None:
-    from shim_guard.clients.codex.settings import hook_group
+    from shim_cli.clients.codex.settings import hook_group
 
     home = _codex_home(monkeypatch, tmp_path)
     target = home / ".codex" / "hooks.json"
@@ -456,7 +487,7 @@ def test_install_preserves_shared_hooks_and_preview_hides_them(
 def test_repeated_install_does_not_reformat_existing_document(
     monkeypatch, tmp_path: Path
 ) -> None:
-    from shim_guard.clients.codex.settings import hook_group
+    from shim_cli.clients.codex.settings import hook_group
 
     home = _codex_home(monkeypatch, tmp_path)
     target = home / ".codex" / "hooks.json"
@@ -506,7 +537,7 @@ def test_install_refuses_hook_document_changed_during_confirmation(
         target.write_text(json.dumps(changed))
         return True
 
-    monkeypatch.setattr("shim_guard.cli.integrations.typer.confirm", change_hooks)
+    monkeypatch.setattr("shim_cli.cli.integrations.typer.confirm", change_hooks)
     result = runner.invoke(app, ["install", "codex"])
 
     assert result.exit_code == 2
@@ -533,7 +564,7 @@ def test_install_refuses_when_detector_warmup_fails(
     def fail(_: str) -> None:
         raise RuntimeError
 
-    monkeypatch.setattr("shim_guard.guard.evaluate", fail)
+    monkeypatch.setattr("shim_cli.guard.evaluate", fail)
     result = runner.invoke(app, ["install", "codex", "--yes"])
 
     assert result.exit_code == 2
@@ -542,24 +573,31 @@ def test_install_refuses_when_detector_warmup_fails(
 
 
 def test_doctor_version_states(monkeypatch, tmp_path: Path) -> None:
+    """Read the boundaries from the constants; a bump must not edit this test."""
+    from shim_cli.clients.codex.settings import (
+        MINIMUM_CODEX_VERSION,
+        TESTED_CODEX_VERSION,
+    )
+
     _codex_home(monkeypatch, tmp_path)
 
-    monkeypatch.setenv("PATH", "")
-    missing = runner.invoke(app, ["doctor", "codex", "--json"])
-    _codex(monkeypatch, tmp_path, "0.148.0")
-    older = runner.invoke(app, ["doctor", "codex", "--json"])
-    _codex(monkeypatch, tmp_path, "0.150.0")
-    future = runner.invoke(app, ["doctor", "codex", "--json"])
-    _codex(monkeypatch, tmp_path, "0.149.0")
-    current = runner.invoke(app, ["doctor", "codex", "--json"])
-
-    def codex_status(result) -> str:
+    def status(version: str | None) -> str:
+        if version is None:
+            monkeypatch.setenv("PATH", "")
+        else:
+            _codex(monkeypatch, tmp_path, version)
+        result = runner.invoke(app, ["doctor", "codex", "--json"])
         return json.loads(result.output)["checks"][0]["status"]
 
-    assert codex_status(missing) == "FAIL"
-    assert codex_status(older) == "FAIL"
-    assert codex_status(future) == "WARN"
-    assert codex_status(current) == "PASS"
+    major, minor, patch = (int(part) for part in MINIMUM_CODEX_VERSION.split("."))
+    below = f"{major}.{minor}.{patch - 1}"
+    beyond = f"{major}.{minor + 100}.0"
+
+    assert status(None) == "FAIL"
+    assert status(below) == "FAIL"
+    assert status(MINIMUM_CODEX_VERSION) == "PASS"
+    assert status(TESTED_CODEX_VERSION) == "PASS"
+    assert status(beyond) == "WARN"
 
 
 def test_config_preserves_the_sections_it_does_not_change(monkeypatch, tmp_path: Path):
@@ -631,7 +669,7 @@ def test_report_says_so_when_there_is_no_session(monkeypatch, tmp_path: Path) ->
 
 def test_report_renders_the_most_recent_session(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("SHIM_GUARD_SESSION_DIR", str(tmp_path / "spools"))
-    from shim_guard.session import spool
+    from shim_cli.session import spool
 
     spool.append(
         "a-session",
@@ -655,7 +693,7 @@ def test_report_renders_the_most_recent_session(monkeypatch, tmp_path: Path) -> 
 def test_ledger_purge_deletes_only_what_is_retained(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("SHIM_GUARD_STATE_DIR", str(tmp_path / "state"))
     monkeypatch.setenv("SHIM_GUARD_SESSION_DIR", str(tmp_path / "spools"))
-    from shim_guard.session import ledger, spool
+    from shim_cli.session import ledger, spool
 
     ledger.append({"action": "mask", "entities": {"SECRET": 1}})
     spool.append("live", {"action": "mask", "entities": {"SECRET": 1}})
@@ -672,7 +710,7 @@ def test_ledger_purge_deletes_only_what_is_retained(monkeypatch, tmp_path: Path)
 
 
 def test_diet_ships_on_and_can_be_turned_off(monkeypatch, tmp_path: Path) -> None:
-    from shim_guard.events.diet import DEFAULT_TRANSFORMS
+    from shim_cli.events.diet import DEFAULT_TRANSFORMS
 
     target = _guard_config(monkeypatch, tmp_path)
 
@@ -703,7 +741,7 @@ def test_a_single_transform_can_be_named_in_the_config_file(
 
 
 def test_report_reads_the_ledger_once_the_session_has_ended(tmp_path: Path) -> None:
-    from shim_guard.session import ledger
+    from shim_cli.session import ledger
 
     ledger.append(
         {
@@ -727,7 +765,7 @@ def test_report_reads_the_ledger_once_the_session_has_ended(tmp_path: Path) -> N
 
 
 def test_report_prefers_the_live_session_over_the_ledger() -> None:
-    from shim_guard.session import ledger, spool
+    from shim_cli.session import ledger, spool
 
     ledger.append(
         {
@@ -746,7 +784,7 @@ def test_report_prefers_the_live_session_over_the_ledger() -> None:
 
 
 def test_report_shows_one_session_not_the_whole_month() -> None:
-    from shim_guard.session import ledger
+    from shim_cli.session import ledger
 
     for session, when, entity in (
         ("older", "2026-08-29T10:00:00Z", "IBAN"),
@@ -793,7 +831,7 @@ def test_config_shows_whether_records_are_being_kept() -> None:
     (
         ("claude", ".claude/settings.json"),
         ("codex", ".codex/hooks.json"),
-        ("copilot", ".copilot/hooks/shim-guard.json"),
+        ("copilot", ".copilot/hooks/shim.json"),
     ),
 )
 def test_install_creates_a_config_directory_that_does_not_exist_yet(
@@ -848,3 +886,402 @@ def test_config_refuses_file_created_during_confirmation(monkeypatch, tmp_path):
     result = CliRunner().invoke(app, ["config", "--enable", "PHONE"])
     assert result.exit_code == 2
     assert target.read_bytes() == concurrent
+
+
+def test_the_coverage_table_says_what_stop_sees_and_that_it_changes_nothing(
+    monkeypatch, tmp_path: Path
+) -> None:
+    from shim_cli.cli.diagnostics import _coverage_rows
+
+    rows = {row["event"]: row for row in _coverage_rows("claude")}
+
+    assert "last_assistant_message" in rows["Stop"]["sees"]
+    assert rows["Stop"]["can_mask"] is False
+    assert rows["Stop"]["can_report"] is True
+
+
+def test_custom_patterns_are_written_read_and_removed(monkeypatch, tmp_path) -> None:
+    target = _guard_config(monkeypatch, tmp_path)
+
+    added = runner.invoke(
+        app,
+        ["config", "--custom", r"CODENAME=\bATLAS-[0-9]{4}\b", "--yes"],
+        color=False,
+    )
+    scanned = runner.invoke(app, ["scan", "--json"], input="ship ATLAS-0042")
+    removed = runner.invoke(
+        app, ["config", "--remove-custom", "CODENAME", "--yes"], color=False
+    )
+    after = runner.invoke(app, ["scan", "--json"], input="ship ATLAS-0042")
+
+    assert added.exit_code == 0
+    assert json.loads(scanned.output)["counts"] == {"CUSTOM": 1}
+    assert removed.exit_code == 0
+    assert json.loads(after.output)["counts"] == {}
+    assert "custom" not in target.read_text(encoding="utf-8")
+
+
+def test_a_literal_is_written_and_matched_whole(monkeypatch, tmp_path) -> None:
+    _guard_config(monkeypatch, tmp_path)
+
+    runner.invoke(app, ["config", "--custom-literal", "CODENAME=atlas", "--yes"])
+    matched = runner.invoke(app, ["scan", "--json"], input="atlas ships")
+    missed = runner.invoke(app, ["scan", "--json"], input="atlases ship")
+
+    assert json.loads(matched.output)["counts"] == {"CUSTOM": 1}
+    assert json.loads(missed.output)["counts"] == {}
+
+
+@pytest.mark.parametrize(
+    "value", (r"BAD=(a+)+$", r"BACKREF=(a)\1", "NOEQUALS", "lower=x")
+)
+def test_a_pattern_that_cannot_be_trusted_is_refused(
+    monkeypatch, tmp_path, value: str
+) -> None:
+    target = _guard_config(monkeypatch, tmp_path)
+    before = target.read_bytes() if target.exists() else None
+
+    result = runner.invoke(app, ["config", "--custom", value, "--yes"], color=False)
+
+    assert result.exit_code == 2
+    assert (target.read_bytes() if target.exists() else None) == before
+
+
+def test_a_backtracking_pattern_names_itself(monkeypatch, tmp_path) -> None:
+    _guard_config(monkeypatch, tmp_path)
+
+    result = runner.invoke(app, ["config", "--custom", "BAD=(a+)+$", "--yes"])
+
+    assert "BAD backtracks on repeated input" in unstyle(result.output)
+
+
+def test_the_same_name_twice_replaces_rather_than_duplicates(
+    monkeypatch, tmp_path
+) -> None:
+    target = _guard_config(monkeypatch, tmp_path)
+
+    runner.invoke(app, ["config", "--custom", "CODENAME=alpha", "--yes"])
+    runner.invoke(app, ["config", "--custom", "CODENAME=beta", "--yes"])
+
+    body = target.read_text(encoding="utf-8")
+    assert body.count("CODENAME") == 1
+    assert "beta" in body and "alpha" not in body
+
+
+def test_doctor_reports_a_pattern_that_is_already_in_the_file(
+    monkeypatch, tmp_path
+) -> None:
+    target = _guard_config(monkeypatch, tmp_path)
+    target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    target.write_text(
+        'enabled_entities = ["CUSTOM"]\n[[custom]]\nname = "BAD"\npattern = "(a+)+$"\n',
+        encoding="utf-8",
+    )
+    target.chmod(0o600)
+
+    result = runner.invoke(app, ["doctor", "claude", "--json"])
+
+    checks = {item["name"]: item for item in json.loads(result.output)["checks"]}
+    assert checks["custom_patterns"]["status"] == "FAIL"
+
+
+def test_reveal_is_written_honoured_and_removed(monkeypatch, tmp_path) -> None:
+    target = _guard_config(monkeypatch, tmp_path)
+    iban = "TR330006100519786457841326"
+
+    runner.invoke(app, ["config", "--reveal", "IBAN=4", "--yes"])
+    revealed = runner.invoke(app, ["redact"], input=f"pay {iban}")
+    runner.invoke(app, ["config", "--no-reveal", "IBAN", "--yes"])
+    plain = runner.invoke(app, ["redact"], input=f"pay {iban}")
+
+    assert "<IBAN_1:1326>" in revealed.output
+    assert "<IBAN_1>" in plain.output and ":1326" not in plain.output
+    assert "reveal" not in target.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("value", ("SECRET=4", "IBAN=9", "IBAN=x", "EMAIL=2"))
+def test_a_reveal_that_is_not_allowed_is_refused(
+    monkeypatch, tmp_path, value: str
+) -> None:
+    target = _guard_config(monkeypatch, tmp_path)
+    before = target.read_bytes() if target.exists() else None
+
+    result = runner.invoke(app, ["config", "--reveal", value, "--yes"], color=False)
+
+    assert result.exit_code == 2
+    assert (target.read_bytes() if target.exists() else None) == before
+
+
+def test_the_doctor_fixture_ignores_the_user_s_own_settings(
+    monkeypatch, tmp_path
+) -> None:
+    """SHIM_CONFIG outranks the 0.2.0 name; the self-test must still be isolated."""
+    from shim_cli.cli.diagnostics import _runner_check
+
+    target = tmp_path / "settings" / "config.toml"
+    target.parent.mkdir(mode=0o700, parents=True)
+    target.write_text('[mode]\nuser-prompt = "enforce"\n', encoding="utf-8")
+    target.chmod(0o600)
+    monkeypatch.setenv("SHIM_CONFIG", str(target))
+    monkeypatch.delenv("SHIM_GUARD_CONFIG", raising=False)
+
+    assert _runner_check("claude").status == "PASS"
+
+
+def test_a_venv_install_is_not_reported_as_no_hook(monkeypatch, tmp_path) -> None:
+    """`shim install` writes an absolute interpreter path, so PATH is irrelevant."""
+    from shim_cli.cli import diagnostics
+    from shim_cli.cli.resolution import Resolution
+
+    monkeypatch.setattr(
+        diagnostics,
+        "resolve",
+        lambda: Resolution(
+            "none",
+            "No hook is runnable; prompts are passing through uninspected.",
+            None,
+            None,
+        ),
+    )
+    monkeypatch.setattr(
+        diagnostics, "_installed_hook_runs_this_package", lambda _client: True
+    )
+
+    check = diagnostics._resolution_check("codex")
+
+    assert check.status == "PASS"
+    assert "nothing is needed on PATH" in check.detail
+
+
+def test_no_hook_anywhere_is_still_a_failure(monkeypatch, tmp_path) -> None:
+    from shim_cli.cli import diagnostics
+    from shim_cli.cli.resolution import Resolution
+
+    monkeypatch.setattr(
+        diagnostics,
+        "resolve",
+        lambda: Resolution(
+            "none",
+            "No hook is runnable; prompts are passing through uninspected.",
+            None,
+            None,
+        ),
+    )
+    monkeypatch.setattr(
+        diagnostics, "_installed_hook_runs_this_package", lambda _client: False
+    )
+
+    assert diagnostics._resolution_check("codex").status == "FAIL"
+
+
+def _legacy_claude_settings(home: Path, *, foreign: bool = False) -> Path:
+    from shim_cli.clients.claude.settings import legacy_hook_groups
+    from shim_cli.clients.hook_settings import add_groups
+
+    document = json.loads(add_groups(None, legacy_hook_groups()))
+    if foreign:
+        document["hooks"]["UserPromptSubmit"].append(
+            {"hooks": [{"type": "command", "command": "existing-hook"}]}
+        )
+    target = home / ".claude" / "settings.json"
+    target.write_text(json.dumps(document, indent=2))
+    return target
+
+
+def test_doctor_on_a_020_fragment_does_not_also_say_it_is_not_installed(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """The review found both lines two apart. The first one is false: the hook
+    is installed, in the shape 0.2.0 wrote."""
+    home = _claude_home(monkeypatch, tmp_path)
+    _claude(monkeypatch, tmp_path)
+    _legacy_claude_settings(home)
+
+    result = runner.invoke(app, ["doctor", "claude"])
+    text = " ".join(unstyle(result.output).split())
+
+    assert (
+        "hook installed in the 0.2.0 shape; run shim install claude to move it" in text
+    )
+    assert "hook group is not installed" not in text
+
+    payload = json.loads(runner.invoke(app, ["doctor", "claude", "--json"]).output)
+    names = {item["name"] for item in payload["checks"]}
+    assert "legacy_names" in names
+    assert "hook_configuration" not in names
+
+
+def test_install_over_a_020_fragment_says_it_replaced_the_line(
+    monkeypatch, tmp_path: Path
+) -> None:
+    home = _claude_home(monkeypatch, tmp_path)
+    _claude(monkeypatch, tmp_path)
+    _legacy_claude_settings(home)
+
+    result = runner.invoke(app, ["install", "claude", "--yes"])
+    text = " ".join(unstyle(result.output).split())
+
+    assert result.exit_code == 0
+    assert "Replaced the 0.2.0 hook line with the current one." in text
+    # Nothing was preserved and nothing was appended after anything.
+    assert "will be preserved" not in text
+    assert "Appended shim after existing" not in text
+
+
+def test_install_over_a_020_fragment_beside_a_foreign_hook_says_both(
+    monkeypatch, tmp_path: Path
+) -> None:
+    home = _claude_home(monkeypatch, tmp_path)
+    _claude(monkeypatch, tmp_path)
+    target = _legacy_claude_settings(home, foreign=True)
+
+    result = runner.invoke(app, ["install", "claude", "--yes"])
+    text = " ".join(unstyle(result.output).split())
+
+    assert "Replaced the 0.2.0 hook line with the current one." in text
+    assert "will be preserved" in text
+    assert "existing-hook" in target.read_text(encoding="utf-8")
+
+
+def _broken_config(tmp_path: Path) -> Path:
+    target = tmp_path / "shim-roots" / "config" / "shim" / "config.toml"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        'enabled_entities = ["EMAIL"]\nledger = true\nbroken line here\n',
+        encoding="utf-8",
+    )
+    return target
+
+
+@pytest.mark.parametrize(
+    "command",
+    [["doctor", "claude"], ["config", "--enable", "IBAN", "--yes"]],
+)
+def test_a_broken_settings_file_names_the_file_the_line_and_the_way_out(
+    command: list[str], monkeypatch, tmp_path: Path
+) -> None:
+    """`Entity settings are unsafe or invalid` named none of the three, and
+    every prompt was withheld until the user guessed which was wrong."""
+    _claude_home(monkeypatch, tmp_path)
+    _claude(monkeypatch, tmp_path)
+    target = _broken_config(tmp_path)
+
+    result = runner.invoke(app, command)
+    # Rich wraps long paths, so compare with the whitespace removed.
+    text = " ".join(unstyle(result.output).split())
+    dense = text.replace(" ", "")
+
+    assert str(target).replace(" ", "") in dense
+    assert "line3" in dense
+    assert "shimconfig--reset" in dense
+
+
+def test_the_hook_says_nothing_about_the_contents_of_a_broken_settings_file(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Doctor may quote the parser. The hook may not: its output reaches the
+    model, and a settings file is the user's, not the model's."""
+    from shim_cli.hook import main
+
+    target = _broken_config(tmp_path)
+    monkeypatch.setattr(
+        "sys.stdin",
+        SimpleNamespace(
+            buffer=io.BytesIO(
+                b'{"hook_event_name":"UserPromptSubmit","prompt":"hello"}'
+            )
+        ),
+    )
+    written: list[bytes] = []
+    monkeypatch.setattr(
+        "sys.stdout",
+        SimpleNamespace(
+            buffer=SimpleNamespace(write=written.append, flush=lambda: None)
+        ),
+    )
+
+    monkeypatch.setattr("sys.argv", ["shim-hook", "claude"])
+    with contextlib.suppress(SystemExit):
+        main()
+
+    output_text = b"".join(written).decode("utf-8")
+    assert "broken line here" not in output_text
+    assert str(target) not in output_text
+    assert "shim doctor claude" in output_text
+
+
+def test_the_ledger_can_be_read_back_not_only_deleted(monkeypatch, tmp_path) -> None:
+    """`shim ledger purge` was the only ledger command, so the opt-in record
+    was write-only: enabling it to prove something meant reading JSONL by hand.
+    """
+    from shim_cli.session import ledger
+
+    root = tmp_path / "shim-roots" / "state" / "shim"
+    root.mkdir(parents=True, exist_ok=True)
+    root.chmod(0o700)  # the journal refuses a directory anyone else can read
+    path = root / "ledger-2026-09.jsonl"
+    path.write_text(
+        json.dumps(
+            {"ts": "2026-09-01T00:00:00Z", "entities": {"IBAN": 2}, "tool_name": "Read"}
+        )
+        + "\n"
+        + json.dumps(
+            {
+                "ts": "2026-09-02T00:00:00Z",
+                "entities": {"EMAIL": 1},
+                "tool_name": "Read",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    path.chmod(0o600)
+
+    result = runner.invoke(app, ["ledger", "show"])
+    text = " ".join(unstyle(result.output).split())
+
+    assert result.exit_code == 0
+    assert "2 events over 2 day(s)" in text
+    assert f"kept for {ledger.RETENTION_DAYS} days" in text
+    assert "2026-09-01 1 event 2 IBAN" in text
+    assert "2026-09-02 1 event 1 EMAIL" in text
+
+    payload = json.loads(runner.invoke(app, ["ledger", "show", "--json"]).output)
+    assert payload["events"] == 2
+    assert payload["days"] == 2
+    assert [entry["ts"] for entry in payload["entries"]] == [
+        "2026-09-01T00:00:00Z",
+        "2026-09-02T00:00:00Z",
+    ]
+
+
+def test_an_empty_ledger_says_how_to_turn_it_on(monkeypatch, tmp_path) -> None:
+    result = runner.invoke(app, ["ledger", "show"])
+
+    assert result.exit_code == 0
+    assert "shim config --ledger" in unstyle(result.output)
+
+
+def test_a_failed_removal_is_not_reported_as_a_removal(monkeypatch, tmp_path) -> None:
+    """`removed the old hook file at ...` printed even when the unlink raised,
+    because the message sat outside the suppress. The file was still there and
+    doctor kept naming it, while the user had been told it was gone.
+    """
+    from shim_cli.cli import integrations
+
+    legacy = tmp_path / "shim-guard.json"
+    legacy.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(integrations, "_legacy_copilot_file", lambda: legacy)
+
+    def refuse(self):
+        raise OSError("read-only file system")
+
+    monkeypatch.setattr(Path, "unlink", refuse)
+    printed: list[str] = []
+    monkeypatch.setattr(
+        integrations, "emit", lambda level, text, **kw: printed.append(text)
+    )
+
+    integrations._remove_legacy_copilot_file()
+
+    assert printed == [], "nothing was removed, so nothing may say it was"

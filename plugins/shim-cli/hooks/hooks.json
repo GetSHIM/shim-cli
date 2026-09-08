@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c '[ -n \"$CLAUDE_PLUGIN_ROOT\" ] && exit 0; exec \"${PLUGIN_ROOT}/hooks/run-shim\" codex \"${PLUGIN_ROOT}\"'",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

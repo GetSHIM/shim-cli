@@ -121,6 +121,13 @@ STEPS = (
         ("Bash",),
     ),
     Step(
+        "model-reply",
+        "First say only the word CHECKING. Then use the Read tool on "
+        "dotenv-sample.txt. Then reply with one sentence naming the address "
+        "that file sets as OWNER_EMAIL.",
+        ("Read",),
+    ),
+    Step(
         "batch",
         "In one turn, use the Read tool on notes.md and the Read tool on "
         "docker-compose.yml. Then reply with only the word DONE.",

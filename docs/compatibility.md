@@ -4,11 +4,49 @@
 
 | Area | Status |
 | --- | --- |
-| Python | CPython 3.10 through 3.13 |
+| Python | CPython 3.10 through 3.13 for the package; the plugin archive runs on 3.9 through 3.13 |
 | Operating systems | macOS and Linux target |
 | Prompt hooks | Codex CLI, Claude Code, and GitHub Copilot CLI |
 | Tool hooks | Claude Code `PreToolUse` and `PostToolUse` only |
-| `shim watch` | Claude Code verified; Codex available with an unverified-proxy warning; Copilot out of scope because a custom endpoint removes GitHub authentication |
+| `shim watch` | Claude Code only. Codex is refused: it reads its endpoint from its own configuration, so the proxy is bypassed and the session measured as empty ([probe](probe-2026-09-codex-watch.md)). Copilot out of scope because a custom endpoint removes GitHub authentication |
+
+## Deprecated names
+
+The package was renamed from `shim_guard` to `shim_cli` in 0.3.0. Three names
+survive so that an install written by 0.2.0 keeps working, and all three are
+removed in **0.5.0**, the second minor release after 0.3.0:
+
+| Name | Replacement |
+| --- | --- |
+| the importable `shim_guard` package, including `python -m shim_guard.hook` | `shim_cli`, `python -m shim_cli.hook` |
+| the `shim-guard-hook` console script | `shim-hook` |
+| the `SHIM_GUARD_CONFIG` variable | `SHIM_CONFIG`, which outranks it |
+| the `shim-guard` marketplace entry in both plugin manifests | the `shim-cli` entry |
+
+The compatibility package re-exports and does nothing else. It emits no
+deprecation warning: the hook is a cold-start subprocess whose stderr the
+client shows to the user, and a warning on every event is noise.
+
+The plugin marketplaces carry a second `shim-guard` entry pointing at the same
+directory, also removed in 0.5.0. On Claude Code that entry is enough: the
+marketplace key is whatever the user typed when they added it, so a plugin
+installed as `shim-guard@shim-guard` keeps loading and updating with no action.
+
+**Codex needs one migration.** There the marketplace name in the manifest *is*
+the identity, so renaming it to `shim-cli` orphans an install made under the old
+name — `config.toml` still says the plugin is enabled while `codex plugin list`
+reports nothing installed. A Codex user who installed the 0.2.0 plugin runs:
+
+```
+codex plugin remove shim-guard
+codex plugin marketplace remove shim-guard
+codex plugin marketplace add https://github.com/GetSHIM/shim-cli
+codex plugin add shim-cli@shim-cli
+```
+
+This affects the plugin only. A Codex user who installed the PyPI package is
+unaffected, and the zero-install plugin path could not reach the archive under
+Codex before 0.3.0, so no working Codex plugin install is being broken.
 
 Codex and Copilot install prompt hooks only. The repository contains no
 Codex, Copilot, `PostToolUseFailure`, or `PostToolBatch` tool adapter. Tool
@@ -25,6 +63,43 @@ arguments and native structured tool responses. Copilot uses
 `userPromptTransformed` to replace the model-facing prompt; the original can
 remain visible in its timeline.
 
+**The plugin ships two hook files, and Claude Code reads both.** `plugin.json`
+declares `hooks/claude.json`, but Claude Code 2.1.263 also loads
+`hooks/hooks.json` by convention — the file Codex finds the same way, because
+`.codex-plugin/plugin.json` has no field that names a hooks path. Claude Code
+does not expand Codex's `${PLUGIN_ROOT}`, so every prompt ran `/hooks/run-shim`
+and logged exit 127 beside the real hook's output. The Codex command therefore
+opens with `[ -n "$CLAUDE_PLUGIN_ROOT" ] && exit 0`: Claude Code sets that
+variable and the command stands down silently, while Codex does not set it and
+substitutes `${PLUGIN_ROOT}` as before. If a future Codex manifest accepts a
+hooks path, the file becomes `hooks/codex.json` and the guard is dropped.
+
+**A Codex hook does not run until it is trusted.** From 0.151.0 Codex holds a
+persisted trust record per hook and silently skips any hook it does not have
+one for: no warning, no line in the transcript, and prompts reach the model
+uninspected. Writing the fragment is therefore only half of `shim install
+codex` — review and trust it in Codex, which is why `shim doctor codex` ends
+on `Codex hook activation is client UI state; verify SHIM with /hooks`. shim
+cannot read that record and does not write it; a diagnosis that claimed to
+would be guessing. `codex exec --dangerously-bypass-hook-trust` runs enabled
+hooks without it, which is useful to confirm an install and wrong as a habit.
+
+## 0.3.0 release evidence
+
+Recorded 8 September 2026 on macOS 26.4 arm64, CPython 3.13.5, uv 0.12.5.
+
+| Evidence | Recorded result |
+| --- | --- |
+| Local gate | `python scripts/check.py` green: lock, `ruff check`, `ruff format --check`, `ty`, **1,856 tests**, wheel and source distribution built. |
+| Tag-time re-verification | `release.yml` re-runs the same gate on the tagged tree, rebuilds from a clean snapshot and requires the fresh build to match the tested artifacts byte for byte. The tag is cut only from a commit whose `Verify` run is green. |
+| Claude Code | 2.1.263. Prompt and tool hooks exercised live; `shim watch` measured request and response, both directions reported apart, `stop_reason` read from the wire. The `Stop` last-block limitation is captured as a fixture. |
+| Codex CLI | 0.151.0. Prompt hook installed into a real `~/.codex` and exercised live: `observe` passed the prompt through, `enforce` blocked it before the model call. Hook trust is a client-side record shim cannot read; an untrusted hook runs silently not at all. |
+| Codex `shim watch` | Refused, with the reason measured rather than assumed. See [the September 2026 probe](probe-2026-09-codex-watch.md). The transport works; the shipped implementation set an environment variable Codex ignores. |
+| GitHub Copilot CLI | **Not re-verified this cycle.** 1.0.83 is installed locally; the tested version remains 1.0.80. Install and diagnosis paths are covered by the suite; no live client run was made for 0.3.0. |
+| Context diet under the proxy | Seven scripted Claude Code sessions, 8 September 2026. The cache prefix held in every one, including a session whose configuration changed mid-run. A 22,199-byte tool result became 13,374 with the diet on and 21,690 with it off. [Study](study-2026-09-08-image-repeat-cache.md). |
+| Python floor | 3.10 is exercised by CI only; no local 3.10 run was made. The bundled archive targets 3.9 and is rebuilt and compared by a contract test. |
+| Supply-chain workflows | CodeQL, Scorecard, Dependabot and the prose check are configured and their pinning is asserted by `tests/contracts/test_workflows.py`. They run on pull requests into `main` and on pushes to `main`; a first green run of each is a condition of the release, not a claim of this document. |
+
 ## Dated development evidence
 
 These facts guided implementation. They are not evidence for the 0.2.0 tag and
@@ -37,6 +112,13 @@ must not be copied into its release record without a fresh run.
 | Interactive prompt clients | Codex ChatGPT sign-in, Claude first-party sign-in, and GitHub Copilot OAuth exercised on macOS 26.5.2 arm64 |
 | Hook activation and timeout behavior | Hooks reviewed and activated; safe and finding prompts exercised; forced timeout or error observed to fail open at the client boundary |
 | `shim watch` | Claude verified end to end on 30 August 2026 against a live subscription sign-in; request forwarded unchanged, streaming preserved, and provider usage read from the wire |
+| `shim watch` scan scope | Claude Code 2.1.263 on 8 September 2026. One minimal request measured 191,599 bytes, 921 text leaves and 169,134 characters; a working request measured 4,402 leaves, 256,517 characters and 35 levels of nesting, the depth coming from an MCP tool's recursive JSON schema. The hook's own limits (2,000 leaves, 200,000 characters, depth 24) would report almost every real request as unmeasured, so the proxy carries its own. |
+| `shim watch` both directions | Claude Code 2.1.263 on 8 September 2026. A synthetic three-IBAN file read through the Read tool and echoed back reported `request 3 IBAN in messages`, `response 3 IBAN in model text`, `compare IBAN 3 in request, 3 in response`. |
+| `Stop` model output | Claude Code 2.1.263 on 8 September 2026. `last_assistant_message` is present and carries **only the turn's last text block**: a turn that said `CHECKING`, called `Read`, then answered held just the answer. Text the model produced before a tool call in the same turn is not counted. Capture: `tests/fixtures/probe/claude/Stop-none-model-reply-1.json`. |
+| Codex `shim watch` transport | Codex CLI 0.151.0 on 8 September 2026, ChatGPT sign-in, macOS 26.4.0 arm64. With the base URL passed as a config override every request reached the proxy; with `OPENAI_BASE_URL` alone **nothing did**. `chatgpt.com` returned 200 to a request re-sent by Python's `http.client` with a stock TLS context, `cf-ray` present, no challenge — so there is no fingerprint rejection. A WebSocket upgrade was attempted and fell back to HTTP 0.602 s after a 426. The usage shape is still uncaptured: the account's quota returned 429 before any turn completed. [Probe](probe-2026-09-codex-watch.md). |
+| Claude auth header shape | Claude Code subscription sign-in on 8 September 2026 sends `authorization` and no `x-api-key`, with `anthropic-beta` and `anthropic-version`; upstream 200 through the same harness. |
+| Codex live prompt hook | Codex CLI 0.151.0 on 8 September 2026, ChatGPT sign-in, macOS 26.4.0 arm64. With the hook trusted, a prompt carrying a synthetic address reported `hook: UserPromptSubmit Completed` under `observe` and `hook: UserPromptSubmit Blocked` under `enforce`, the blocked prompt never reaching the model. The same prompt with the hook untrusted produced no hook line at all and was sent unchanged. |
+| `Stop` scan cost | 66 KB final assistant text, hook end to end: 41 ms median, 50 ms p95 on macOS 26.5.2 arm64, CPython 3.13.5. Text beyond the detector's 100,000-character limit is not scanned and the record says `truncated`. |
 
 The native Claude capture and the decisions made from it are preserved in the
 [August 2026 probe](probe-2026-08.md). Repository fixtures contract the prompt

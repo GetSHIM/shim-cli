@@ -1,0 +1,23 @@
+version: 2
+updates:
+  # ruff is pinned by the dev group; bumping it changes what
+  # `ruff format --check` accepts, so it moves on purpose, not on schedule.
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      python:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    ignore:
+      - dependency-name: ruff
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]

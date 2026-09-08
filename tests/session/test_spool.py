@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from shim_guard.session import spool
+from shim_cli.session import spool
 
 SESSION = "0199aa11-2233-4455-6677-889900aabbcc"
 
@@ -201,8 +201,8 @@ def test_a_configured_directory_that_is_not_a_plain_path_is_refused(
 
 
 def test_the_largest_record_this_code_can_produce_fits_the_entry_cap() -> None:
-    from shim_guard.guard import ENTITY_TYPES
-    from shim_guard.session.record import Record
+    from shim_cli.guard import ENTITY_TYPES
+    from shim_cli.session.record import Record
 
     worst = Record(
         client="claude",
@@ -254,7 +254,7 @@ def test_concurrent_hook_processes_do_not_lose_or_tear_records(
 
     processes = [
         subprocess.Popen(
-            (sys.executable, "-I", "-B", "-m", "shim_guard.hook", "claude"),
+            (sys.executable, "-I", "-B", "-m", "shim_cli.hook", "claude"),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,

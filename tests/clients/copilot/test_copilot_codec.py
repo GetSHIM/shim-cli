@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from shim_guard.clients.copilot.hook import block_output, error_output, parse_input
+from shim_cli.clients.copilot.hook import block_output, error_output, parse_input
 
 
 @dataclass(frozen=True)
@@ -52,7 +52,7 @@ def test_copilot_rewrites_sensitive_prompt_directly() -> None:
 
 def test_copilot_error_replaces_the_uninspectable_prompt() -> None:
     assert error_output() == (
-        b'{"modifiedTransformedPrompt":"SHIM Guard could not inspect this prompt, '
+        b'{"modifiedTransformedPrompt":"shim could not inspect this prompt, '
         b"so it was withheld. Do not act on the original prompt; tell the user to "
         b'run `shim doctor copilot` for the reason."}'
     )

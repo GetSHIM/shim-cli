@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from shim_guard.clients.claude.settings import (
+from shim_cli.clients.claude.settings import (
     HOOK_TIMEOUT_SECONDS,
     MINIMUM_CLAUDE_VERSION,
     TESTED_CLAUDE_VERSION,
@@ -16,14 +16,14 @@ from shim_guard.clients.claude.settings import (
     target_path,
     tool_hook_group,
 )
-from shim_guard.clients.claude.tool_events import INSTALLED_EVENTS
-from shim_guard.session import SESSION_EVENTS
+from shim_cli.clients.claude.tool_events import INSTALLED_EVENTS
+from shim_cli.session import SESSION_EVENTS
 
 
 def test_claude_code_settings_use_shell_free_exec_form(tmp_path: Path) -> None:
     interpreter = tmp_path / "venv's python"
     handler = {
-        "args": ["-I", "-B", "-m", "shim_guard.hook", "claude"],
+        "args": ["-I", "-B", "-m", "shim_cli.hook", "claude"],
         "command": str(interpreter),
         "timeout": 30,
         "type": "command",

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from shim_guard.session import SESSION_EVENTS, spool
+from shim_cli.session import SESSION_EVENTS, spool
 
 ROOT = Path(__file__).parents[2]
 SESSION = "0199aa11-2233-4455-6677-889900aabbcc"
@@ -21,7 +21,7 @@ def _isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _run(payload: dict, client: str = "claude") -> bytes:
     result = subprocess.run(
-        (sys.executable, "-I", "-B", "-m", "shim_guard.hook", client),
+        (sys.executable, "-I", "-B", "-m", "shim_cli.hook", client),
         input=json.dumps(payload).encode(),
         capture_output=True,
         cwd=ROOT,
@@ -152,6 +152,164 @@ def test_the_prompt_path_is_recorded_too() -> None:
 
 
 def test_the_installed_session_events_are_the_ones_the_hook_dispatches() -> None:
-    from shim_guard import hook
+    from shim_cli import hook
 
     assert set(SESSION_EVENTS) == {hook._STOP_EVENT, hook._SESSION_END_EVENT}
+
+
+REPLY = "I moved the account TR330006100519786457841326 and told alice@example.com."
+
+
+def test_the_model_s_own_reply_is_counted_at_stop() -> None:
+    _run(_read_event("/work/service/.env"))
+
+    document = json.loads(_run(_stop(last_assistant_message=REPLY)))
+
+    message = document["systemMessage"]
+    assert "model     1 EMAIL, 1 IBAN in its replies" in message
+    assert "(model-generated content, not leaks)" in message
+    assert "TR330006100519786457841326" not in message
+    assert "alice@example.com" not in message
+
+
+def test_a_clean_reply_is_not_worth_a_summary() -> None:
+    assert _run(_stop(last_assistant_message="All three tests pass.")) == b""
+
+
+def test_a_reply_is_counted_even_when_the_summary_is_suppressed() -> None:
+    assert _run(_stop(stop_hook_active=True, last_assistant_message=REPLY)) == b""
+
+    document = json.loads(_run(_stop()))
+
+    assert "model     1 EMAIL, 1 IBAN in its replies" in document["systemMessage"]
+
+
+@pytest.mark.parametrize("value", (None, 7, "", ["a"], {"text": "a"}))
+def test_a_missing_or_malformed_reply_changes_nothing(value: object) -> None:
+    _run(_read_event("/work/service/.env"))
+    payload = _stop()
+    if value is not None:
+        payload["last_assistant_message"] = value
+
+    document = json.loads(_run(payload))
+
+    assert "1 SECRET" in document["systemMessage"]
+    assert "in its replies" not in document["systemMessage"]
+
+
+def test_the_reply_count_reaches_the_report_as_its_own_direction() -> None:
+    _run(_stop(last_assistant_message=REPLY))
+
+    records = spool.entries(SESSION)
+
+    assert [record["direction"] for record in records] == ["model-output"]
+    assert records[0]["action"] == "report"
+    assert records[0]["mode"] == "observe"
+    assert records[0]["entities"] == {"EMAIL": 1, "IBAN": 1}
+    assert REPLY not in json.dumps(records)
+
+
+def test_a_reply_past_the_scan_bound_is_counted_short_and_says_so() -> None:
+    from shim_cli.guard.normalize import MAX_SOURCE_CHARACTERS
+
+    filler = "fine. " * ((MAX_SOURCE_CHARACTERS // 6) + 100)
+    _run(_stop(last_assistant_message=filler + " alice@example.com"))
+
+    records = spool.entries(SESSION)
+
+    assert records[0]["note"] == "truncated"
+    assert records[0]["entities"] == {}
+    assert records[0]["in_bytes"] > MAX_SOURCE_CHARACTERS
+
+
+def test_a_reply_just_under_the_bound_is_counted_in_full() -> None:
+    from shim_cli.guard.normalize import MAX_SOURCE_CHARACTERS
+
+    filler = "fine. " * ((MAX_SOURCE_CHARACTERS // 6) - 100)
+    _run(_stop(last_assistant_message=filler + " alice@example.com"))
+
+    records = spool.entries(SESSION)
+
+    assert records[0]["note"] == ""
+    assert records[0]["entities"] == {"EMAIL": 1}
+
+
+CUSTOM_SETTINGS = (
+    'enabled_entities = ["CUSTOM"]\n'
+    '[[custom]]\nname = "PROJECT_CODENAME"\npattern = "ATLAS-[0-9]{4}"\n'
+)
+
+
+@pytest.fixture
+def _configured(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    target = tmp_path / "settings" / "config.toml"
+    target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    target.write_text(CUSTOM_SETTINGS, encoding="utf-8")
+    target.chmod(0o600)
+    monkeypatch.setenv("SHIM_CONFIG", str(target))
+
+
+def _codename_event() -> dict:
+    return {
+        "hook_event_name": "PostToolUse",
+        "session_id": SESSION,
+        "tool_name": "Read",
+        "tool_input": {"file_path": "/work/plan.md"},
+        "tool_response": {"type": "text", "file": {"content": "ship ATLAS-0042\n"}},
+    }
+
+
+def test_a_configured_pattern_masks_a_tool_result_and_names_itself(
+    _configured,
+) -> None:
+    masked = json.loads(_run(_codename_event()))
+    document = json.loads(_run(_stop()))
+
+    output = masked["hookSpecificOutput"]["updatedToolOutput"]
+    assert output["file"]["content"] == "ship <CUSTOM_1>\n"
+    assert "custom    1 PROJECT_CODENAME" in document["systemMessage"]
+    assert "ATLAS-0042" not in document["systemMessage"]
+
+
+def test_the_same_result_is_untouched_without_the_pattern() -> None:
+    assert _run(_codename_event()) == b""
+
+
+@pytest.fixture
+def _revealing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    target = tmp_path / "settings" / "config.toml"
+    target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    target.write_text("[reveal]\nIBAN = 4\n", encoding="utf-8")
+    target.chmod(0o600)
+    monkeypatch.setenv("SHIM_CONFIG", str(target))
+
+
+def _iban_event() -> dict:
+    return {
+        "hook_event_name": "PostToolUse",
+        "session_id": SESSION,
+        "tool_name": "Read",
+        "tool_input": {"file_path": "/work/accounts.txt"},
+        "tool_response": {
+            "type": "text",
+            "file": {
+                "content": (
+                    "one TR330006100519786457841326\ntwo GB29NWBK60161331926819\n"
+                )
+            },
+        },
+    }
+
+
+def test_a_revealed_tail_reaches_the_masked_tool_result(_revealing) -> None:
+    document = json.loads(_run(_iban_event()))
+
+    content = document["hookSpecificOutput"]["updatedToolOutput"]["file"]["content"]
+    assert content == "one <IBAN_1:1326>\ntwo <IBAN_2:6819>\n"
+
+
+def test_the_same_result_is_fully_masked_without_the_table() -> None:
+    document = json.loads(_run(_iban_event()))
+
+    content = document["hookSpecificOutput"]["updatedToolOutput"]["file"]["content"]
+    assert content == "one <IBAN_1>\ntwo <IBAN_2>\n"

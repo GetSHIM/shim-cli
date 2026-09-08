@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from shim_guard.events import diet
+from shim_cli.events import diet
 
 ROOT = Path(__file__).parents[2]
 
@@ -57,7 +57,7 @@ def test_every_transform_is_deterministic_within_a_process(text: str) -> None:
 def test_transforms_are_deterministic_across_processes() -> None:
     source = (
         "import json,sys\n"
-        "from shim_guard.events import diet\n"
+        "from shim_cli.events import diet\n"
         "samples = json.loads(sys.stdin.read())\n"
         "sys.stdout.write(json.dumps([diet.shrink(t) for t in samples]))\n"
     )

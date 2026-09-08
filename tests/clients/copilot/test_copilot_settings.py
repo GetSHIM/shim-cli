@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from shim_guard.clients.copilot.settings import (
+from shim_cli.clients.copilot.settings import (
     HOOK_TIMEOUT_SECONDS,
     MINIMUM_COPILOT_VERSION,
     TESTED_COPILOT_VERSION,
@@ -43,7 +43,7 @@ def test_copilot_1080_hook_file_is_exact(tmp_path: Path) -> None:
         "-I",
         "-B",
         "-m",
-        "shim_guard.hook",
+        "shim_cli.hook",
         "copilot",
     ]
     assert HOOK_TIMEOUT_SECONDS == 30
@@ -55,10 +55,8 @@ def test_copilot_target_respects_home_and_copilot_home(
 ) -> None:
     monkeypatch.setenv("COPILOT_HOME", str(tmp_path / "configured"))
 
-    assert target_path() == tmp_path / "configured" / "hooks" / "shim-guard.json"
-    assert target_path(tmp_path) == (
-        tmp_path / ".copilot" / "hooks" / "shim-guard.json"
-    )
+    assert target_path() == tmp_path / "configured" / "hooks" / "shim.json"
+    assert target_path(tmp_path) == (tmp_path / ".copilot" / "hooks" / "shim.json")
 
 
 def test_copilot_hook_file_install_and_revert_are_exact(tmp_path: Path) -> None:

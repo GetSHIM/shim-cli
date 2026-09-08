@@ -1,0 +1,34 @@
+name: prose
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  naming:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check the name in metadata files
+        run: |
+          set -uo pipefail
+          hits=$(grep -rnE '\b(SHIM|Shim)\b' \
+            --include='pyproject.toml' \
+            --include='plugin.json' \
+            --include='marketplace.json' \
+            --include='package.json' \
+            --include='*.cff' \
+            --exclude='NOTICE' --exclude='LICENSE' \
+            . || true)
+          if [ -n "$hits" ]; then
+            echo "The name is lowercase 'shim'. Fix these:"
+            echo "$hits"
+            exit 1
+          fi

@@ -4,7 +4,7 @@
   </a>
 </p>
 
-<h1 align="center">shim Guard</h1>
+<h1 align="center">shim-cli</h1>
 
 <p align="center">
   <strong>Local traffic visibility and privacy controls for coding agents.</strong><br>
@@ -14,16 +14,23 @@
 <p align="center">
   <a href="https://pypi.org/project/shim/"><img src="https://img.shields.io/pypi/v/shim.svg?logo=pypi&amp;label=PyPI" alt="PyPI version"></a>
   <a href="https://github.com/GetSHIM/shim-cli/actions/workflows/ci.yml"><img src="https://github.com/GetSHIM/shim-cli/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/GetSHIM/shim-cli/actions/workflows/codeql.yml"><img src="https://github.com/GetSHIM/shim-cli/actions/workflows/codeql.yml/badge.svg" alt="CodeQL"></a>
+  <a href="https://scorecard.dev/viewer/?uri=github.com/GetSHIM/shim-cli"><img src="https://api.scorecard.dev/projects/github.com/GetSHIM/shim-cli/badge" alt="OpenSSF Scorecard"></a>
   <a href="https://pypi.org/project/shim/"><img src="https://img.shields.io/pypi/pyversions/shim.svg?logo=python&amp;logoColor=white" alt="Python versions"></a>
   <a href="https://github.com/GetSHIM/shim-cli/blob/main/LICENSE"><img src="https://img.shields.io/github/license/GetSHIM/shim-cli.svg" alt="License"></a>
   <a href="https://github.com/GetSHIM/shim-cli/stargazers"><img src="https://img.shields.io/github/stars/GetSHIM/shim-cli.svg?style=flat&amp;logo=github" alt="GitHub stars"></a>
 </p>
 
-shim Guard shows you what your coding agent actually sends to the model — how
+shim-cli shows you what your coding agent actually sends to the model — how
 many tokens went where, what the turn cost, and which secrets and personal data
 were in it — and masks what it can before the model sees it. The hook and
 detector add no network destination, account, API key, or telemetry. The opt-in
 `shim watch` proxy forwards only to the provider the client already uses.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/GetSHIM/shim-cli/main/docs/assets/shots/masked-tool-result.png" width="880"
+       alt="A terminal: the agent runs Read on a .env file holding an AWS key, an IBAN and an email; the model is handed AWS_ACCESS_KEY_ID=&lt;SECRET_1&gt;, BILLING_IBAN=&lt;IBAN_1&gt; and &lt;EMAIL_1&gt; instead.">
+</p>
 
 Two commands, two different questions:
 
@@ -33,7 +40,7 @@ Two commands, two different questions:
 | `shim install claude` | Mask secrets and personal data in eligible tool results, every session, automatically. |
 
 > [!WARNING]
-> shim Guard is alpha software and a best-effort guard, not a data-loss
+> shim-cli is alpha software and a best-effort guard, not a data-loss
 > prevention boundary. Read the [privacy limitations](https://github.com/GetSHIM/shim-cli/blob/main/docs/privacy.md) before
 > using it with sensitive data.
 
@@ -48,25 +55,31 @@ shim watch -- claude
 shim watch -- claude -p "explain this repo"
 ```
 
-```text
-shim watch — 8s, 1 requests
-  input     109,678 tokens  (exact)
-    cache read   91,562   83%
-    cache write  18,114
-  output    157 tokens  (exact)
-  where the input went  (approximate — split by byte share)
-    tools     ~      90,001   82%
-    system    ~      10,361    9%
-    messages  ~       9,185    8%
-  @ files   1 inlined, 354 bytes (invisible to hooks)
-  found     2 EMAIL in traffic
-  spend     ~$0.10  (approximate, 2026-08-30 prices)
-```
+<p align="center">
+  <img src="https://raw.githubusercontent.com/GetSHIM/shim-cli/main/docs/assets/shots/shim-watch.png" width="880"
+       alt="shim watch — 16s, 2 requests. Input 257,661 tokens, 46% cache read; output 281. Where the input went: tools ~226,781 (88%), system 3%, messages 9%. Request 3 IBAN and 2 EMAIL in messages; response 3 IBAN in model text. Spend ~$2.82. Nothing was modified, and no request body was written to disk.">
+</p>
 
-On the session above, **the tools array was 82% of the input tokens** — before
+On the session above, **the tools array was 88% of the input tokens** — before
 a single line of the user's own code. That is one session on one repository,
 not a universal figure, which is the point: it is your number and you have no
 other way to get it.
+
+The three `IBAN`s came from a file the agent read with a tool: shim scans every
+text field the model reads, including tool results, and says which part of the
+request each finding was in.
+
+If you sign in with a subscription, the `spend` line is what the same traffic
+would cost on an API key, not a bill. shim reads the tokens the provider
+reports and prices them; it cannot see what your plan charges.
+
+The `response` line is the other direction — what the model wrote back, with
+its `thinking` counted apart from its answer. It is a recall measurement, not a
+leak report: on your own key there is no other tenant to leak from, and a coding
+agent invents plausible values all day. `compare` puts the two sides next to
+each other: three account numbers went in through a tool result and the same
+three came back, which is the round trip made visible. A response that stopped
+at the provider's output limit adds a `cut off` line.
 
 Token counts come from the provider's own `usage` block and are exact. How
 they divide between sections has no ground truth on the wire, so it is
@@ -91,16 +104,20 @@ runs after the response has been relayed. Request inspection retains at most
 Larger requests still pass through in full; skipped or unfinished measurements
 are reported as incomplete. Usage can be known, partial, or unavailable.
 
-`shim watch` refuses a non-empty `ANTHROPIC_BASE_URL` (Claude) or
-`OPENAI_BASE_URL` (Codex) before startup. Custom upstreams are not supported.
-Requests need an unambiguous non-negative `Content-Length`; transfer coding
-(including chunked requests) is rejected. Request-body reads have a 30-second
-deadline.
+`shim watch` refuses a non-empty `ANTHROPIC_BASE_URL` before startup. Custom
+upstreams are not supported. Requests need an unambiguous non-negative
+`Content-Length`; transfer coding (including chunked requests) is rejected.
+Request-body reads have a 30-second deadline.
 
-Claude Code is verified. Codex runs with a warning — a ChatGPT sign-in behind a
-third-party proxy is documented but untested. Copilot is out of scope: it
-accepts a custom endpoint only through bring-your-own-key, which removes GitHub
-authentication altogether, so there is nothing to watch.
+**`shim watch` supports Claude Code only.** Codex is refused, because it takes
+its endpoint from its own configuration rather than the environment: a proxy
+would be started and the whole session would run past it, reported as empty.
+That was measured, not assumed — [the September 2026
+probe](https://github.com/GetSHIM/shim-cli/blob/main/docs/probe-2026-09-codex-watch.md)
+also shows the transport itself works, so this is a limitation with a fix
+rather than a dead end. The Codex prompt hook is unaffected. Copilot is out of
+scope: it accepts a custom endpoint only through bring-your-own-key, which
+removes GitHub authentication altogether, so there is nothing to watch.
 
 ## Supported clients
 
@@ -114,7 +131,7 @@ Tool coverage is verified against a running client, not derived from
 documentation. `shim doctor <client>` prints exactly which events are installed
 and what shim can and cannot change at each one.
 
-shim Guard detects email addresses, phone numbers, credit cards, IBANs, IP and
+shim-cli detects email addresses, phone numbers, credit cards, IBANs, IP and
 MAC addresses, US SSNs, Turkish national and tax IDs, secrets, and database
 URIs. Checksums are verified where they exist, so a mistyped IBAN or national
 ID is not reported.
@@ -132,17 +149,15 @@ telemetry, or prompt history.
 
 ## Install
 
-shim Guard supports CPython 3.10 through 3.13 on macOS and Linux. Choose one
-package manager:
+The `shim` package supports CPython 3.10 through 3.13 on macOS and Linux. The
+plugin's bundled hook also runs on 3.9, which is what a stock macOS provides.
+Choose one package manager:
 
 ```console
 uv tool install --compile-bytecode shim
 # or
 pipx install shim
 ```
-
-If you installed the previous `shim-guard` distribution, uninstall it before
-installing `shim`; both distributions provide the same commands.
 
 Preview and install the hook for your client:
 
@@ -155,25 +170,47 @@ shim doctor codex
 Replace `codex` with `claude` or `copilot` as needed. Run `shim help` for all
 commands.
 
+One more step in Codex: **a hook does not run until you trust it.** Codex keeps
+a trust record per hook and skips any hook without one — no warning, and your
+prompts reach the model uninspected. Open `/hooks` in Codex, review the shim
+entry, and enable it. `shim doctor codex` ends by reminding you, because that
+record lives in Codex and shim cannot read it.
+
 ### Marketplace plugins
 
 Codex and Claude Code users can install the repository's marketplace plugin:
 
-```console
-codex plugin marketplace add GetSHIM/shim-cli
-codex plugin add shim-guard@shim-guard
-```
-
 ```text
 /plugin marketplace add GetSHIM/shim-cli
-/plugin install shim-guard@shim-guard
+/plugin install shim-cli@shim-cli
+```
+
+```console
+codex plugin marketplace add GetSHIM/shim-cli
+codex plugin add shim-cli@shim-cli
 ```
 
 The marketplace plugin and `shim install` are alternative hook-registration
-methods. Do not use both for the same client. Release-tag Claude plugins bundle
-the hook archive and need only Python 3.10 or newer; the Codex plugin currently
-uses `shim-guard-hook` from the installed CLI package. A development checkout
-may not contain the release archive.
+methods. Do not use both for the same client; `shim doctor` fails when it finds
+two. Release-tag plugins bundle the hook archive, which needs only Python 3.9 or
+newer and nothing else installed, on both clients. A development checkout may not
+contain the release archive.
+
+### Upgrading from 0.2.0
+
+Nothing breaks and nothing is required of you. The hook command your client
+already runs keeps working, byte for byte, through a compatibility package.
+
+When convenient, run `shim install <client>` once. That rewrites the hook line
+to the new module name and, on Copilot, replaces the old hook file. Your
+settings and ledger move to `shim/` on the next `shim` command that touches
+them, and each move is reported once. The Claude Code plugin keeps loading and
+updating: `shim-guard@shim-guard` still resolves through a marketplace alias,
+which is removed in 0.5.0 along with the `shim-guard-hook` script, the
+`shim_guard` package and the `SHIM_GUARD_CONFIG` variable.
+
+Codex plugin users are the one exception and need four commands; see
+[docs/compatibility.md](docs/compatibility.md).
 
 ## Use
 
@@ -189,7 +226,7 @@ Both commands read standard input. Do not pass real prompts as command-line
 arguments, where they may be recorded in shell history or process listings.
 
 > [!IMPORTANT]
-> **With the default configuration, shim Guard does not prevent a secret you
+> **With the default configuration, shim-cli does not prevent a secret you
 > type into a prompt from reaching the model. It tells you afterwards.**
 > Codex and Claude Code offer no field for rewriting a submitted prompt, so the
 > only way to stop one is to refuse the sentence you just typed — which is
@@ -197,6 +234,14 @@ arguments, where they may be recorded in shell history or process listings.
 > `user-prompt = "enforce"` in `[mode]` to block instead. Copilot's
 > `userPromptTransformed` event does support a model-facing replacement. Claude
 > tool results are masked at the verified installed events.
+
+Under `enforce`, the prompt is withheld and you are handed a redacted copy to
+resend:
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/GetSHIM/shim-cli/main/docs/assets/shots/blocked-prompt.png" width="880"
+       alt="shim's verbatim answer to the client: decision block, reason &quot;shim blocked this prompt: EMAIL (1)&quot;, and a path to a redacted copy of the prompt to send instead, with suppressOriginalPrompt true.">
+</p>
 
 ## See what it did
 
@@ -222,6 +267,16 @@ under `shim watch` at the same time, the proxy — which reads the actual wire,
 independently of the hook — reported two email addresses in the whole session,
 both from the client's own system messages. None of the sixty reached the
 model.
+
+Two more lines appear when they have something to say. A session with your own
+patterns names which one matched, and a scanned model reply is counted apart
+from everything else, because the model wrote it:
+
+```text
+  masked    3 CUSTOM  (Read config/settings.py)
+  custom    2 PROJECT_CODENAME, 1 INTERNAL_HOST
+  model     1 EMAIL in its replies (model-generated content, not leaks)
+```
 
 `shim report` prints the same summary on demand, and `--json` makes it
 scriptable. It reads the newest temporary spool first; if none remains, it
@@ -314,6 +369,76 @@ Every key in the file is optional. A file holding only `[mode]` or only
 Changes are previewed before they are saved. The CLI, installed hook, `scan`,
 and `redact` all use the same policy.
 
+### Your own patterns
+
+The eleven built-in types do not know your project's code name, your internal
+host format, or your customer id shape. Name a pattern and shim masks it like
+any other type, as `CUSTOM`:
+
+```console
+shim config --custom PROJECT_CODENAME='\bATLAS-[0-9]{4}\b'
+shim config --custom-literal INTERNAL_HOST='build.corp.internal'
+shim config --remove-custom PROJECT_CODENAME
+```
+
+```toml
+[[custom]]
+name = "PROJECT_CODENAME"
+pattern = '\bATLAS-[0-9]{4}\b'
+
+[[custom]]
+name = "INTERNAL_HOST"
+literal = "build.corp.internal"
+ignore_case = true
+```
+
+A match is replaced by `<CUSTOM_1>` — the name stays out of the model's
+context — and the session summary says which pattern matched:
+
+```text
+  masked    3 CUSTOM  (Read config/settings.py)
+  custom    2 PROJECT_CODENAME, 1 INTERNAL_HOST
+```
+
+A literal matches whole words unless you set `whole_word = false`; a pattern is
+a Python regular expression and writes its own boundaries. At most 32 patterns,
+and a built-in type wins wherever the two overlap, so a custom pattern can add
+detection but never take an email away from `EMAIL`.
+
+**The pattern is checked when you write it, not when it runs.** The hook is
+synchronous and Python's `re` has no per-match timeout, so a pattern that
+backtracks would overrun the client's own timeout on a large tool result.
+`shim config` refuses one before writing it, `shim doctor` re-checks the file,
+and 32 patterns cost no measurable time on the hook path:
+
+```console
+$ shim config --custom BAD='(a+)+$'
+FAIL pattern BAD backtracks on repeated input; simplify it
+```
+
+### Keep the last few digits
+
+Every finding is replaced whole, so three masked accounts on three lines read
+the same and neither you nor the model can tell which is which. Opt in per
+entity and shim keeps the trailing digits banks and card issuers already print
+for exactly that purpose:
+
+```console
+shim config --reveal IBAN=4
+shim config --no-reveal IBAN
+```
+
+```diff
+- move <IBAN_1> to <IBAN_2>
++ move <IBAN_1:1326> to <IBAN_2:6819>
+```
+
+Only `IBAN`, `CREDIT_CARD` and `PHONE` may reveal a tail, one to four digits;
+anything else is refused. Separators are skipped, so a value printed as
+`TR33 0006 1005 1978 6457 8413 26` still reveals `1326`. It is off by default
+and changes nothing else: the same spans are found and the same counts are
+reported.
+
 ## Privacy limitations
 
 - The host client receives the raw prompt before its hook runs, and other hooks
@@ -328,22 +453,74 @@ and `redact` all use the same policy.
 See [Privacy](https://github.com/GetSHIM/shim-cli/blob/main/docs/privacy.md) for the full trust boundary and
 [Compatibility](https://github.com/GetSHIM/shim-cli/blob/main/docs/compatibility.md) for tested versions and evidence.
 
+## How this is verified
+
+Every figure here was measured on the released build, not estimated.
+
+| | |
+| --- | --- |
+| Tests | **1,800+**, one command: `python scripts/check.py` — lock, lint, format, types, suite, wheel, sdist |
+| Hook cost | **67 ms** median end to end, interpreter start included; **41 ms** for a session summary |
+| With 32 custom patterns | **+0.8 ms** median against the same prompt with none |
+| Detector corpus | **570 cases**, graded on exact redacted output rather than category presence |
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/GetSHIM/shim-cli/main/docs/assets/shots/shim-doctor.png" width="880"
+       alt="shim doctor claude: twelve checks, each PASS or WARN — the hook group is present, no 0.2.0 names are left, 12 of 12 entities are enabled, the runner protected a sensitive fixture, and coverage is 5 of 5 events.">
+</p>
+
+Hook output is asserted byte for byte, not by shape: a safe event must produce
+exactly zero bytes on stdout and stderr. 312 contract tests hold that, plus the
+import boundaries, the rule that no committed file carries the machine it was
+written on, and a byte-identical rebuild of the shipped plugin archive.
+
+The detector scores 1.0 precision and recall on that corpus, and the metrics
+file states in the same breath why that is a weaker claim than it looks:
+*synthetic fixture-bound evidence only; not a real-world statistical claim.* A
+perfect score on a corpus you wrote is a regression guard, not a measurement of
+the world.
+
+Three things were learned by running the tool against a live client rather than
+reasoning about it, and each one changed the code:
+
+- One working request carried **4,402 text fields across 35 levels of nesting**,
+  the depth coming from an MCP tool's recursive JSON schema. The hook's own
+  traversal stops at 24, so `shim watch` carries its own budget.
+- The **tools array was 88% of the input tokens** on a real session, before a
+  single line of the user's own code.
+- Claude Code's `Stop` event hands the hook **only the turn's last text block**,
+  so anything the model said before a tool call in the same turn is not counted
+  there. `shim watch` sees all of it.
+
+Tested client versions, captured fixtures and the full evidence table are in
+[Compatibility](https://github.com/GetSHIM/shim-cli/blob/main/docs/compatibility.md).
+
 ## Uninstall
 
-Remove shim Guard's hook before uninstalling the package:
+In this order, because each step needs the one before it:
 
 ```console
-shim revert codex
+shim revert claude          # once per client you installed
+shim ledger purge           # only if you turned the ledger on (shim ledger show reads it)
+uv tool uninstall shim      # or: /plugin uninstall shim-cli@shim-cli
+rm -r ~/.config/shim        # your settings, if you want them gone too
 ```
 
-Replace `codex` with the client you installed. `shim watch` needs no uninstall:
-it edits nothing, so there is nothing to undo.
+`shim revert` removes only shim's own hook group and leaves every other hook in
+the file untouched; for Copilot it also deletes the hook file, which is shim's
+alone. `shim ledger purge` deletes the retained records — skip it and they age
+out after 30 days on their own. Uninstalling the package leaves
+`~/.config/shim/config.toml` in place, which is why the last line is separate:
+reinstalling later finds your entity choices and custom patterns still there.
+
+`shim watch` needs no uninstall: it edits nothing, so there is nothing to undo.
 
 ## Project documentation
 
 - [Architecture](https://github.com/GetSHIM/shim-cli/blob/main/docs/architecture.md)
 - [Compatibility](https://github.com/GetSHIM/shim-cli/blob/main/docs/compatibility.md)
 - [Privacy](https://github.com/GetSHIM/shim-cli/blob/main/docs/privacy.md)
+- [0.3.0 release notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/0.3.0.md)
 - [0.2.0 release notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/0.2.0.md)
 - [Contributing](https://github.com/GetSHIM/shim-cli/blob/main/CONTRIBUTING.md)
 - [Security policy](https://github.com/GetSHIM/shim-cli/blob/main/SECURITY.md)

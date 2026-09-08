@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from shim_guard.guard import ENTITY_TYPES, evaluate
+from shim_cli.guard import BUILT_IN_TYPES, evaluate
 
 CORPUS_DIR = Path(__file__).resolve().parents[1] / "corpus"
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "probe"
@@ -73,7 +73,7 @@ def test_prompt_corpus_schema_is_complete() -> None:
 
     assert PROMPTS["version"] == 2
     assert PROMPTS["evaluation_unit"] == "exact redacted output"
-    assert tuple(PROMPTS["categories"]) == ENTITY_TYPES
+    assert tuple(PROMPTS["categories"]) == BUILT_IN_TYPES
     assert len(cases) >= 45
     assert len({case["id"] for case in cases}) == len(cases)
     for case in cases:
@@ -87,10 +87,10 @@ def test_prompt_corpus_covers_every_category_and_the_assignment_rule() -> None:
     positive = {c for case in cases for c in case["categories"]}
     negative_ids = {case["id"] for case in cases if not case["categories"]}
 
-    assert positive == set(ENTITY_TYPES)
+    assert positive == set(BUILT_IN_TYPES)
     assert {
         f"{category.lower().replace('_', '-')}-safe-negative"
-        for category in ENTITY_TYPES
+        for category in BUILT_IN_TYPES
     } <= negative_ids
 
     prose = [
@@ -111,7 +111,7 @@ def test_published_prompt_metrics_match_the_detector() -> None:
         case["id"]: {f.entity_type for f in evaluate(case["text"]).findings}
         for case in cases
     }
-    for category in ENTITY_TYPES:
+    for category in BUILT_IN_TYPES:
         expected = {c["id"] for c in cases if category in c["categories"]}
         predicted = {i for i, cats in predictions.items() if category in cats}
         published = METRICS["categories"][category]

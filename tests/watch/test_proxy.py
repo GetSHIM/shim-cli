@@ -5,15 +5,18 @@ import http.client
 import http.server
 import io
 import json
+import pathlib
 import socket
 import socketserver
+import sys
 import threading
 import time
 import urllib.request
+from types import SimpleNamespace
 
 import pytest
 
-from shim_guard.watch import proxy
+from shim_cli.watch import proxy
 
 MESSAGE_START = (
     b"event: message_start\n"
@@ -477,7 +480,7 @@ def test_stopping_twice_is_harmless() -> None:
 def test_measurement_runs_on_a_worker_thread_without_the_signal_deadline(
     watched,
 ) -> None:
-    from shim_guard.guard import evaluate
+    from shim_cli.guard import evaluate
 
     running, _upstream = watched
     running._server.RequestHandlerClass.evaluate = staticmethod(evaluate)
@@ -577,7 +580,7 @@ def test_slow_measurement_does_not_delay_response_or_shutdown(watched, monkeypat
         running.stop()
         assert time.monotonic() - started < 1.5
         assert not running.session.exchanges[0].measured
-        from shim_guard.watch import report
+        from shim_cli.watch import report
 
         assert report.as_json(running.session, 1)["inspection_incomplete"] == 1
     finally:
@@ -680,3 +683,271 @@ def test_decompression_budget_never_changes_forwarded_bytes(monkeypatch):
         compressed,
     )
     assert exchange.usage_status == "unavailable"
+
+
+IBAN = "TR330006100519786457841326"
+
+
+@pytest.fixture
+def scanned(monkeypatch, upstream):
+    """A watch whose detector is supplied by the test."""
+    port = upstream.port
+
+    class Plain(http.client.HTTPConnection):
+        def __init__(self, host, timeout=None, context=None):
+            super().__init__("127.0.0.1", port, timeout=timeout or 30)
+
+    monkeypatch.setattr(http.client, "HTTPSConnection", Plain)
+    started: list = []
+
+    def start(evaluate):
+        running = proxy.start("api.anthropic.com", evaluate)
+        started.append(running)
+        return running
+
+    yield start
+    for running in started:
+        running.stop()
+
+
+def _strings(value, seen=None, depth: int = 0):
+    seen = set() if seen is None else seen
+    if depth > 12 or id(value) in seen:
+        return
+    seen.add(id(value))
+    if isinstance(value, str):
+        yield value
+        return
+    if isinstance(value, dict):
+        for key, item in value.items():
+            yield from _strings(key, seen, depth + 1)
+            yield from _strings(item, seen, depth + 1)
+        return
+    if isinstance(value, (list, tuple, set)):
+        for item in value:
+            yield from _strings(item, seen, depth + 1)
+        return
+    inner = getattr(value, "__dict__", None)
+    if inner:
+        yield from _strings(inner, seen, depth + 1)
+
+
+def test_the_whole_request_is_scanned_and_none_of_it_is_kept(scanned) -> None:
+    from shim_cli.guard import evaluate
+
+    running = scanned(evaluate)
+    body = json.dumps(
+        {
+            "model": "claude-sonnet-5",
+            "system": f"policy {IBAN}",
+            "tools": [{"name": "Read", "description": f"example {IBAN}"}],
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "toolu_1",
+                            "content": f"file said {IBAN}",
+                        }
+                    ],
+                }
+            ],
+        }
+    ).encode()
+
+    _post(running, body, HEADERS)
+
+    exchange = running.session.exchanges[0]
+    assert exchange.entities["IBAN"] == 3
+    assert exchange.entities_by_section["messages"]["IBAN"] == 1
+    for text in _strings(running.session):
+        assert IBAN not in text
+        assert "policy" not in text
+
+
+def test_a_large_tool_set_is_scanned_once_across_a_session(scanned) -> None:
+    from types import SimpleNamespace
+
+    lengths: list[int] = []
+
+    def counting(text: str):
+        lengths.append(len(text))
+        return SimpleNamespace(counts=())
+
+    running = scanned(counting)
+    body = json.dumps(
+        {
+            "model": "claude-sonnet-5",
+            "tools": [{"name": "Read", "description": "d" * 150_000}],
+            "messages": [{"role": "user", "content": "hello"}],
+        }
+    ).encode()
+
+    for _ in range(3):
+        _post(running, body, HEADERS)
+
+    assert len(running.session.exchanges) == 3
+    assert sum(1 for length in lengths if length > 100_000) == 1
+    assert lengths.count(5) == 3
+
+
+def test_a_truncated_response_is_recorded_and_relayed_unchanged(
+    watched, monkeypatch
+) -> None:
+    import sys
+
+    running, _upstream = watched
+    delta = (
+        b"event: message_delta\n"
+        b'data: {"type":"message_delta","delta":{"stop_reason":"max_tokens"},'
+        b'"usage":{"output_tokens":214}}\n\n'
+    )
+    monkeypatch.setattr(sys.modules[__name__], "MESSAGE_DELTA", delta)
+
+    _status, _headers, body = _post(running, BODY, HEADERS)
+
+    assert running.session.exchanges[0].stop_reason == "max_tokens"
+    decoded = gzip.decompress(body) if body[:2] == b"\x1f\x8b" else body
+    assert delta in decoded
+
+
+FIXTURES = pathlib.Path(__file__).resolve().parents[1] / "fixtures" / "watch"
+
+
+class _Streaming(_Upstream):
+    """An upstream that replays a captured SSE fixture instead of the default one."""
+
+    def __init__(self, name: str, **changes) -> None:
+        self.parts = (FIXTURES / name).read_bytes().split(b"\n\n")
+        super().__init__(**changes)
+
+
+def _replaying(monkeypatch, name: str, evaluate=None, **changes):
+    upstream = _Streaming(name, **changes)
+    port = upstream.port
+
+    class Plain(http.client.HTTPConnection):
+        def __init__(self, host, timeout=None, context=None):
+            super().__init__("127.0.0.1", port, timeout=timeout or 30)
+
+    monkeypatch.setattr(http.client, "HTTPSConnection", Plain)
+    monkeypatch.setattr(
+        sys.modules[__name__], "MESSAGE_START", upstream.parts[0] + b"\n\n"
+    )
+    monkeypatch.setattr(
+        sys.modules[__name__],
+        "MESSAGE_DELTA",
+        b"\n\n".join(upstream.parts[1:]),
+    )
+    running = proxy.start("api.anthropic.com", evaluate)
+    return running, upstream
+
+
+def test_a_value_split_across_two_chunks_is_still_found(monkeypatch) -> None:
+    from shim_cli.guard import evaluate
+
+    running, upstream = _replaying(monkeypatch, "split-iban.sse", evaluate, delay=0.15)
+    try:
+        _post(running, BODY, HEADERS)
+    finally:
+        running.stop()
+        upstream.stop()
+
+    exchange = running.session.exchanges[0]
+    assert exchange.response_entities == {"text": {"IBAN": 1}}
+    assert exchange.response_scan_status == "known"
+
+
+def test_the_client_never_waits_for_the_detector(monkeypatch) -> None:
+    """The wire order is unobservable from outside; being unblocked is the point."""
+    entered = threading.Event()
+    release = threading.Event()
+
+    def blocking(text: str):
+        entered.set()
+        assert release.wait(5)
+        return SimpleNamespace(counts=())
+
+    running, upstream = _replaying(monkeypatch, "split-iban.sse", blocking)
+    try:
+        request = urllib.request.Request(
+            running.base_url + "/v1/messages", data=BODY, headers=HEADERS
+        )
+        started = time.monotonic()
+        with urllib.request.urlopen(request, timeout=30) as response:
+            assert response.read()
+        elapsed = time.monotonic() - started
+
+        assert entered.wait(2), "the detector never ran"
+        assert elapsed < 1.0, f"the client waited {elapsed:.2f}s"
+    finally:
+        release.set()
+        running.session.drain(5)
+        running.stop()
+        upstream.stop()
+
+
+def test_without_a_free_slot_the_response_is_not_scanned(monkeypatch) -> None:
+    calls: list[str] = []
+
+    def counting(text: str):
+        calls.append(text)
+        return SimpleNamespace(counts=())
+
+    running, upstream = _replaying(monkeypatch, "split-iban.sse", counting)
+    slots = running.session._measurement_slots
+    assert slots.acquire(False) and slots.acquire(False)
+    try:
+        assert _post(running, BODY, HEADERS)[0] == 200
+    finally:
+        slots.release()
+        slots.release()
+        running.stop()
+        upstream.stop()
+
+    exchange = running.session.exchanges[0]
+    assert exchange.response_scan_status == "unavailable"
+    assert exchange.response_entities == {}
+    assert calls == []
+
+
+def test_no_response_text_survives_the_exchange(monkeypatch, tmp_path) -> None:
+    from shim_cli.guard import evaluate
+
+    running, upstream = _replaying(monkeypatch, "thinking.sse", evaluate)
+    try:
+        _post(running, BODY, HEADERS)
+    finally:
+        running.stop()
+        upstream.stop()
+
+    assert running.session.exchanges[0].response_entities == {"thinking": {"IBAN": 1}}
+    for text in _strings(running.session):
+        assert IBAN not in text
+        assert "removed the duplicate" not in text
+    written = [
+        path
+        for path in tmp_path.rglob("*")
+        if path.is_file() and IBAN.encode() in path.read_bytes()
+    ]
+    assert written == []
+
+
+def test_scanning_changes_none_of_the_bytes_the_client_receives(monkeypatch) -> None:
+    from shim_cli.guard import evaluate
+
+    seen = []
+    for detector in (None, evaluate):
+        running, upstream = _replaying(monkeypatch, "thinking.sse", detector)
+        try:
+            seen.append(_post(running, BODY, HEADERS))
+        finally:
+            running.stop()
+            upstream.stop()
+
+    (status, headers, body), (other_status, other_headers, other_body) = seen
+    # gzip stamps the time it ran, so compare what the client actually decodes.
+    assert status == other_status
+    assert gzip.decompress(body) == gzip.decompress(other_body)
+    assert headers.get("Content-Encoding") == other_headers.get("Content-Encoding")

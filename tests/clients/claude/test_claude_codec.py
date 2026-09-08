@@ -4,8 +4,8 @@ from dataclasses import dataclass
 
 import pytest
 
-from shim_guard.clients.claude.hook import block_output, error_output, parse_input
-from shim_guard.clients.claude.tool_events import MAX_INPUT_BYTES, TOOL_EVENTS
+from shim_cli.clients.claude.hook import block_output, error_output, parse_input
+from shim_cli.clients.claude.tool_events import MAX_INPUT_BYTES, TOOL_EVENTS
 
 
 @dataclass(frozen=True)
@@ -22,7 +22,7 @@ def test_claude_code_prompt_contract() -> None:
     assert parse_input(raw) == "hello 👋"
     assert block_output(Decision(False)) == b""
     assert block_output(Decision(True, (("EMAIL", 1),)), "/tmp/shim-redacted.txt") == (
-        b'{"decision":"block","reason":"SHIM Guard blocked this prompt: '
+        b'{"decision":"block","reason":"shim blocked this prompt: '
         b"EMAIL (1).\\nCopy and paste this as your next prompt:\\n"
         b'Read this file and use its contents as my prompt: /tmp/shim-redacted.txt",'
         b'"suppressOriginalPrompt":true}'
@@ -50,7 +50,7 @@ def test_claude_code_codec_rejects_hostile_payloads(raw: bytes) -> None:
 
 def test_claude_code_error_is_a_native_generic_block() -> None:
     assert error_output() == (
-        b'{"decision":"block","reason":"SHIM Guard could not inspect this '
+        b'{"decision":"block","reason":"shim could not inspect this '
         b'prompt, so it was withheld. Run `shim doctor claude` for the reason.",'
         b'"suppressOriginalPrompt":true}'
     )

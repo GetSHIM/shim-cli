@@ -1,14 +1,14 @@
 {
-  "name": "shim-guard",
+  "name": "shim-cli",
   "interface": {
-    "displayName": "shim Guard"
+    "displayName": "shim-cli"
   },
   "plugins": [
     {
-      "name": "shim-guard",
+      "name": "shim-cli",
       "source": {
         "source": "local",
-        "path": "./plugins/shim-guard"
+        "path": "./plugins/shim-cli"
       },
       "policy": {
         "installation": "AVAILABLE",
@@ -16,6 +16,19 @@
       },
       "category": "Security",
       "description": "Detect and report sensitive prompt data locally; prompt blocking is opt in."
+    },
+    {
+      "name": "shim-guard",
+      "source": {
+        "source": "local",
+        "path": "./plugins/shim-cli"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Security",
+      "description": "Former name of shim-cli. Existing installs keep updating; new installs should use shim-cli."
     }
   ],
   "description": "Local sensitive-data detection and reporting for coding agents."

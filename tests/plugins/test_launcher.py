@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import shutil
 import subprocess
 import sys
 import zipfile
@@ -11,8 +13,8 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-PLUGIN = ROOT / "plugins" / "shim-guard"
-LAUNCHER = PLUGIN / "hooks" / "run-shim-guard"
+PLUGIN = ROOT / "plugins" / "shim-cli"
+LAUNCHER = PLUGIN / "hooks" / "run-shim"
 BUILDER = ROOT / "scripts" / "build_zipapp.py"
 COMMITTED = PLUGIN / "bin" / "shim.pyz"
 MAX_ARCHIVE_BYTES = 500_000
@@ -172,13 +174,13 @@ def test_archive_is_self_contained_and_within_budget(archive: Path) -> None:
     names = zipfile.ZipFile(archive).namelist()
     packaged = {name.split("/")[0] for name in names}
 
-    assert packaged == {"__main__.py", "shim_guard", "phonenumbers", "tomli"}
-    assert not any(name.startswith("shim_guard/cli/") for name in names)
+    assert packaged == {"__main__.py", "shim_cli", "phonenumbers", "tomli"}
+    assert not any(name.startswith("shim_cli/cli/") for name in names)
     assert not any(name.endswith(".pyi") for name in names)
     assert not any(name.endswith((".so", ".pyd", ".dylib")) for name in names)
     for excluded in ("geodata", "carrierdata", "tzdata"):
         assert not any(f"phonenumbers/{excluded}/" in name for name in names)
-    assert "shim_guard/guard/suffixes.py" in names
+    assert "shim_cli/guard/suffixes.py" in names
     assert "tomli/_parser.py" in names
 
 
@@ -187,9 +189,91 @@ def test_archive_refuses_an_unsupported_interpreter_without_blocking(
 ) -> None:
     source = zipfile.ZipFile(archive).read("__main__.py").decode()
 
-    assert "MINIMUM = (3, 10)" in source
+    assert "MINIMUM = (3, 9)" in source
     assert "sys.exit(0)" in source
     assert 'f"' not in source, "must parse on interpreters without f-strings"
+
+    older = shutil.which("python3.8")
+    if older is None:
+        pytest.skip("python3.8 is not installed")
+    result = subprocess.run(
+        (older, str(archive), "claude"),
+        input=_payload("claude"),
+        capture_output=True,
+        check=False,
+        timeout=120,
+    )
+
+    assert result.returncode == 0
+    assert result.stdout == b""
+    assert result.stderr.startswith(b"shim: needs Python 3.9 or newer; found 3.8.")
+
+
+# Every fixture leaves the ASCII fast path in `normalize()`. An ASCII-only set
+# passed on 3.9 for a year while `zip(strict=True)` made non-ASCII text raise.
+FIXTURES = {
+    "prompt": (
+        '{"hook_event_name":"UserPromptSubmit",'
+        '"prompt":"Hesap \u0131\u015fl\u011fi: TR330006100519786457841326"}'
+    ).encode("utf-8"),
+    "tool": (
+        '{"hook_event_name":"PostToolUse","tool_name":"Read",'
+        '"tool_response":{"content":"kanit \u2014 AKIAIOSFODNN7EXAMPLE"}}'
+    ).encode("utf-8"),
+    "stop": (
+        '{"hook_event_name":"Stop","session_id":"s1",'
+        '"last_assistant_message":"bitti \u2014 alice@example.com"}'
+    ).encode("utf-8"),
+}
+
+
+def test_the_archive_answers_identically_on_39_and_the_current_interpreter(
+    archive: Path, tmp_path: Path
+) -> None:
+    """The zero-install path targets a stock macOS, whose python3 is 3.9."""
+    old = shutil.which("python3.9")
+    if old is None:
+        pytest.skip("python3.9 is not installed")
+    config = tmp_path / "c.toml"
+    config.write_text(
+        'enabled_entities = ["EMAIL", "IBAN", "SECRET"]\n\n'
+        '[mode]\nuser-prompt = "enforce"\n',
+        encoding="utf-8",
+    )
+
+    def answer(interpreter: str, raw: bytes) -> tuple[int, bytes, bytes]:
+        home = tmp_path / Path(interpreter).name
+        home.mkdir(exist_ok=True)
+        result = subprocess.run(
+            (interpreter, str(archive), "claude"),
+            input=raw,
+            capture_output=True,
+            check=False,
+            # Each interpreter needs its own spool: conftest sets one session
+            # directory for the whole test, so without this the second run
+            # summarises the first run's records too.
+            env=os.environ
+            | {
+                "TMPDIR": str(home),
+                "SHIM_CONFIG": str(config),
+                "SHIM_GUARD_SESSION_DIR": str(home / "session"),
+                "XDG_STATE_HOME": str(home / "state"),
+            },
+            timeout=120,
+        )
+        scrub = re.compile(rb"shim-redacted-[^\"]+")
+        timing = re.compile(rb"\d+ ms")
+        return (
+            result.returncode,
+            timing.sub(
+                b"N ms",
+                scrub.sub(b"X", result.stdout.replace(str(home).encode(), b"<tmp>")),
+            ),
+            result.stderr,
+        )
+
+    for name, raw in FIXTURES.items():
+        assert answer(old, raw) == answer(sys.executable, raw), name
 
 
 def _archive_members(path: Path) -> dict[str, bytes]:
@@ -207,12 +291,27 @@ def _archive_members(path: Path) -> dict[str, bytes]:
         return {name: packaged.read(name) for name in names}
 
 
+def test_archive_version_reads_the_new_layout_and_the_old_one(tmp_path: Path) -> None:
+    from shim_cli.cli.resolution import archive_version
+
+    for package, expected in (("shim_cli", "9.9.9"), ("shim_guard", "0.2.0")):
+        bundle = tmp_path / f"{package}.pyz"
+        with zipfile.ZipFile(bundle, "w") as archive:
+            archive.writestr(f"{package}/__init__.py", f'__version__ = "{expected}"\n')
+        assert archive_version(bundle) == expected
+
+    empty = tmp_path / "empty.pyz"
+    with zipfile.ZipFile(empty, "w") as archive:
+        archive.writestr("__main__.py", "")
+    assert archive_version(empty) is None
+
+
 def test_committed_archive_matches_a_fresh_build(archive: Path) -> None:
-    assert COMMITTED.is_file(), "build plugins/shim-guard/bin/shim.pyz"
+    assert COMMITTED.is_file(), "build plugins/shim-cli/bin/shim.pyz"
     assert os.access(COMMITTED, os.X_OK)
     assert COMMITTED.stat().st_size < MAX_ARCHIVE_BYTES
     assert _archive_members(COMMITTED) == _archive_members(archive), (
-        "rebuild plugins/shim-guard/bin/shim.pyz"
+        "rebuild plugins/shim-cli/bin/shim.pyz"
     )
 
 
@@ -231,7 +330,7 @@ def test_archive_build_is_reproducible(archive: Path, tmp_path: Path) -> None:
 def test_archive_contains_every_module_the_hook_path_imports(archive: Path) -> None:
     probe = (
         "import json, sys\n"
-        "from shim_guard import hook\n"
+        "from shim_cli import hook\n"
         "for client in ('claude', 'codex', 'copilot'):\n"
         "    payload = json.dumps({'hook_event_name': 'UserPromptSubmit',"
         " 'prompt': 'Contact alice@example.com'}).encode()\n"
@@ -241,7 +340,7 @@ def test_archive_contains_every_module_the_hook_path_imports(archive: Path) -> N
         " 'tool_input': {'file_path': 'x'},"
         " 'tool_response': {'text': 'Contact alice@example.com'}}).encode()\n"
         "    hook._output(payload, 'claude')\n"
-        "print(json.dumps(sorted(m for m in sys.modules if m.startswith('shim_guard'))))"
+        "print(json.dumps(sorted(m for m in sys.modules if m.startswith('shim_cli'))))"
     )
     result = subprocess.run(
         (sys.executable, "-I", "-B", "-c", probe),
@@ -255,7 +354,7 @@ def test_archive_contains_every_module_the_hook_path_imports(archive: Path) -> N
     packaged = {
         name[: -len(".py")].replace("/", ".")
         for name in zipfile.ZipFile(archive).namelist()
-        if name.startswith("shim_guard/") and name.endswith(".py")
+        if name.startswith("shim_cli/") and name.endswith(".py")
     }
     packaged |= {
         name.rsplit(".", 1)[0] for name in list(packaged) if name.endswith(".__init__")

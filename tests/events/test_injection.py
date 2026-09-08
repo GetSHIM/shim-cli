@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from shim_guard.events import injection
+from shim_cli.events import injection
 
 POSITIVE = [
     (
@@ -87,7 +87,7 @@ def test_scanning_never_returns_the_text_it_scanned() -> None:
 
 
 def test_scanning_stays_linear_on_a_long_whitespace_run() -> None:
-    from shim_guard.events.payload import MAX_TEXT_CHARACTERS
+    from shim_cli.events.payload import MAX_TEXT_CHARACTERS
 
     worst = "\n" * MAX_TEXT_CHARACTERS
     started = time.perf_counter()

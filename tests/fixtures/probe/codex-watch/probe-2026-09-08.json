@@ -1,0 +1,161 @@
+{
+  "recorded": "2026-09-08",
+  "codex_version": "codex-cli 0.151.0",
+  "platform": "macOS 26.4.0 arm64",
+  "auth_mode": "ChatGPT sign-in (no API key configured)",
+  "cases": [
+    {
+      "case": "config-override",
+      "config_override": true,
+      "environment_variable": true,
+      "reached_the_proxy": true,
+      "records": [
+        {
+          "at": 0.407,
+          "kind": "request",
+          "method": "GET",
+          "path": "/backend-api/codex/models?client_version=0.151.0",
+          "upstream_host": "chatgpt.com",
+          "upstream_path": "/backend-api/codex/models?client_version=0.151.0",
+          "header_names": [
+            "accept",
+            "authorization",
+            "chatgpt-account-id",
+            "host",
+            "originator",
+            "user-agent",
+            "version"
+          ],
+          "account_id_present": true,
+          "request_bytes": 0,
+          "upstream_status": 200,
+          "upstream_reason": "OK",
+          "cf_ray_present": true,
+          "content_type": "application/json",
+          "response_bytes": 231368,
+          "sse_events": [],
+          "usage_keys": []
+        },
+        {
+          "at": 2.081,
+          "kind": "upgrade",
+          "method": "GET",
+          "path": "/backend-api/codex/responses",
+          "header_names": [
+            "authorization",
+            "chatgpt-account-id",
+            "connection",
+            "host",
+            "openai-beta",
+            "originator",
+            "sec-websocket-extensions",
+            "sec-websocket-key",
+            "sec-websocket-version",
+            "session-id",
+            "thread-id",
+            "upgrade",
+            "user-agent",
+            "version",
+            "x-client-request-id",
+            "x-codex-beta-features",
+            "x-codex-routing-hint",
+            "x-codex-turn-metadata",
+            "x-codex-window-id"
+          ],
+          "account_id_present": true,
+          "answered": 426
+        },
+        {
+          "at": 2.683,
+          "kind": "request",
+          "method": "POST",
+          "path": "/backend-api/codex/responses",
+          "upstream_host": "chatgpt.com",
+          "upstream_path": "/backend-api/codex/responses",
+          "header_names": [
+            "accept",
+            "authorization",
+            "chatgpt-account-id",
+            "content-encoding",
+            "content-length",
+            "content-type",
+            "host",
+            "originator",
+            "session-id",
+            "thread-id",
+            "user-agent",
+            "version",
+            "x-client-request-id",
+            "x-codex-beta-features",
+            "x-codex-routing-hint",
+            "x-codex-turn-metadata",
+            "x-codex-window-id",
+            "x-openai-internal-codex-responses-lite"
+          ],
+          "account_id_present": true,
+          "request_bytes": 30058,
+          "upstream_status": 429,
+          "upstream_reason": "Too Many Requests",
+          "cf_ray_present": true,
+          "content_type": "application/json",
+          "response_bytes": 345,
+          "sse_events": [],
+          "usage_keys": [],
+          "error_type": "usage_limit_reached"
+        }
+      ]
+    },
+    {
+      "case": "environment-only",
+      "config_override": false,
+      "environment_variable": true,
+      "reached_the_proxy": false,
+      "records": []
+    }
+  ],
+  "anthropic_headers": {
+    "reached_the_proxy": true,
+    "records": [
+      {
+        "at": 3.923,
+        "kind": "request",
+        "method": "POST",
+        "path": "/v1/messages?beta=true",
+        "upstream_host": "api.anthropic.com",
+        "upstream_path": "/v1/messages?beta=true",
+        "header_names": [
+          "accept",
+          "accept-encoding",
+          "anthropic-beta",
+          "anthropic-dangerous-direct-browser-access",
+          "anthropic-version",
+          "authorization",
+          "connection",
+          "content-length",
+          "content-type",
+          "host",
+          "user-agent",
+          "x-app",
+          "x-claude-code-session-id",
+          "x-stainless-arch",
+          "x-stainless-lang",
+          "x-stainless-os",
+          "x-stainless-package-version",
+          "x-stainless-retry-count",
+          "x-stainless-runtime",
+          "x-stainless-runtime-version",
+          "x-stainless-timeout"
+        ],
+        "account_id_present": false,
+        "request_bytes": 198682,
+        "upstream_status": 200,
+        "upstream_reason": "OK",
+        "cf_ray_present": true,
+        "content_type": "text/event-stream; charset=utf-8",
+        "response_bytes": 674,
+        "sse_events": [],
+        "usage_keys": []
+      }
+    ]
+  }
+}

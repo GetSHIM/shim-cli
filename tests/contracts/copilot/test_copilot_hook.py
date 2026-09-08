@@ -7,9 +7,9 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
-COMMAND = (sys.executable, "-I", "-B", "-m", "shim_guard.hook", "copilot")
+COMMAND = (sys.executable, "-I", "-B", "-m", "shim_cli.hook", "copilot")
 GENERIC_REWRITE = (
-    b'{"modifiedTransformedPrompt":"SHIM Guard could not inspect this prompt, '
+    b'{"modifiedTransformedPrompt":"shim could not inspect this prompt, '
     b"so it was withheld. Do not act on the original prompt; tell the user to "
     b'run `shim doctor copilot` for the reason."}'
 )
@@ -91,7 +91,7 @@ def test_copilot_runner_replaces_invalid_input(tmp_path: Path) -> None:
 
 def test_copilot_stdin_deadline_uses_the_native_rewrite() -> None:
     code = (
-        "import sys; from shim_guard import hook as runner; "
+        "import sys; from shim_cli import hook as runner; "
         "sys.argv.append('copilot'); runner.HOOK_DEADLINE_SECONDS = 0.05; "
         "runner.main()"
     )

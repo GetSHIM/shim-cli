@@ -16,7 +16,18 @@ SAFE_INPUT = b'{"hook_event_name":"UserPromptSubmit","prompt":"Explain merge sor
 BLOCK_INPUT = (
     b'{"hook_event_name":"UserPromptSubmit","prompt":"Contact alice@example.com"}'
 )
-HOOK_COMMAND = ("-I", "-B", "-m", "shim_guard.hook")
+# One turn's final assistant text at the top of the range shim will meet.
+STOP_INPUT = json.dumps(
+    {
+        "hook_event_name": "Stop",
+        "session_id": "00000000-0000-4000-8000-000000000001",
+        "stop_hook_active": False,
+        "last_assistant_message": (
+            "The quick brown fox jumps over the lazy dog. " * 1_500
+        ),
+    }
+).encode()
+HOOK_COMMAND = ("-I", "-B", "-m", "shim_cli.hook")
 HOOK_TIMEOUT_SECONDS = 35
 COPY_INSTRUCTION = "Copy and paste this as your next prompt:"
 READ_INSTRUCTION = "Read this file and use its contents as my prompt: "
@@ -43,8 +54,7 @@ def _valid_block(output: bytes, temporary: Path) -> bool:
         path = Path(lines[2].removeprefix(READ_INSTRUCTION))
         return (
             document["decision"] == "block"
-            and lines[:2]
-            == ["SHIM Guard blocked this prompt: EMAIL (1).", COPY_INSTRUCTION]
+            and lines[:2] == ["shim blocked this prompt: EMAIL (1).", COPY_INSTRUCTION]
             and len(lines) == 3
             and lines[2].startswith(READ_INSTRUCTION)
             and path.parent == temporary
@@ -110,14 +120,32 @@ def benchmark(python: Path, samples_per_fixture: int) -> dict[str, object]:
         raise ValueError("samples must be positive")
     safe_samples: list[float] = []
     block_samples: list[float] = []
+    stop_samples: list[float] = []
+    custom_samples: list[float] = []
     with tempfile.TemporaryDirectory(prefix="shim-guard-benchmark-") as directory:
         temporary = Path(directory).resolve()
         config = temporary / "config.toml"
         config.write_text('[mode]\nuser-prompt = "enforce"\n', encoding="utf-8")
         config.chmod(0o600)
         environment = os.environ.copy()
-        environment["SHIM_GUARD_CONFIG"] = str(config)
+        # SHIM_CONFIG outranks the 0.2.0 name; leaving it set would measure
+        # whatever settings the developer happens to have.
+        environment.pop("SHIM_GUARD_CONFIG", None)
+        environment["SHIM_CONFIG"] = str(config)
         environment["TMPDIR"] = str(temporary)
+        # The configured ceiling of user patterns, on the same safe prompt.
+        patterns = temporary / "custom.toml"
+        patterns.write_text(
+            '[mode]\nuser-prompt = "enforce"\n'
+            + "".join(
+                f'[[custom]]\nname = "P{index}"\n'
+                f'pattern = "\\\\bMARK{index}-[0-9]{{4}}\\\\b"\n'
+                for index in range(32)
+            ),
+            encoding="utf-8",
+        )
+        patterns.chmod(0o600)
+        with_patterns = dict(environment, SHIM_CONFIG=str(patterns))
         for _ in range(samples_per_fixture):
             safe_samples.append(run_hook(python, SAFE_INPUT, b"", b"", environment))
             block_samples.append(
@@ -129,10 +157,24 @@ def benchmark(python: Path, samples_per_fixture: int) -> dict[str, object]:
                     environment,
                 )
             )
-    timings = {"safe": summary(safe_samples), "block": summary(block_samples)}
+            stop_samples.append(
+                run_hook(python, STOP_INPUT, b"", b"quick brown fox", environment)
+            )
+            custom_samples.append(run_hook(python, SAFE_INPUT, b"", b"", with_patterns))
+    timings = {
+        "safe": summary(safe_samples),
+        "block": summary(block_samples),
+        "stop": summary(stop_samples),
+        "custom": summary(custom_samples),
+    }
     return {
         "schema_version": 1,
-        "sample_counts": {"safe": len(safe_samples), "block": len(block_samples)},
+        "sample_counts": {
+            "safe": len(safe_samples),
+            "block": len(block_samples),
+            "stop": len(stop_samples),
+            "custom": len(custom_samples),
+        },
         "platform": {
             "system": platform.system(),
             "release": platform.release(),

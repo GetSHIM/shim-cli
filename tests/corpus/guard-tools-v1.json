@@ -106,7 +106,7 @@
             "EMAIL"
           ],
           "input_chars": 208,
-          "expected_output": "DATABASE_URL=<DB_URI_1>\nAWS_ACCESS_KEY_ID=<SECRET_1>\nGITHUB_TOKEN=<SECRET_2>\npassword = <SECRET_3>\n<EMAIL_1>\n"
+          "expected_output": "DATABASE_URL=<DB_URI_1>\nAWS_ACCESS_KEY_ID=<SECRET_1>\nGITHUB_TOKEN=<SECRET_2>\npassword = <SECRET_3>\nOWNER_EMAIL=<EMAIL_1>\n"
         }
       ],
       "tool": "Read"
@@ -182,7 +182,7 @@
             "EMAIL"
           ],
           "input_chars": 211,
-          "expected_output": "DATABASE_URL=<DB_URI_1>\nAWS_ACCESS_KEY_ID=<SECRET_1>\nGITHUB_TOKEN=<SECRET_2>\npassword = <SECRET_3>\n<EMAIL_1>\nend"
+          "expected_output": "DATABASE_URL=<DB_URI_1>\nAWS_ACCESS_KEY_ID=<SECRET_1>\nGITHUB_TOKEN=<SECRET_2>\npassword = <SECRET_3>\nOWNER_EMAIL=<EMAIL_1>\nend"
         }
       ],
       "tool": "Bash"
@@ -343,7 +343,7 @@
             "EMAIL"
           ],
           "input_chars": 220,
-          "expected_output": "1\tDATABASE_URL=<DB_URI_1>\n2\tAWS_ACCESS_KEY_ID=<SECRET_1>\n3\tGITHUB_TOKEN=<SECRET_2>\n4\tpassword = <SECRET_3>\n5\t<EMAIL_1>\n6\t"
+          "expected_output": "1\tDATABASE_URL=<DB_URI_1>\n2\tAWS_ACCESS_KEY_ID=<SECRET_1>\n3\tGITHUB_TOKEN=<SECRET_2>\n4\tpassword = <SECRET_3>\n5\tOWNER_EMAIL=<EMAIL_1>\n6\t"
         }
       ],
       "tool": "Read"
@@ -446,7 +446,7 @@
             "EMAIL"
           ],
           "input_chars": 211,
-          "expected_output": "DATABASE_URL=<DB_URI_1>\nAWS_ACCESS_KEY_ID=<SECRET_1>\nGITHUB_TOKEN=<SECRET_2>\npassword = <SECRET_3>\n<EMAIL_1>\nend"
+          "expected_output": "DATABASE_URL=<DB_URI_1>\nAWS_ACCESS_KEY_ID=<SECRET_1>\nGITHUB_TOKEN=<SECRET_2>\npassword = <SECRET_3>\nOWNER_EMAIL=<EMAIL_1>\nend"
         }
       ],
       "tool": "Bash"

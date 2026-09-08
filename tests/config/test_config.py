@@ -2,14 +2,15 @@ from pathlib import Path
 
 import pytest
 
-from shim_guard.config import (
+from shim_cli.config import (
     config_path,
     load_entities,
     load_policy,
     parse_settings,
     render_entities,
+    render_settings,
 )
-from shim_guard.guard import DEFAULT_ENTITIES
+from shim_cli.guard import DEFAULT_ENTITIES
 
 
 def test_entity_settings_default_preset_and_round_trip_a_selection(
@@ -66,7 +67,24 @@ def test_unsafe_or_relative_settings_paths_are_rejected(
     with pytest.raises(ValueError, match="path"):
         config_path()
 
-    monkeypatch.setenv("SHIM_GUARD_CONFIG", "~shim_guard_missing_user/config.toml")
+    monkeypatch.setenv("SHIM_GUARD_CONFIG", "~shim_cli_missing_user/config.toml")
+    with pytest.raises(ValueError, match="path"):
+        config_path()
+
+
+def test_the_new_configuration_variable_outranks_the_old_one(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    new = tmp_path / "new.toml"
+    old = tmp_path / "old.toml"
+
+    monkeypatch.setenv("SHIM_GUARD_CONFIG", str(old))
+    assert config_path() == old
+
+    monkeypatch.setenv("SHIM_CONFIG", str(new))
+    assert config_path() == new
+
+    monkeypatch.setenv("SHIM_CONFIG", "relative/config.toml")
     with pytest.raises(ValueError, match="path"):
         config_path()
 
@@ -80,6 +98,8 @@ def test_a_version_one_file_is_a_valid_version_two_file() -> None:
         "entities": {},
         "ledger": False,
         "diet": ("json",),
+        "custom": [],
+        "reveal": {},
     }
 
 
@@ -151,7 +171,7 @@ def test_a_file_without_an_entity_list_still_parses(document: str) -> None:
 def test_a_missing_config_file_means_the_shipped_defaults_not_empty_ones(
     tmp_path: Path,
 ) -> None:
-    from shim_guard.events.diet import DEFAULT_TRANSFORMS
+    from shim_cli.events.diet import DEFAULT_TRANSFORMS
 
     policy = load_policy(tmp_path / "absent" / "config.toml")
 
@@ -159,3 +179,129 @@ def test_a_missing_config_file_means_the_shipped_defaults_not_empty_ones(
     assert policy.diet == DEFAULT_TRANSFORMS
     assert policy.ledger is False
     assert policy.mode_for("inbound") == "enforce"
+
+
+@pytest.mark.parametrize("key", ("model-output", "Stop"))
+@pytest.mark.parametrize("value", ("warn", "enforce"))
+def test_a_mode_that_promises_to_act_on_model_output_is_refused(key, value) -> None:
+    with pytest.raises(ValueError, match="shim settings are invalid"):
+        parse_settings(f'[mode]\n"{key}" = "{value}"\n')
+
+
+@pytest.mark.parametrize("key", ("model-output", "Stop"))
+def test_observing_model_output_is_accepted(key: str) -> None:
+    settings = parse_settings(f'[mode]\n"{key}" = "observe"\n')
+
+    assert settings["mode"][key] == "observe"
+
+
+CUSTOM = '[[custom]]\nname = "PROJECT_CODENAME"\npattern = "ATLAS-[0-9]{4}"\n'
+
+
+def test_a_custom_pattern_survives_a_settings_round_trip() -> None:
+    parsed = parse_settings(CUSTOM)
+
+    rendered = render_settings(DEFAULT_ENTITIES, custom=parsed["custom"])
+
+    assert parse_settings(rendered.decode())["custom"] == parsed["custom"]
+
+
+@pytest.mark.parametrize(
+    "body",
+    (
+        '[[custom]]\nname = "lowercase"\npattern = "x"\n',
+        '[[custom]]\nname = "9LEADING"\npattern = "x"\n',
+        '[[custom]]\nname = "' + "A" * 33 + '"\npattern = "x"\n',
+        '[[custom]]\nname = "A"\n',
+        '[[custom]]\nname = "A"\npattern = "x"\nliteral = "abc"\n',
+        '[[custom]]\nname = "A"\npattern = "' + "x" * 257 + '"\n',
+        '[[custom]]\nname = "A"\nliteral = "ab"\n',
+        '[[custom]]\nname = "A"\npattern = "x"\nscore = 1.5\n',
+        '[[custom]]\nname = "A"\npattern = "x"\nscore = "high"\n',
+        '[[custom]]\nname = "A"\npattern = "x"\nignore_case = "yes"\n',
+        '[[custom]]\nname = "A"\npattern = "x"\nwhole_word = false\n',
+        '[[custom]]\nname = "A"\npattern = "(unclosed"\n',
+        '[[custom]]\nname = "A"\npattern = "x"\nunknown = 1\n',
+        '[[custom]]\nname = "A"\npattern = "x"\n[[custom]]\nname = "A"\npattern = "y"\n',
+        "custom = 7\n",
+    ),
+)
+def test_a_malformed_custom_entry_fails_closed(body: str) -> None:
+    with pytest.raises(ValueError):
+        parse_settings(body)
+
+
+@pytest.mark.parametrize(
+    "body",
+    (
+        '[[custom]]\nname = "A"\npattern = "x"\n',
+        '[[custom]]\nname = "A_1"\nliteral = "abc"\n',
+        '[[custom]]\nname = "A"\nliteral = "abc"\nwhole_word = false\n',
+        '[[custom]]\nname = "A"\npattern = "x"\nscore = 0\n',
+        '[[custom]]\nname = "A"\npattern = "x"\nscore = 1\n',
+        '[[custom]]\nname = "A"\npattern = "x"\nignore_case = true\n',
+    ),
+)
+def test_a_well_formed_custom_entry_is_accepted(body: str) -> None:
+    assert parse_settings(body)["custom"]
+
+
+def test_more_patterns_than_the_cap_fails_closed() -> None:
+    from shim_cli.guard.entities import MAX_CUSTOM_PATTERNS
+
+    body = "".join(
+        f'[[custom]]\nname = "P{index}"\npattern = "x{index}"\n'
+        for index in range(MAX_CUSTOM_PATTERNS + 1)
+    )
+
+    with pytest.raises(ValueError, match="shim settings are invalid"):
+        parse_settings(body)
+
+
+def test_exactly_the_cap_is_accepted() -> None:
+    from shim_cli.guard.entities import MAX_CUSTOM_PATTERNS
+
+    body = "".join(
+        f'[[custom]]\nname = "P{index}"\npattern = "x{index}"\n'
+        for index in range(MAX_CUSTOM_PATTERNS)
+    )
+
+    assert len(parse_settings(body)["custom"]) == MAX_CUSTOM_PATTERNS
+
+
+@pytest.mark.parametrize(
+    "body",
+    (
+        "[reveal]\nIBAN = 1\n",
+        "[reveal]\nPHONE = 4\n",
+        "[reveal]\nIBAN = 4\nCREDIT_CARD = 2\n",
+    ),
+)
+def test_an_allowed_reveal_is_accepted(body: str) -> None:
+    assert parse_settings(body)["reveal"]
+
+
+@pytest.mark.parametrize(
+    "body",
+    (
+        "[reveal]\nSECRET = 4\n",
+        "[reveal]\nEMAIL = 4\n",
+        "[reveal]\nCUSTOM = 4\n",
+        "[reveal]\nIBAN = 0\n",
+        "[reveal]\nIBAN = 5\n",
+        "[reveal]\nIBAN = true\n",
+        '[reveal]\nIBAN = "4"\n',
+        "reveal = 4\n",
+    ),
+)
+def test_a_reveal_that_is_not_allowed_fails_closed(body: str) -> None:
+    with pytest.raises(ValueError, match="shim settings are invalid"):
+        parse_settings(body)
+
+
+def test_a_reveal_table_survives_a_settings_round_trip() -> None:
+    parsed = parse_settings("[reveal]\nIBAN = 4\nPHONE = 2\n")
+
+    rendered = render_settings(DEFAULT_ENTITIES, reveal=parsed["reveal"])
+
+    assert parse_settings(rendered.decode())["reveal"] == {"IBAN": 4, "PHONE": 2}

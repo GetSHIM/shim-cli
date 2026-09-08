@@ -4,9 +4,9 @@ import json
 
 import pytest
 
-from shim_guard.events import payload
-from shim_guard.events.payload import PayloadTooLarge, mask, replace, walk
-from shim_guard.guard import evaluate
+from shim_cli.events import payload
+from shim_cli.events.payload import PayloadTooLarge, mask, replace, walk
+from shim_cli.guard import evaluate
 
 NESTED = {
     "tool_response": [
@@ -89,6 +89,16 @@ def test_deep_nesting_is_refused_rather_than_partially_scanned() -> None:
 
     with pytest.raises(PayloadTooLarge, match="nested more deeply"):
         walk(document)
+
+
+def test_a_caller_off_the_hook_path_may_raise_the_limits() -> None:
+    document: object = "Contact alice@example.com"
+    for _ in range(payload.MAX_DEPTH + 2):
+        document = {"next": document}
+
+    found = walk(document, max_depth=payload.MAX_DEPTH + 4)
+
+    assert len(found.leaves) == 1
 
 
 def test_oversized_text_is_refused_rather_than_partially_scanned() -> None:

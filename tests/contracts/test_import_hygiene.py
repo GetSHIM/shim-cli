@@ -11,7 +11,7 @@ import pytest
 
 ALLOWED_THIRD_PARTY = frozenset({"phonenumbers", "tomli"})
 
-SOURCE_ROOT = Path(__file__).parents[2] / "src" / "shim_guard"
+SOURCE_ROOT = Path(__file__).parents[2] / "src" / "shim_cli"
 TOP_LEVEL_OWNERS = frozenset(
     {
         "cli",
@@ -28,45 +28,47 @@ TOP_LEVEL_OWNERS = frozenset(
 )
 ALLOWED_INTERNAL_IMPORTS = {
     "cli": (
-        "shim_guard.clients",
-        "shim_guard.config",
-        "shim_guard.events.diet",
-        "shim_guard.guard",
-        "shim_guard.session",
-        "shim_guard.settings_files",
-        "shim_guard.watch",
+        "shim_cli.clients",
+        "shim_cli.config",
+        "shim_cli.events.diet",
+        "shim_cli.guard",
+        "shim_cli.session",
+        "shim_cli.settings_files",
+        "shim_cli.watch",
     ),
     "hook": (
-        "shim_guard.clients",
-        "shim_guard.config",
-        "shim_guard.events",
-        "shim_guard.guard",
-        "shim_guard.session",
+        "shim_cli.clients",
+        "shim_cli.config",
+        "shim_cli.events",
+        "shim_cli.guard",
+        "shim_cli.session",
     ),
     "config": (
-        "shim_guard.events.diet",
-        "shim_guard.guard.entities",
-        "shim_guard.policy",
-        "shim_guard.settings_files",
+        "shim_cli.events.diet",
+        "shim_cli.guard.entities",
+        "shim_cli.policy",
+        "shim_cli.settings_files",
     ),
     "clients": (
-        "shim_guard.events",
-        "shim_guard.policy",
-        "shim_guard.session",
-        "shim_guard.settings_files",
+        "shim_cli.events",
+        "shim_cli.policy",
+        "shim_cli.session",
+        "shim_cli.settings_files",
     ),
     "events": (
-        "shim_guard.guard",
-        "shim_guard.policy",
-        "shim_guard.session.record",
+        "shim_cli.guard",
+        "shim_cli.policy",
+        "shim_cli.session.record",
     ),
+    # The proxy reuses the hook's bounded traversal; the hook never sees watch.
+    "watch": ("shim_cli.events.payload",),
 }
 ALLOWED_INTERNAL_EXCEPTIONS = frozenset(
     {
-        ("clients/user_prompt_hook.py", "shim_guard.guard.GuardDecision"),
-        ("clients/claude/hook.py", "shim_guard.guard.GuardDecision"),
-        ("clients/codex/hook.py", "shim_guard.guard.GuardDecision"),
-        ("clients/copilot/hook.py", "shim_guard.guard.GuardDecision"),
+        ("clients/user_prompt_hook.py", "shim_cli.guard.GuardDecision"),
+        ("clients/claude/hook.py", "shim_cli.guard.GuardDecision"),
+        ("clients/codex/hook.py", "shim_cli.guard.GuardDecision"),
+        ("clients/copilot/hook.py", "shim_cli.guard.GuardDecision"),
     }
 )
 
@@ -75,7 +77,7 @@ import importlib.util
 import json
 import sys
 
-from shim_guard import hook
+from shim_cli import hook
 
 payload = json.dumps(
     {"hook_event_name": "UserPromptSubmit", "prompt": PROMPT}
@@ -89,7 +91,7 @@ hook._output(payload, CLIENT)
 
 third_party = []
 for name in sorted({module.split(".")[0] for module in sys.modules}):
-    if name.startswith("_") or name == "shim_guard":
+    if name.startswith("_") or name == "shim_cli":
         continue
     try:
         specification = importlib.util.find_spec(name)
@@ -98,7 +100,7 @@ for name in sorted({module.split(".")[0] for module in sys.modules}):
     if specification and specification.origin and "site-packages" in specification.origin:
         third_party.append(name)
 
-shim_modules = sorted(m for m in sys.modules if m.startswith("shim_guard."))
+shim_modules = sorted(m for m in sys.modules if m.startswith("shim_cli."))
 sys.stdout.write(json.dumps(
     {"third_party": third_party, "shim": shim_modules}
 ))
@@ -181,7 +183,7 @@ def test_internal_imports_follow_the_architecture() -> None:
         allowed = ALLOWED_INTERNAL_IMPORTS.get(owner_name, ())
         for imported, under_type_checking in _imported_modules(path):
             parts = imported.split(".")
-            if parts[:1] != ["shim_guard"] or len(parts) < 2:
+            if parts[:1] != ["shim_cli"] or len(parts) < 2:
                 continue
             target_owner = parts[1]
             if target_owner == owner_name or target_owner not in TOP_LEVEL_OWNERS:
@@ -226,6 +228,6 @@ def test_the_hook_path_imports_no_unexpected_third_party_module(
 def test_the_hook_path_never_imports_the_watch_proxy(client: str) -> None:
     observed = _probe(client, "Contact alice@example.com")
 
-    watch = [name for name in observed["shim"] if name.startswith("shim_guard.watch")]
+    watch = [name for name in observed["shim"] if name.startswith("shim_cli.watch")]
 
     assert not watch, f"{client}: the hook path imported {watch}"

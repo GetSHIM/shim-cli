@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from shim_guard.clients.codex.settings import (
+from shim_cli.clients.codex.settings import (
     HOOK_TIMEOUT_SECONDS,
     MAX_CONFIG_BYTES,
     MINIMUM_CODEX_VERSION,
@@ -47,12 +47,13 @@ def test_codex_0149_settings_are_exact_and_deterministic(tmp_path: Path) -> None
         "-I",
         "-B",
         "-m",
-        "shim_guard.hook",
+        "shim_cli.hook",
     ]
     assert b'"matcher"' not in document
     assert b'"async"' not in document
     assert HOOK_TIMEOUT_SECONDS == 30
-    assert TESTED_CODEX_VERSION == MINIMUM_CODEX_VERSION == "0.149.0"
+    assert MINIMUM_CODEX_VERSION == "0.149.0"
+    assert TESTED_CODEX_VERSION == "0.151.0"
 
 
 def test_target_path_respects_injected_home(
@@ -134,7 +135,7 @@ def test_inline_hook_detection_normalizes_parser_recursion(
     def recurse(_: str) -> None:
         raise RecursionError
 
-    monkeypatch.setattr("shim_guard.clients.codex.settings.tomllib.loads", recurse)
+    monkeypatch.setattr("shim_cli.clients.codex.settings.tomllib.loads", recurse)
     with pytest.raises(ValueError, match="cannot be inspected"):
         has_inline_hooks(config)
 

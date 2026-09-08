@@ -1,0 +1,31 @@
+#!/bin/sh
+# Missing runtimes fail open.
+
+set -u
+
+client=${1:-codex}
+root=${2:-${CLAUDE_PLUGIN_ROOT:-}}
+
+if command -v shim-hook >/dev/null 2>&1; then
+    exec shim-hook "$client"
+fi
+
+if command -v shim-guard-hook >/dev/null 2>&1; then
+    exec shim-guard-hook "$client"
+fi
+
+archive="$root/bin/shim.pyz"
+if [ -n "$root" ] && [ -f "$archive" ]; then
+    for interpreter in python3.13 python3.12 python3.11 python3.10 python3.9 python3 python; do
+        if command -v "$interpreter" >/dev/null 2>&1; then
+            exec "$interpreter" "$archive" "$client"
+        fi
+    done
+    printf '%s\n' \
+        "shim: no python3 found on PATH; the prompt was not inspected." >&2
+    exit 0
+fi
+
+printf '%s\n' \
+    "shim: no hook available. Install with 'uv tool install shim' or reinstall the plugin; the prompt was not inspected." >&2
+exit 0

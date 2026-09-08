@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "evaluation_unit": "exact redacted output",
+  "note": "Opt-in partial reveal. Every value here is synthetic.",
+  "cases": [
+    {
+      "id": "reveal-iban-skips-the-spaces-it-was-printed-with",
+      "reveal": { "IBAN": 4 },
+      "text": "pay TR33 0006 1005 1978 6457 8413 26 now",
+      "expected_output": "pay <IBAN_1:1326> now"
+    },
+    {
+      "id": "reveal-tells-two-accounts-apart",
+      "reveal": { "IBAN": 4 },
+      "text": "move TR330006100519786457841326 to GB29NWBK60161331926819",
+      "expected_output": "move <IBAN_1:1326> to <IBAN_2:6819>"
+    },
+    {
+      "id": "reveal-card-skips-the-hyphens",
+      "reveal": { "CREDIT_CARD": 4 },
+      "text": "card 4242-4242-4242-4242 charged",
+      "expected_output": "card <CREDIT_CARD_1:4242> charged"
+    },
+    {
+      "id": "reveal-phone-skips-the-parentheses",
+      "reveal": { "PHONE": 4 },
+      "text": "call (555) 010-1234 now",
+      "expected_output": "call <PHONE_1:1234> now"
+    },
+    {
+      "id": "reveal-at-the-lower-bound",
+      "reveal": { "IBAN": 1 },
+      "text": "pay TR330006100519786457841326 now",
+      "expected_output": "pay <IBAN_1:6> now"
+    },
+    {
+      "id": "reveal-at-the-upper-bound",
+      "reveal": { "IBAN": 4 },
+      "text": "pay TR330006100519786457841326 now",
+      "expected_output": "pay <IBAN_1:1326> now"
+    },
+    {
+      "id": "reveal-does-not-reach-a-type-outside-the-table",
+      "reveal": { "IBAN": 4 },
+      "text": "card 4242-4242-4242-4242 for TR330006100519786457841326",
+      "expected_output": "card <CREDIT_CARD_1> for <IBAN_1:1326>"
+    },
+    {
+      "id": "reveal-absent-leaves-the-placeholder-whole",
+      "reveal": {},
+      "text": "pay TR330006100519786457841326 now",
+      "expected_output": "pay <IBAN_1> now"
+    }
+  ]
+}

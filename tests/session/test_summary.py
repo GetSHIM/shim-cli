@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from shim_guard.session import summary
+from shim_cli.session import summary
 
 
 def _record(**changes: object) -> dict:
@@ -220,3 +220,72 @@ def test_a_marker_never_carries_the_text_that_matched_it() -> None:
 
     assert "ignore all previous" not in text.lower()
     assert "ignore" not in json.dumps(document).lower()
+
+
+def _reply(**changes: object) -> dict:
+    record = {
+        "client": "claude",
+        "event": "Stop",
+        "tool_name": "",
+        "direction": "model-output",
+        "mode": "observe",
+        "action": "report",
+        "entities": {"EMAIL": 2, "IBAN": 1},
+        "latency_ms": 4,
+    }
+    record.update(changes)
+    return record
+
+
+def test_what_the_model_wrote_gets_its_own_line_and_its_own_caveat() -> None:
+    text = summary.render([_reply()])
+
+    assert f"  model     2 EMAIL, 1 IBAN in its replies ({summary.NOT_LEAKS})" in text
+    assert "warned" not in text
+
+
+def test_a_reply_with_nothing_in_it_is_silence() -> None:
+    assert summary.render([_reply(entities={})]) == ""
+
+
+def test_the_model_line_never_borrows_the_masked_column() -> None:
+    text = summary.render([_record(), _reply()])
+
+    assert "masked    1 SECRET" in text
+    assert "model     2 EMAIL, 1 IBAN in its replies" in text
+
+
+def test_the_model_counts_reach_the_json_report() -> None:
+    document = summary.as_json([_record(), _reply()])
+
+    assert document["model_output"] == {"EMAIL": 2, "IBAN": 1}
+    assert "report" not in document["actions"]
+
+
+def test_a_session_with_no_model_line_still_carries_the_json_key() -> None:
+    assert summary.as_json([_record()])["model_output"] == {}
+
+
+def test_a_named_pattern_is_reported_beside_the_type_it_masked() -> None:
+    text = summary.render(
+        [_record(entities={"CUSTOM": 3}, custom={"PROJECT_CODENAME": 2, "HOST": 1})]
+    )
+
+    assert "masked    3 CUSTOM" in text
+    assert "custom    2 PROJECT_CODENAME, 1 HOST" in text
+
+
+def test_pattern_names_reach_the_json_report() -> None:
+    document = summary.as_json([_record(custom={"PROJECT_CODENAME": 2})])
+
+    assert document["custom"] == {"PROJECT_CODENAME": 2}
+
+
+def test_a_session_without_named_patterns_carries_an_empty_map() -> None:
+    assert summary.as_json([_record()])["custom"] == {}
+
+
+def test_a_malformed_custom_map_is_ignored_rather_than_rendered() -> None:
+    text = summary.render([_record(custom="not a map")])
+
+    assert "custom" not in text

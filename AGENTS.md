@@ -1,4 +1,4 @@
-# SHIM Guard agent guidance
+# shim-cli agent guidance
 
 Read `README.md`, `docs/architecture.md`, `docs/privacy.md`, and `docs/compatibility.md` before changing the detector, hook protocol, installer, or `shim watch`.
 
@@ -10,7 +10,7 @@ Apply the `ponytail:ponytail` and `code-writing-guidelines` skills to every impl
   `shim watch` is the one component that touches the network, and only as a
   forwarding proxy: it runs for the length of one command, binds to loopback
   only, forwards bytes unchanged, and originates no request of its own. Nothing
-  under `src/shim_guard/watch/` may be imported from the hook path — the hook is
+  under `src/shim_cli/watch/` may be imported from the hook path — the hook is
   a cold-start subprocess on every tool call and `tests/contracts` enforces it.
 - Never log or persist raw prompts, findings, or replacement values. The only
   prompt-derived file is one `0600` typed redaction in OS temporary storage per

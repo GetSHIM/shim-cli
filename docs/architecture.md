@@ -1,6 +1,6 @@
 # Architecture
 
-shim Guard is one Python distribution and one domain-sliced modular monolith.
+shim-cli is one Python distribution and one domain-sliced modular monolith.
 It has two independent paths between a coding agent and its model:
 
 - The synchronous **hook** receives native client events, applies local policy,
@@ -66,10 +66,12 @@ hook ------> config, clients, events, session, guard
 config ----> policy, guard/entities, settings_files, events/diet
 clients ---> policy, events, session, settings_files
 events ----> policy, guard, session/record
+watch -----> events/payload
 ```
 
 `guard`, `policy`, `session`, `settings_files`, and `watch` do not depend on
-the CLI or hook. `guard` does not import configuration, `session` does not
+the CLI or hook. `watch` reuses the hook's bounded string traversal and nothing
+else from it. `guard` does not import configuration, `session` does not
 import events, events do not import clients, and the hook does not import
 `watch`. `tests/contracts/test_import_hygiene.py` enforces these boundaries.
 Composition stays explicit in `hook.py` and the CLI; there is no dependency
@@ -94,7 +96,7 @@ and a verified mutation or report channel; it is not enabled by a flag.
 
 Codex installation leaves inline `config.toml` hooks untouched. Claude
 installation changes only shim's exact groups in user `settings.json`.
-Copilot owns its dedicated `hooks/shim-guard.json` and retains an empty
+Copilot owns its dedicated `hooks/shim.json` and retains an empty
 versioned document on revert. All clients preserve unrelated settings;
 malformed, ambiguous, unsafe, or concurrently changed files require manual
 action.
@@ -115,11 +117,45 @@ may need. Lossless JSON compaction is the default; trailing-whitespace removal
 is available only through explicit configuration because it can change
 Markdown hard breaks.
 
-The detector contracts are `guard-v2.json`, `guard-tools-v1.json`, and
-`parity-v1.json`. The last is generated migration evidence and is never
+Eleven entity types are built in. The twelfth, `CUSTOM`, is whatever the user
+named in `[[custom]]`: `guard/entities.py` compiles those entries, the hook and
+the proxy pass the compiled tuple to `evaluate`, and a `Finding` carries the
+pattern's name as its `label` so the report can say which one matched while the
+placeholder stays `<CUSTOM_n>`. A built-in type outranks it wherever the two
+overlap. A pattern is checked for catastrophic backtracking when `shim config`
+writes it and again by `shim doctor`, never on the hook path: `re` has no
+per-match timeout and the hook is what a user is waiting on.
+
+Substitution is the one place a policy setting changes the output text.
+`[reveal]` keeps the last one to four digits of an `IBAN`, `CREDIT_CARD` or
+`PHONE` span, separators skipped, as `<TYPE_n:tail>`; `guard/evaluate.py`
+holds the single definition of what a placeholder looks like in either form.
+Detection, counting and spans are untouched, so with no table the output is
+byte-identical to a build without the feature.
+
+The detector contracts are `guard-v2.json`, `guard-tools-v1.json`,
+`custom-v1.json`, `reveal-v1.json`, and `parity-v1.json`. The last is generated migration evidence and is never
 regenerated to make a test pass; intentional differences are recorded in
 `DELIBERATE_DIVERGENCES`. Detailed evidence belongs in
 [Compatibility](compatibility.md), not in this module map.
+
+## Directions
+
+`policy.py` classifies every inspected thing into one of six directions:
+`user-prompt`, `outbound`, `inbound`, `local-write`, `executable-text` and
+`model-output`. The first five come from a hook event and a tool name and can
+be masked, blocked or reported according to their mode.
+
+`model-output` is different, and deliberately so. It is the final assistant
+text of a turn, handed to the hook by Claude Code at `Stop`; the client has
+already shown it, so nothing can be done about it. Its only mode is `observe`,
+`decide` refuses `warn` and `enforce` with an error rather than accepting a
+mode it could not honour, and `config.py` rejects any other value for it — or
+for `Stop` as a per-event override — through the malformed-settings path.
+Because acting is impossible, observing has to mean counting: `decide` returns
+`report` where every other direction returns `allow`, so the count reaches the
+summary. The text itself is never stored, and only the last text block of the
+turn is visible (see [Compatibility](compatibility.md)).
 
 ## Session records
 
@@ -154,3 +190,36 @@ measurements. A bounded incremental reader handles SSE and JSON usage, reporting
 known, partial, or unavailable usage independently of request inspection.
 Request and response bodies are not written to disk. Attribution across tools,
 system, and messages is inferred from byte share and marked approximate.
+
+Detection walks the request with `events/payload.py`, the same bounded traversal
+the hook uses, so every text leaf is offered to the detector: message content in
+either form, tool results, tool call arguments, the system prompt and the tool
+definitions. Base64 attachment data and thinking signatures are skipped, and a
+request past a limit is reported as unmeasured rather than partly counted.
+
+The proxy passes its own limits to that traversal. The hook's defaults bound a
+user waiting on a synchronous subprocess; measurement runs after the response
+has been relayed, on a body already capped at 8 MB. One measured Claude Code
+request held 4,402 text leaves, 256,517 characters and nested 35 levels deep
+inside an MCP tool's recursive JSON schema, against hook defaults of 2,000,
+200,000 and 24 — so the hook's limits would report almost every real request as
+unmeasured.
+
+Findings are held per section, and the `tools` and `system` results are memoised
+per session by content hash, sixteen entries, first in first out.
+
+The same reader accumulates the response. Anthropic `content_block_delta`
+payloads are joined per block index — `text_delta` into `text`, `thinking_delta`
+into `thinking`, `input_json_delta` ignored because the hook already scans tool
+arguments at `PreToolUse` — and a plain JSON body yields its content blocks
+directly. Accumulation is capped at 1 MB per exchange. The detector runs only
+after the terminating chunk has been written and flushed, and only for an
+exchange holding a measurement slot, so the client never waits on it; the text
+is dropped before the handler returns. The report keeps the two directions on
+separate lines and never sums them.
+
+The usage reader also keeps the provider's stop reason, in whichever shape it
+arrives: an Anthropic `delta.stop_reason`, a Responses `status: incomplete`
+with its `incomplete_details.reason`, or a chat-completions `finish_reason`.
+The first one on the wire wins. Only the three that mean the output limit was
+reached produce a line; every reason reaches the JSON totals.
