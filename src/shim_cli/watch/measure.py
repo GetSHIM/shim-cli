@@ -23,6 +23,11 @@ MAX_BODY_BYTES = 8_000_000
 MAX_MODEL_CHARS = 120
 UNKNOWN_MODEL = "unknown"
 
+MAX_STOP_REASON_CHARS = 40
+UNKNOWN_REASON = "unknown"
+# Every provider spelling for "the answer stopped at the output limit".
+TRUNCATED = frozenset({"max_tokens", "max_output_tokens", "length"})
+
 AT_FILE_MARKER = "Called the Read tool with the following input:"
 _REMINDER_OPEN = "<system-reminder>"
 _REMINDER_CLOSE = "</system-reminder>"
@@ -56,6 +61,47 @@ class Usage:
         )
 
 
+def _reason(value: object) -> str:
+    if not isinstance(value, str) or not value:
+        return ""
+    printable = len(value) <= MAX_STOP_REASON_CHARS and value.isprintable()
+    return value if printable else UNKNOWN_REASON
+
+
+def _incomplete(value: object) -> str:
+    """The Responses shape states truncation as a status, not a reason."""
+    if not isinstance(value, dict) or value.get("status") != "incomplete":
+        return ""
+    details = value.get("incomplete_details")
+    return _reason(details.get("reason") if isinstance(details, dict) else None)
+
+
+def stop_reason_from(document: object) -> str:
+    if not isinstance(document, dict):
+        return ""
+    delta = document.get("delta")
+    for candidate in (
+        delta.get("stop_reason") if isinstance(delta, dict) else None,
+        document.get("stop_reason"),
+    ):
+        found = _reason(candidate)
+        if found:
+            return found
+    message = document.get("message")
+    if isinstance(message, dict):
+        found = _reason(message.get("stop_reason"))
+        if found:
+            return found
+    for candidate in (document, document.get("response")):
+        found = _incomplete(candidate)
+        if found:
+            return found
+    choices = document.get("choices")
+    if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+        return _reason(choices[0].get("finish_reason"))
+    return ""
+
+
 def _int(value: object) -> int:
     return value if type(value) is int and value >= 0 else 0
 
@@ -83,6 +129,7 @@ class UsageReader:
     def __init__(self, content_type: str = "text/event-stream") -> None:
         self.usage = Usage()
         self.status = "unavailable"
+        self.stop_reason = ""
         self._pending = ""
         self._data: list[str] = []
         self._data_chars = 0
@@ -134,6 +181,8 @@ class UsageReader:
             return
         if not isinstance(document, dict):
             return
+        if not self.stop_reason:
+            self.stop_reason = stop_reason_from(document)
         nested = document.get("message") or document.get("response") or document
         block = document.get("usage")
         if not isinstance(block, dict) and isinstance(nested, dict):
@@ -310,6 +359,7 @@ class Exchange:
     sections: dict = field(default_factory=dict)
     entities: dict = field(default_factory=dict)
     entities_by_section: dict = field(default_factory=dict)
+    stop_reason: str = ""
     at_files: AtFiles = field(default_factory=AtFiles)
     measured: bool = True
     usage_status: str = "unavailable"
@@ -375,13 +425,16 @@ __all__ = [
     "AT_FILE_MARKER",
     "MAX_BODY_BYTES",
     "MAX_MODEL_CHARS",
+    "MAX_STOP_REASON_CHARS",
     "MAX_SCAN_DEPTH",
     "MAX_SCAN_LEAVES",
     "MEMOISED",
     "MEMO_LIMIT",
     "OTHER",
     "SECTIONS",
+    "TRUNCATED",
     "UNKNOWN_MODEL",
+    "UNKNOWN_REASON",
     "AtFiles",
     "Exchange",
     "SectionMemo",
@@ -391,5 +444,6 @@ __all__ = [
     "attribute",
     "inspect_request",
     "sections",
+    "stop_reason_from",
     "usage_from",
 ]

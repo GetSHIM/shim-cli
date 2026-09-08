@@ -173,3 +173,9 @@ unmeasured.
 
 Findings are held per section, and the `tools` and `system` results are memoised
 per session by content hash, sixteen entries, first in first out.
+
+The usage reader also keeps the provider's stop reason, in whichever shape it
+arrives: an Anthropic `delta.stop_reason`, a Responses `status: incomplete`
+with its `incomplete_details.reason`, or a chat-completions `finish_reason`.
+The first one on the wire wins. Only the three that mean the output limit was
+reached produce a line; every reason reaches the JSON totals.

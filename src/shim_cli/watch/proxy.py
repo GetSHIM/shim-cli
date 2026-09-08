@@ -220,6 +220,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             except Exception:
                 self.session.failed()
                 exchange.usage = reader.usage
+                exchange.stop_reason = reader.stop_reason
                 exchange.usage_status = (
                     "partial" if reader.status != "unavailable" else "unavailable"
                 )
@@ -272,6 +273,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         except OSError:
             pass
         exchange.usage = reader.usage
+        exchange.stop_reason = reader.stop_reason
 
     do_POST = _relay
     do_GET = _relay

@@ -233,3 +233,33 @@ def test_the_report_says_nothing_was_modified() -> None:
 
     assert "nothing was modified" in text
     assert "no request body was written to disk" in text
+
+
+def test_a_truncated_response_is_named_with_its_reason() -> None:
+    session = _session(
+        _exchange(stop_reason="max_tokens"),
+        _exchange(stop_reason="end_turn"),
+        _exchange(stop_reason="max_tokens"),
+    )
+
+    text = report.render(session, 9.0)
+
+    assert "cut off   2 of 3 responses stopped at the output limit (max_tokens)" in text
+
+
+def test_a_session_that_was_never_cut_off_says_nothing() -> None:
+    text = report.render(_session(_exchange(stop_reason="end_turn")), 9.0)
+
+    assert "cut off" not in text
+
+
+def test_every_stop_reason_reaches_the_json_totals() -> None:
+    session = _session(
+        _exchange(stop_reason="max_tokens"),
+        _exchange(stop_reason="end_turn"),
+        _exchange(),
+    )
+
+    document = report.as_json(session, 5.0)
+
+    assert document["stop_reasons"] == {"max_tokens": 1, "end_turn": 1}

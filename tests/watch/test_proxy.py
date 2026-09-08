@@ -787,3 +787,23 @@ def test_a_large_tool_set_is_scanned_once_across_a_session(scanned) -> None:
     assert len(running.session.exchanges) == 3
     assert sum(1 for length in lengths if length > 100_000) == 1
     assert lengths.count(5) == 3
+
+
+def test_a_truncated_response_is_recorded_and_relayed_unchanged(
+    watched, monkeypatch
+) -> None:
+    import sys
+
+    running, _upstream = watched
+    delta = (
+        b"event: message_delta\n"
+        b'data: {"type":"message_delta","delta":{"stop_reason":"max_tokens"},'
+        b'"usage":{"output_tokens":214}}\n\n'
+    )
+    monkeypatch.setattr(sys.modules[__name__], "MESSAGE_DELTA", delta)
+
+    _status, _headers, body = _post(running, BODY, HEADERS)
+
+    assert running.session.exchanges[0].stop_reason == "max_tokens"
+    decoded = gzip.decompress(body) if body[:2] == b"\x1f\x8b" else body
+    assert delta in decoded

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .measure import OTHER, SECTIONS, Usage
+from .measure import OTHER, SECTIONS, TRUNCATED, Usage
 
 SECTION_WORDS = {
     "system": "system prompt",
@@ -103,6 +103,15 @@ def _words(names: list) -> str:
     return " and ".join([", ".join(said[:-1]), said[-1]] if len(said) > 2 else said)
 
 
+def stop_reason_totals(exchanges: list) -> dict:
+    combined: dict = {}
+    for exchange in exchanges:
+        if exchange.stop_reason:
+            reason = exchange.stop_reason
+            combined[reason] = combined.get(reason, 0) + 1
+    return combined
+
+
 def at_file_totals(exchanges: list) -> tuple:
     return (
         sum(exchange.at_files.count for exchange in exchanges),
@@ -157,6 +166,14 @@ def render(session, seconds: float) -> str:
     if combined.output_tokens:
         lines.append(
             f"  output    {_thousands(combined.output_tokens)} tokens  (exact)"
+        )
+
+    cut_off = [e for e in exchanges if e.stop_reason in TRUNCATED]
+    if cut_off:
+        named = ", ".join(sorted({exchange.stop_reason for exchange in cut_off}))
+        lines.append(
+            f"  cut off   {len(cut_off)} of {len(exchanges)} responses stopped "
+            f"at the output limit ({named})"
         )
 
     by_section = section_totals(exchanges)
@@ -248,6 +265,7 @@ def as_json(session, seconds: float) -> dict:
         "at_files": {"count": count, "bytes": size},
         "entities": entity_totals(exchanges),
         "entities_by_section": entity_section_totals(exchanges),
+        "stop_reasons": stop_reason_totals(exchanges),
     }
 
 
@@ -261,5 +279,6 @@ __all__ = [
     "render",
     "section_totals",
     "spend",
+    "stop_reason_totals",
     "totals",
 ]

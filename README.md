@@ -49,22 +49,28 @@ shim watch -- claude -p "explain this repo"
 ```
 
 ```text
-shim watch — 8s, 1 requests
-  input     109,678 tokens  (exact)
-    cache read   91,562   83%
-    cache write  18,114
-  output    157 tokens  (exact)
+shim watch — 17s, 2 requests
+  input     189,706 tokens  (exact)
+    cache read   118,048   62%
+    cache write  71,654
+  output    610 tokens  (exact)
   where the input went  (approximate — split by byte share)
-    tools     ~      90,001   82%
-    system    ~      10,361    9%
-    messages  ~       9,185    8%
-  @ files   1 inlined, 354 bytes (invisible to hooks)
-  found     2 EMAIL in traffic
-  spend     ~$0.10  (approximate, 2026-08-30 prices)
+    tools     ~     158,949   84%
+    system    ~       6,821    4%
+    messages  ~      23,678   12%
+    other     ~         258    0%
+  found     3 EMAIL, 1 IBAN, 1 SECRET in request messages
+  also      4 EMAIL, 2 PHONE in system prompt and tool definitions
+  spend     ~$1.57  (approximate, 2026-08-30 prices)
+  largest   one request was 347,649 bytes, tools 90% of it
+  nothing was modified, and no request body was written to disk
 ```
 
-On the session above, **the tools array was 82% of the input tokens** — before
-a single line of the user's own code. That is one session on one repository,
+On the session above, **the tools array was 84% of the input tokens** — before
+a single line of the user's own code. The `IBAN` and the `SECRET` came from a
+file the agent read with a tool: shim scans every text field the model reads,
+including tool results, and says which part of the request each finding was in.
+A response that stopped at the provider's output limit adds a `cut off` line. That is one session on one repository,
 not a universal figure, which is the point: it is your number and you have no
 other way to get it.
 

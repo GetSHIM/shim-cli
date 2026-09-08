@@ -502,3 +502,77 @@ def test_a_tool_schema_deeper_than_the_hook_allows_is_still_measured() -> None:
 
     assert exchange.measured is True
     assert _ibans(exchange) == {"tools": 1}
+
+
+@pytest.mark.parametrize(
+    ("document", "expected"),
+    (
+        (
+            {"type": "message_delta", "delta": {"stop_reason": "max_tokens"}},
+            "max_tokens",
+        ),
+        ({"stop_reason": "end_turn"}, "end_turn"),
+        ({"message": {"stop_reason": "tool_use"}}, "tool_use"),
+        (
+            {
+                "type": "response.completed",
+                "response": {
+                    "status": "incomplete",
+                    "incomplete_details": {"reason": "max_output_tokens"},
+                },
+            },
+            "max_output_tokens",
+        ),
+        (
+            {
+                "status": "incomplete",
+                "incomplete_details": {"reason": "content_filter"},
+            },
+            "content_filter",
+        ),
+        ({"response": {"status": "completed"}}, ""),
+        ({"choices": [{"finish_reason": "length"}]}, "length"),
+        ({"choices": [{"finish_reason": "stop"}]}, "stop"),
+        ({"choices": []}, ""),
+        ({"choices": "not a list"}, ""),
+        ({}, ""),
+        ([], ""),
+        ({"stop_reason": 7}, ""),
+        ({"stop_reason": ""}, ""),
+        ({"stop_reason": "x" * 41}, measure.UNKNOWN_REASON),
+        ({"stop_reason": "max\ntokens"}, measure.UNKNOWN_REASON),
+    ),
+)
+def test_the_provider_s_stop_reason_is_read_in_every_shape(document, expected) -> None:
+    assert measure.stop_reason_from(document) == expected
+
+
+def test_usage_and_a_stop_reason_in_one_event_are_both_kept() -> None:
+    reader = measure.UsageReader()
+
+    reader.feed(
+        "event: message_delta\n"
+        'data: {"type":"message_delta","delta":{"stop_reason":"max_tokens"},'
+        '"usage":{"output_tokens":214}}\n\n'
+    )
+
+    assert reader.stop_reason == "max_tokens"
+    assert reader.usage.output_tokens == 214
+
+
+def test_the_first_stop_reason_on_the_wire_wins() -> None:
+    reader = measure.UsageReader()
+
+    reader.feed('data: {"delta":{"stop_reason":"max_tokens"}}\n\n')
+    reader.feed('data: {"delta":{"stop_reason":"end_turn"}}\n\n')
+
+    assert reader.stop_reason == "max_tokens"
+
+
+def test_a_stream_that_never_states_a_reason_leaves_it_empty() -> None:
+    reader = measure.UsageReader()
+
+    reader.feed(MESSAGE_START + MESSAGE_DELTA)
+
+    assert reader.stop_reason == ""
+    assert measure.Exchange().stop_reason == ""
