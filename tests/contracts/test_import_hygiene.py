@@ -60,6 +60,8 @@ ALLOWED_INTERNAL_IMPORTS = {
         "shim_cli.policy",
         "shim_cli.session.record",
     ),
+    # The proxy reuses the hook's bounded traversal; the hook never sees watch.
+    "watch": ("shim_cli.events.payload",),
 }
 ALLOWED_INTERNAL_EXCEPTIONS = frozenset(
     {

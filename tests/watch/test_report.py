@@ -124,10 +124,75 @@ def test_invalid_model_labels_reach_neither_report(model: str) -> None:
 
 
 def test_findings_in_traffic_are_counted_by_type() -> None:
-    text = report.render(_session(_exchange(entities={"SECRET": 2, "EMAIL": 1})), 9.0)
+    text = report.render(
+        _session(
+            _exchange(entities_by_section={"messages": {"SECRET": 2, "EMAIL": 1}})
+        ),
+        9.0,
+    )
 
     assert "2 SECRET" in text
     assert "1 EMAIL" in text
+
+
+def test_the_prompt_and_the_scaffolding_are_reported_apart() -> None:
+    text = report.render(
+        _session(
+            _exchange(
+                entities_by_section={"messages": {"SECRET": 2}, "tools": {"EMAIL": 1}}
+            )
+        ),
+        9.0,
+    )
+
+    assert "found     2 SECRET in request messages" in text
+    assert "also      1 EMAIL in tool definitions" in text
+
+
+def test_a_finding_only_outside_the_prompt_still_reads_as_found() -> None:
+    text = report.render(
+        _session(_exchange(entities_by_section={"system": {"EMAIL": 1}})), 9.0
+    )
+
+    assert "found     1 EMAIL in system prompt" in text
+    assert "also" not in text
+
+
+def test_every_section_that_contributed_is_named() -> None:
+    text = report.render(
+        _session(
+            _exchange(
+                entities_by_section={
+                    "messages": {"EMAIL": 1},
+                    "system": {"EMAIL": 1},
+                    "tools": {"EMAIL": 2},
+                    "other": {"EMAIL": 1},
+                }
+            )
+        ),
+        9.0,
+    )
+
+    assert (
+        "also      4 EMAIL in system prompt, tool definitions and other fields" in text
+    )
+
+
+def test_the_json_report_splits_findings_by_section() -> None:
+    document = report.as_json(
+        _session(
+            _exchange(
+                entities_by_section={"messages": {"SECRET": 1}, "tools": {"SECRET": 2}}
+            )
+        ),
+        5.0,
+    )
+
+    assert document["entities"] == {"SECRET": 3}
+    assert document["entities_by_section"] == {
+        "messages": {"SECRET": 1},
+        "tools": {"SECRET": 2},
+    }
 
 
 def test_forwarding_failures_are_reported() -> None:

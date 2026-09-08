@@ -66,10 +66,12 @@ hook ------> config, clients, events, session, guard
 config ----> policy, guard/entities, settings_files, events/diet
 clients ---> policy, events, session, settings_files
 events ----> policy, guard, session/record
+watch -----> events/payload
 ```
 
 `guard`, `policy`, `session`, `settings_files`, and `watch` do not depend on
-the CLI or hook. `guard` does not import configuration, `session` does not
+the CLI or hook. `watch` reuses the hook's bounded string traversal and nothing
+else from it. `guard` does not import configuration, `session` does not
 import events, events do not import clients, and the hook does not import
 `watch`. `tests/contracts/test_import_hygiene.py` enforces these boundaries.
 Composition stays explicit in `hook.py` and the CLI; there is no dependency
@@ -154,3 +156,20 @@ measurements. A bounded incremental reader handles SSE and JSON usage, reporting
 known, partial, or unavailable usage independently of request inspection.
 Request and response bodies are not written to disk. Attribution across tools,
 system, and messages is inferred from byte share and marked approximate.
+
+Detection walks the request with `events/payload.py`, the same bounded traversal
+the hook uses, so every text leaf is offered to the detector: message content in
+either form, tool results, tool call arguments, the system prompt and the tool
+definitions. Base64 attachment data and thinking signatures are skipped, and a
+request past a limit is reported as unmeasured rather than partly counted.
+
+The proxy passes its own limits to that traversal. The hook's defaults bound a
+user waiting on a synchronous subprocess; measurement runs after the response
+has been relayed, on a body already capped at 8 MB. One measured Claude Code
+request held 4,402 text leaves, 256,517 characters and nested 35 levels deep
+inside an MCP tool's recursive JSON schema, against hook defaults of 2,000,
+200,000 and 24 — so the hook's limits would report almost every real request as
+unmeasured.
+
+Findings are held per section, and the `tools` and `system` results are memoised
+per session by content hash, sixteen entries, first in first out.

@@ -22,31 +22,48 @@ class Traversal:
     partial: bool = False
     skipped: int = 0
     reasons: set[str] = field(default_factory=set)
+    max_leaves: int = MAX_LEAVES
+    max_characters: int = MAX_TEXT_CHARACTERS
+    max_depth: int = MAX_DEPTH
 
     def add(self, path: Path, text: str) -> None:
         if self.partial and (
-            len(self.leaves) >= MAX_LEAVES
-            or self.characters + len(text) > MAX_TEXT_CHARACTERS
+            len(self.leaves) >= self.max_leaves
+            or self.characters + len(text) > self.max_characters
         ):
             self.skipped += 1
             self.reasons.add("size-limit")
             return
         self.leaves.append((path, text))
         self.characters += len(text)
-        if len(self.leaves) > MAX_LEAVES:
+        if len(self.leaves) > self.max_leaves:
             raise PayloadTooLarge("payload has too many text fields to scan safely")
-        if self.characters > MAX_TEXT_CHARACTERS:
+        if self.characters > self.max_characters:
             raise PayloadTooLarge("payload text exceeds the safe analysis limit")
 
 
-def walk(value: Any, root: Path = (), *, partial: bool = False) -> Traversal:
-    found = Traversal(partial=partial)
+def walk(
+    value: Any,
+    root: Path = (),
+    *,
+    partial: bool = False,
+    max_leaves: int = MAX_LEAVES,
+    max_characters: int = MAX_TEXT_CHARACTERS,
+    max_depth: int = MAX_DEPTH,
+) -> Traversal:
+    """The defaults bound a hook a user is waiting on; only the proxy raises them."""
+    found = Traversal(
+        partial=partial,
+        max_leaves=max_leaves,
+        max_characters=max_characters,
+        max_depth=max_depth,
+    )
     _walk(value, root, found, 0)
     return found
 
 
 def _walk(value: Any, path: Path, found: Traversal, depth: int) -> None:
-    if depth > MAX_DEPTH:
+    if depth > found.max_depth:
         if found.partial:
             found.skipped += 1
             found.reasons.add("depth-limit")

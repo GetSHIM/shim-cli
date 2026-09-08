@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -248,3 +249,256 @@ def test_invalid_or_missing_usage_is_unavailable(document):
     reader.feed(document)
     reader.finish()
     assert reader.status == "unavailable"
+
+
+IBAN = "TR330006100519786457841326"
+
+
+class _Recorder:
+    """Stands in for the detector so the tests can count how often it ran."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def __call__(self, text: str):
+        self.calls.append(text)
+        return SimpleNamespace(counts=())
+
+
+def _placed() -> dict:
+    """One synthetic IBAN in each place the wire can carry text the model reads."""
+    return _request(
+        system=[
+            {"type": "text", "text": f"policy {IBAN}"},
+            {"type": "text", "text": f"memory {IBAN}"},
+        ],
+        tools=[
+            {
+                "name": "Read",
+                "description": f"reads a file, for example {IBAN}",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": {"type": "string", "description": f"path {IBAN}"}
+                    },
+                },
+            }
+        ],
+        messages=[
+            {"role": "user", "content": f"plain {IBAN}"},
+            {"role": "user", "content": [{"type": "text", "text": f"part {IBAN}"}]},
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "toolu_1",
+                        "content": [{"type": "text", "text": f"nested {IBAN}"}],
+                    },
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "toolu_2",
+                        "content": f"string {IBAN}",
+                    },
+                ],
+            },
+            {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "toolu_3",
+                        "name": "Bash",
+                        "input": {"command": f"echo {IBAN}"},
+                    }
+                ],
+            },
+        ],
+    )
+
+
+def _ibans(exchange) -> dict:
+    return {
+        name: counts["IBAN"]
+        for name, counts in exchange.entities_by_section.items()
+        if "IBAN" in counts
+    }
+
+
+def test_every_text_field_the_model_reads_is_scanned() -> None:
+    from shim_cli.guard import evaluate
+
+    exchange = measure.inspect_request(json.dumps(_placed()).encode(), evaluate)
+
+    assert _ibans(exchange) == {"messages": 5, "system": 2, "tools": 2}
+    assert exchange.entities["IBAN"] == 9
+    assert exchange.measured
+
+
+def test_a_system_prompt_sent_as_a_string_is_scanned() -> None:
+    from shim_cli.guard import evaluate
+
+    body = json.dumps(_request(system=f"policy {IBAN}")).encode()
+
+    assert _ibans(measure.inspect_request(body, evaluate)) == {"system": 1}
+
+
+def test_base64_payloads_and_thinking_signatures_are_left_alone() -> None:
+    from shim_cli.guard import evaluate
+
+    document = _request(
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/png",
+                            "data": IBAN,
+                        },
+                    },
+                    {"type": "thinking", "thinking": "nothing", "signature": IBAN},
+                ],
+            }
+        ]
+    )
+
+    exchange = measure.inspect_request(json.dumps(document).encode(), evaluate)
+
+    assert "IBAN" not in exchange.entities
+    assert exchange.measured
+
+
+def test_a_data_field_outside_a_base64_block_is_still_scanned() -> None:
+    from shim_cli.guard import evaluate
+
+    document = _request(
+        messages=[{"role": "user", "content": [{"type": "text", "data": IBAN}]}]
+    )
+
+    exchange = measure.inspect_request(json.dumps(document).encode(), evaluate)
+
+    assert _ibans(exchange) == {"messages": 1}
+
+
+def test_an_unchanged_tools_section_is_scanned_once_per_session() -> None:
+    memo = measure.SectionMemo()
+    record = _Recorder()
+    first = {"name": "Read", "description": "first tool set"}
+    second = {"name": "Write", "description": "second tool set"}
+
+    for tool, prompt in ((first, "one"), (first, "two"), (second, "three")):
+        body = json.dumps(
+            _request(tools=[tool], messages=[{"role": "user", "content": prompt}])
+        ).encode()
+        measure.inspect_request(body, record, memo)
+
+    assert record.calls.count("first tool set") == 1
+    assert record.calls.count("second tool set") == 1
+    assert [call for call in record.calls if call in ("one", "two", "three")] == [
+        "one",
+        "two",
+        "three",
+    ]
+
+
+def test_without_a_memo_every_request_is_scanned_in_full() -> None:
+    record = _Recorder()
+    body = json.dumps(
+        _request(tools=[{"name": "Read", "description": "same"}])
+    ).encode()
+
+    measure.inspect_request(body, record)
+    measure.inspect_request(body, record)
+
+    assert record.calls.count("same") == 2
+
+
+def test_the_memo_is_bounded_and_keeps_counts_rather_than_text() -> None:
+    from shim_cli.guard import evaluate
+
+    memo = measure.SectionMemo()
+    for index in range(measure.MEMO_LIMIT + 10):
+        body = json.dumps(
+            _request(tools=[{"name": f"tool-{index}", "description": f"see {IBAN}"}])
+        ).encode()
+        measure.inspect_request(body, evaluate, memo)
+
+    assert len(memo._counts) <= measure.MEMO_LIMIT
+    stored = json.dumps(memo._counts)
+    assert IBAN not in stored
+    assert "tool-0" not in stored
+    assert all(
+        isinstance(entity, str) and isinstance(count, int)
+        for counts in memo._counts.values()
+        for entity, count in counts.items()
+    )
+
+
+def test_a_request_past_the_leaf_limit_is_reported_as_unmeasured(monkeypatch) -> None:
+    from shim_cli.guard import evaluate
+
+    monkeypatch.setattr(measure, "MAX_SCAN_LEAVES", 8)
+    document = _request(
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": f"note {index} {IBAN}"}
+                    for index in range(20)
+                ],
+            }
+        ]
+    )
+
+    exchange = measure.inspect_request(json.dumps(document).encode(), evaluate)
+
+    assert exchange.measured is False
+    assert exchange.entities == {}
+    assert exchange.entities_by_section == {}
+
+
+def test_a_session_sized_request_stays_within_the_proxy_budget() -> None:
+    """A real one-turn request measured 169,134 characters over 921 leaves.
+
+    That is 85% of the hook's character budget before the conversation starts,
+    so the proxy carries its own, bounded by the body cap it already enforces.
+    """
+    from shim_cli.events.payload import MAX_TEXT_CHARACTERS, walk
+
+    filler = "the quick brown fox jumps over the lazy dog. " * 200
+    document = _request(
+        tools=[
+            {"name": f"tool-{index}", "description": filler, "input_schema": {}}
+            for index in range(20)
+        ],
+        messages=[
+            {"role": "user", "content": f"turn {index} {filler}"} for index in range(20)
+        ],
+    )
+    reachable = walk(document, max_leaves=10**6, max_characters=10**9)
+    assert reachable.characters > MAX_TEXT_CHARACTERS
+
+    exchange = measure.inspect_request(json.dumps(document).encode(), _Recorder())
+
+    assert exchange.measured is True
+
+
+def test_a_tool_schema_deeper_than_the_hook_allows_is_still_measured() -> None:
+    """One measured request nested 35 deep: an MCP tool's recursive filter schema."""
+    from shim_cli.events.payload import MAX_DEPTH
+    from shim_cli.guard import evaluate
+
+    schema: dict = {"description": f"see {IBAN}"}
+    for _ in range(MAX_DEPTH):
+        schema = {"properties": {"value": schema}}
+    body = json.dumps(
+        _request(tools=[{"name": "Deep", "input_schema": schema}])
+    ).encode()
+
+    exchange = measure.inspect_request(body, evaluate)
+
+    assert exchange.measured is True
+    assert _ibans(exchange) == {"tools": 1}

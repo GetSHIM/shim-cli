@@ -2,6 +2,13 @@ from __future__ import annotations
 
 from .measure import OTHER, SECTIONS, Usage
 
+SECTION_WORDS = {
+    "system": "system prompt",
+    "tools": "tool definitions",
+    OTHER: "other fields",
+}
+BESIDES = ("system", "tools", OTHER)
+
 PRICES = (
     ("claude-opus-4", (15.0, 75.0, 18.75, 1.5)),
     ("claude-opus-5", (15.0, 75.0, 18.75, 1.5)),
@@ -76,6 +83,26 @@ def entity_totals(exchanges: list) -> dict:
     return combined
 
 
+def entity_section_totals(exchanges: list) -> dict:
+    combined: dict = {}
+    for exchange in exchanges:
+        for name, counts in exchange.entities_by_section.items():
+            section = combined.setdefault(name, {})
+            for entity, count in counts.items():
+                section[entity] = section.get(entity, 0) + count
+    return combined
+
+
+def _listed(counts: dict) -> str:
+    ordered = sorted(counts.items(), key=lambda pair: (-pair[1], pair[0]))
+    return ", ".join(f"{count} {entity}" for entity, count in ordered)
+
+
+def _words(names: list) -> str:
+    said = [SECTION_WORDS[name] for name in names]
+    return " and ".join([", ".join(said[:-1]), said[-1]] if len(said) > 2 else said)
+
+
 def at_file_totals(exchanges: list) -> tuple:
     return (
         sum(exchange.at_files.count for exchange in exchanges),
@@ -148,13 +175,19 @@ def render(session, seconds: float) -> str:
             f"(invisible to hooks)"
         )
 
-    found = entity_totals(exchanges)
-    if found:
-        listed = ", ".join(
-            f"{count} {entity}"
-            for entity, count in sorted(found.items(), key=lambda p: (-p[1], p[0]))
-        )
-        lines.append(f"  found     {listed} in traffic")
+    by_section = entity_section_totals(exchanges)
+    in_messages = by_section.get("messages", {})
+    besides = [name for name in BESIDES if by_section.get(name)]
+    elsewhere: dict = {}
+    for name in besides:
+        for entity, count in by_section[name].items():
+            elsewhere[entity] = elsewhere.get(entity, 0) + count
+    if in_messages:
+        lines.append(f"  found     {_listed(in_messages)} in request messages")
+        if elsewhere:
+            lines.append(f"  also      {_listed(elsewhere)} in {_words(besides)}")
+    elif elsewhere:
+        lines.append(f"  found     {_listed(elsewhere)} in {_words(besides)}")
 
     dollars, priced, unpriced = spend(exchanges)
     if priced:
@@ -214,6 +247,7 @@ def as_json(session, seconds: float) -> dict:
         },
         "at_files": {"count": count, "bytes": size},
         "entities": entity_totals(exchanges),
+        "entities_by_section": entity_section_totals(exchanges),
     }
 
 
@@ -222,6 +256,7 @@ __all__ = [
     "PRICES",
     "as_json",
     "at_file_totals",
+    "entity_section_totals",
     "entity_totals",
     "render",
     "section_totals",

@@ -680,3 +680,110 @@ def test_decompression_budget_never_changes_forwarded_bytes(monkeypatch):
         compressed,
     )
     assert exchange.usage_status == "unavailable"
+
+
+IBAN = "TR330006100519786457841326"
+
+
+@pytest.fixture
+def scanned(monkeypatch, upstream):
+    """A watch whose detector is supplied by the test."""
+    port = upstream.port
+
+    class Plain(http.client.HTTPConnection):
+        def __init__(self, host, timeout=None, context=None):
+            super().__init__("127.0.0.1", port, timeout=timeout or 30)
+
+    monkeypatch.setattr(http.client, "HTTPSConnection", Plain)
+    started: list = []
+
+    def start(evaluate):
+        running = proxy.start("api.anthropic.com", evaluate)
+        started.append(running)
+        return running
+
+    yield start
+    for running in started:
+        running.stop()
+
+
+def _strings(value, seen=None, depth: int = 0):
+    seen = set() if seen is None else seen
+    if depth > 12 or id(value) in seen:
+        return
+    seen.add(id(value))
+    if isinstance(value, str):
+        yield value
+        return
+    if isinstance(value, dict):
+        for key, item in value.items():
+            yield from _strings(key, seen, depth + 1)
+            yield from _strings(item, seen, depth + 1)
+        return
+    if isinstance(value, (list, tuple, set)):
+        for item in value:
+            yield from _strings(item, seen, depth + 1)
+        return
+    inner = getattr(value, "__dict__", None)
+    if inner:
+        yield from _strings(inner, seen, depth + 1)
+
+
+def test_the_whole_request_is_scanned_and_none_of_it_is_kept(scanned) -> None:
+    from shim_cli.guard import evaluate
+
+    running = scanned(evaluate)
+    body = json.dumps(
+        {
+            "model": "claude-sonnet-5",
+            "system": f"policy {IBAN}",
+            "tools": [{"name": "Read", "description": f"example {IBAN}"}],
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "toolu_1",
+                            "content": f"file said {IBAN}",
+                        }
+                    ],
+                }
+            ],
+        }
+    ).encode()
+
+    _post(running, body, HEADERS)
+
+    exchange = running.session.exchanges[0]
+    assert exchange.entities["IBAN"] == 3
+    assert exchange.entities_by_section["messages"]["IBAN"] == 1
+    for text in _strings(running.session):
+        assert IBAN not in text
+        assert "policy" not in text
+
+
+def test_a_large_tool_set_is_scanned_once_across_a_session(scanned) -> None:
+    from types import SimpleNamespace
+
+    lengths: list[int] = []
+
+    def counting(text: str):
+        lengths.append(len(text))
+        return SimpleNamespace(counts=())
+
+    running = scanned(counting)
+    body = json.dumps(
+        {
+            "model": "claude-sonnet-5",
+            "tools": [{"name": "Read", "description": "d" * 150_000}],
+            "messages": [{"role": "user", "content": "hello"}],
+        }
+    ).encode()
+
+    for _ in range(3):
+        _post(running, body, HEADERS)
+
+    assert len(running.session.exchanges) == 3
+    assert sum(1 for length in lengths if length > 100_000) == 1
+    assert lengths.count(5) == 3

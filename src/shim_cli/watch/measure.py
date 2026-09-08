@@ -1,10 +1,22 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import threading
 from dataclasses import dataclass, field
+
+from ..events.payload import PayloadTooLarge, walk
 
 SECTIONS = ("tools", "system", "messages")
 OTHER = "other"
+MEMOISED = ("tools", "system")
+MEMO_LIMIT = 16
+# The hook's limits bound a user waiting on a deadline. Measurement runs after
+# the response is relayed, so the body cap above is the bound that counts. One
+# measured Claude Code request: 4,402 leaves, 256,517 characters, 35 deep — the
+# depth is an MCP tool's recursive JSON schema, and the hook's 24 stops there.
+MAX_SCAN_LEAVES = 50_000
+MAX_SCAN_DEPTH = 200
 
 MAX_BODY_BYTES = 8_000_000
 
@@ -144,11 +156,15 @@ class UsageReader:
         )
 
 
-def _size(value: object) -> int:
+def _bytes(value: object) -> bytes:
     try:
-        return len(json.dumps(value, ensure_ascii=False).encode())
+        return json.dumps(value, ensure_ascii=False).encode()
     except (TypeError, ValueError):
-        return 0
+        return b""
+
+
+def _size(value: object) -> int:
+    return len(_bytes(value))
 
 
 def sections(document: object) -> dict:
@@ -161,7 +177,7 @@ def sections(document: object) -> dict:
     return found
 
 
-def _texts(document: dict):
+def _message_texts(document: dict):
     for message in document.get("messages") or ():
         if not isinstance(message, dict):
             continue
@@ -185,7 +201,7 @@ def at_files(document: object) -> AtFiles:
         return AtFiles()
     count = 0
     total = 0
-    for text in _texts(document):
+    for text in _message_texts(document):
         start = 0
         while True:
             start = text.find(_REMINDER_OPEN, start)
@@ -216,6 +232,72 @@ def attribute(by_bytes: dict, exact_total: int) -> dict:
     return shares
 
 
+def _section(path: tuple) -> str:
+    name = path[0] if path else OTHER
+    return name if name in SECTIONS else OTHER
+
+
+def _opaque(document: dict, path: tuple) -> bool:
+    """Base64 payloads and thinking signatures are large and are not prose."""
+    key = path[-1] if path else None
+    if key == "signature":
+        return True
+    if key != "data":
+        return False
+    parent: object = document
+    for step in path[:-1]:
+        try:
+            parent = parent[step]  # type: ignore[index]
+        except (KeyError, IndexError, TypeError):
+            return False
+    return isinstance(parent, dict) and parent.get("type") == "base64"
+
+
+def _tally(leaves: list, evaluate) -> dict:
+    counts: dict = {}
+    for _path, text in leaves:
+        for entity, count in getattr(evaluate(text), "counts", ()):
+            counts[entity] = counts.get(entity, 0) + count
+    return counts
+
+
+def _flatten(by_section: dict) -> dict:
+    counts: dict = {}
+    for section in by_section.values():
+        for entity, count in section.items():
+            counts[entity] = counts.get(entity, 0) + count
+    return counts
+
+
+class SectionMemo:
+    """Counts for a repeated section, keyed by its hash. Never holds the text.
+
+    `tools` and `system` arrive verbatim on every request of a session and are
+    the largest sections; scanning them each time would hold a measurement slot
+    for most of the request's own duration.
+    """
+
+    def __init__(self) -> None:
+        self._counts: dict[str, dict] = {}
+        self._lock = threading.Lock()
+
+    def tally(self, section: str, value: object, leaves: list, evaluate) -> dict:
+        serialised = _bytes(value)
+        if not serialised:
+            return _tally(leaves, evaluate)
+        key = f"{section}:{hashlib.sha256(serialised).hexdigest()}"
+        with self._lock:
+            hit = self._counts.get(key)
+        if hit is not None:
+            return hit
+        counts = _tally(leaves, evaluate)
+        with self._lock:
+            self._counts[key] = counts
+            while len(self._counts) > MEMO_LIMIT:
+                del self._counts[next(iter(self._counts))]
+        return counts
+
+
 @dataclass
 class Exchange:
     """Never retain traffic."""
@@ -227,15 +309,20 @@ class Exchange:
     usage: Usage = field(default_factory=Usage)
     sections: dict = field(default_factory=dict)
     entities: dict = field(default_factory=dict)
+    entities_by_section: dict = field(default_factory=dict)
     at_files: AtFiles = field(default_factory=AtFiles)
     measured: bool = True
     usage_status: str = "unavailable"
+
+    def __post_init__(self) -> None:
+        if self.entities_by_section and not self.entities:
+            self.entities = _flatten(self.entities_by_section)
 
     def tokens_by_section(self) -> dict:
         return attribute(self.sections, self.usage.total_input)
 
 
-def inspect_request(body: bytes | bytearray, evaluate=None) -> Exchange:
+def inspect_request(body: bytes | bytearray, evaluate=None, memo=None) -> Exchange:
     exchange = Exchange(request_bytes=len(body))
     if len(body) > MAX_BODY_BYTES:
         exchange.measured = False
@@ -255,12 +342,32 @@ def inspect_request(body: bytes | bytearray, evaluate=None) -> Exchange:
     exchange.sections = sections(document)
     exchange.at_files = at_files(document)
     if evaluate is not None and isinstance(document, dict):
-        counts: dict = {}
-        for text in _texts(document):
-            decision = evaluate(text)
-            for entity, count in getattr(decision, "counts", ()):
-                counts[entity] = counts.get(entity, 0) + count
-        exchange.entities = counts
+        try:
+            leaves = walk(
+                document,
+                max_leaves=MAX_SCAN_LEAVES,
+                max_characters=MAX_BODY_BYTES,
+                max_depth=MAX_SCAN_DEPTH,
+            ).leaves
+        except (PayloadTooLarge, RecursionError):
+            # Half a count reads as a whole one; say the request was not measured.
+            exchange.measured = False
+            return exchange
+        grouped: dict[str, list] = {}
+        for leaf in leaves:
+            if not _opaque(document, leaf[0]):
+                grouped.setdefault(_section(leaf[0]), []).append(leaf)
+        found: dict[str, dict] = {}
+        for name, group in grouped.items():
+            counts = (
+                memo.tally(name, document.get(name), group, evaluate)
+                if memo is not None and name in MEMOISED
+                else _tally(group, evaluate)
+            )
+            if counts:
+                found[name] = counts
+        exchange.entities_by_section = found
+        exchange.entities = _flatten(found)
     return exchange
 
 
@@ -268,11 +375,16 @@ __all__ = [
     "AT_FILE_MARKER",
     "MAX_BODY_BYTES",
     "MAX_MODEL_CHARS",
+    "MAX_SCAN_DEPTH",
+    "MAX_SCAN_LEAVES",
+    "MEMOISED",
+    "MEMO_LIMIT",
     "OTHER",
     "SECTIONS",
     "UNKNOWN_MODEL",
     "AtFiles",
     "Exchange",
+    "SectionMemo",
     "Usage",
     "UsageReader",
     "at_files",

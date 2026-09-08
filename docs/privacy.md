@@ -237,9 +237,23 @@ The proxy sees the whole wire body — the system prompt, the tools array, the
 full message history and every file the client inlined for an `@` reference.
 None of it is kept.
 
+Every text field of that body is offered to the detector: message content in
+either form, the text inside a tool result, the arguments of a tool call, the
+system prompt and the tool definitions. Two kinds of field are skipped because
+they are opaque rather than prose — the `data` of a base64 attachment and a
+thinking block's `signature`. Findings are attributed to the section they came
+from, so the summary can say what was in your prompt separately from what the
+client's own scaffolding carried.
+
+The tools and system sections repeat verbatim on every request of a session, so
+their result is remembered for the length of the run: the SHA-256 of the
+section and the entity counts it produced, at most sixteen of them, oldest
+evicted first. The remembered value is a hash and a tally; the text that
+produced it is not kept.
+
 What survives one request is a count and a size: bytes per section, entity
-counts by type, a token count from the provider, the model name and the request
-path. **No request or response body is ever written to disk**, and
+counts by type and by section, a token count from the provider, the model name
+and the request path. **No request or response body is ever written to disk**, and
 `tests/watch/test_proxy.py` asserts it by sending a unique marker through the
 proxy and then searching every file written anywhere beneath the temporary root
 for it.

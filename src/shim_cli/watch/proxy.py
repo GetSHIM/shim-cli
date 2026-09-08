@@ -11,7 +11,13 @@ import urllib.parse
 import zlib
 from dataclasses import dataclass, field
 
-from .measure import MAX_BODY_BYTES, Exchange, UsageReader, inspect_request
+from .measure import (
+    MAX_BODY_BYTES,
+    Exchange,
+    SectionMemo,
+    UsageReader,
+    inspect_request,
+)
 
 # Preserve provider auth headers.
 HOP_BY_HOP = frozenset(
@@ -37,6 +43,7 @@ DOWNSTREAM_TIMEOUT_SECONDS = 30
 class Session:
     exchanges: list = field(default_factory=list)
     errors: int = 0
+    memo: SectionMemo = field(default_factory=SectionMemo)
     _lock: threading.Lock = field(default_factory=threading.Lock)
     _measurement_slots: threading.BoundedSemaphore = field(
         default_factory=lambda: threading.BoundedSemaphore(2)
@@ -168,13 +175,14 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
     def _measure(self, body: bytes | bytearray, exchange: Exchange) -> None:
         try:
-            measured = inspect_request(body, self.evaluate)
+            measured = inspect_request(body, self.evaluate, self.session.memo)
         except Exception:
             exchange.measured = False
             return
         exchange.model = measured.model
         exchange.sections = measured.sections
         exchange.entities = measured.entities
+        exchange.entities_by_section = measured.entities_by_section
         exchange.at_files = measured.at_files
         exchange.measured = measured.measured
 
