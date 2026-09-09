@@ -521,6 +521,7 @@ reinstalling later finds your entity choices and custom patterns still there.
 - [Architecture](https://github.com/GetSHIM/shim-cli/blob/main/docs/architecture.md)
 - [Compatibility](https://github.com/GetSHIM/shim-cli/blob/main/docs/compatibility.md)
 - [Privacy](https://github.com/GetSHIM/shim-cli/blob/main/docs/privacy.md)
+- [0.3.1 release notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/0.3.1.md)
 - [0.3.0 release notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/0.3.0.md)
 - [0.2.0 release notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/0.2.0.md)
 - [Contributing](https://github.com/GetSHIM/shim-cli/blob/main/CONTRIBUTING.md)
