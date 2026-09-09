@@ -1285,3 +1285,25 @@ def test_a_failed_removal_is_not_reported_as_a_removal(monkeypatch, tmp_path) ->
     integrations._remove_legacy_copilot_file()
 
     assert printed == [], "nothing was removed, so nothing may say it was"
+
+
+def test_an_unsafe_settings_location_is_not_reported_as_a_parse_error(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """`it is not readable as settings` over a world-writable directory sent
+    people editing TOML that was already valid. The file is fine; the
+    permissions are not, and only the message can tell them apart."""
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    shared.chmod(0o777)
+    target = shared / "config.toml"
+    target.write_text('enabled_entities = ["SECRET"]\n', encoding="utf-8")
+    target.chmod(0o600)
+    monkeypatch.setenv("SHIM_CONFIG", str(target))
+
+    result = runner.invoke(app, ["config"])
+    text = " ".join(unstyle(result.output).split())
+
+    assert "not in a private location" in text
+    assert "0700" in text and "0600" in text
+    assert "not readable as settings" not in text

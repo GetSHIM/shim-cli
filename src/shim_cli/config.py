@@ -254,19 +254,29 @@ def describe_settings_error(error: BaseException) -> str:
     with nothing to act on. The parser's own message carries the line number
     and is already on `__cause__`; it was just never read.
     """
-    cause = error.__cause__
-    reason = (
-        str(cause)
-        if isinstance(cause, tomllib.TOMLDecodeError) and str(cause)
-        else "it is not readable as settings"
-    )
     try:
         where = str(config_path())
     except ValueError:
         where = "the settings file"
+    cause = error.__cause__
+    if isinstance(cause, tomllib.TOMLDecodeError) and str(cause):
+        return (
+            f"Settings at {where} are invalid: {cause}. "
+            "Run shim config --reset to start over, or edit the line above."
+        )
+    if "safely" in str(error):
+        # Not a parse failure. Saying "not readable as settings" here sent
+        # people editing valid TOML; the file is fine and the permissions
+        # are not.
+        return (
+            f"Settings at {where} are not in a private location, so shim will "
+            "not read them: anything that can rewrite the file can turn "
+            "detection off. The directory must not be writable by other users "
+            "(0700) and the file must be 0600."
+        )
     return (
-        f"Settings at {where} are invalid: {reason}. "
-        "Run shim config --reset to start over, or edit the line above."
+        f"Settings at {where} are invalid: they are not readable as settings. "
+        "Run shim config --reset to start over."
     )
 
 
