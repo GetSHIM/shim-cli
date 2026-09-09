@@ -255,7 +255,19 @@ def watch(
     context: typer.Context,
     json_output: bool = typer.Option(False, "--json", help="Write a JSON result."),
 ) -> None:
-    """Run a client through the measuring proxy."""
+    """Run a client through the measuring proxy.
+
+    The client and its own arguments follow `--`, so shim does not try to read
+    them:
+
+        shim watch -- claude
+        shim watch -- claude -p "explain this repo"
+
+    Claude Code only. Codex reads its endpoint from its own configuration, so
+    the proxy would be bypassed and the session measured as empty; the Codex
+    prompt hook is unaffected. The session runs normally and nothing is
+    modified: the report prints when the client exits.
+    """
     from shim_cli.cli.watch import watch as run_watch
 
     run_watch(command=tuple(context.args), as_json=json_output)

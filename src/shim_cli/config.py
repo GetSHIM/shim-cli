@@ -227,7 +227,11 @@ def policy_from_state(state: FileState) -> policy.Policy:
             {},
         )
     if state.kind is not StateKind.FILE or state.content is None:
-        raise ValueError("shim settings cannot be read safely")
+        # `state.reason` already says which of a dozen checks refused the file —
+        # a symlink, a hard link, another user's ownership, a size, a change
+        # mid-read. Carry it: a caller that has to guess will guess wrong.
+        detail = getattr(state, "reason", "") or "the file could not be read safely"
+        raise ValueError(f"shim settings cannot be read safely: {detail}")
     try:
         document = parse_settings(state.content.decode("utf-8"))
     except (UnicodeDecodeError, RecursionError) as error:
@@ -254,19 +258,33 @@ def describe_settings_error(error: BaseException) -> str:
     with nothing to act on. The parser's own message carries the line number
     and is already on `__cause__`; it was just never read.
     """
-    cause = error.__cause__
-    reason = (
-        str(cause)
-        if isinstance(cause, tomllib.TOMLDecodeError) and str(cause)
-        else "it is not readable as settings"
-    )
     try:
         where = str(config_path())
     except ValueError:
         where = "the settings file"
+    cause = error.__cause__
+    if isinstance(cause, tomllib.TOMLDecodeError) and str(cause):
+        return (
+            f"Settings at {where} are invalid: {cause}. "
+            "Run shim config --reset to start over, or edit the line above."
+        )
+    marker = "shim settings cannot be read safely"
+    if str(error).startswith(marker):
+        # Not a parse failure. Say which check refused it rather than guessing:
+        # "writable by another user" and "must not be a symlink" need different
+        # things done to them, and a message that names the wrong one sends
+        # people to chmod a file that is already correct.
+        reason = str(error)[len(marker) :].lstrip(": ").strip()
+        advice = (
+            " shim will not read settings anything else can rewrite, because "
+            "whatever can rewrite them can turn detection off."
+            if "writable" in reason or "owned" in reason
+            else ""
+        )
+        return f"Settings at {where} were refused: {reason}.{advice}"
     return (
-        f"Settings at {where} are invalid: {reason}. "
-        "Run shim config --reset to start over, or edit the line above."
+        f"Settings at {where} are invalid: they are not readable as settings. "
+        "Run shim config --reset to start over."
     )
 
 

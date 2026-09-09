@@ -1285,3 +1285,43 @@ def test_a_failed_removal_is_not_reported_as_a_removal(monkeypatch, tmp_path) ->
     integrations._remove_legacy_copilot_file()
 
     assert printed == [], "nothing was removed, so nothing may say it was"
+
+
+def test_each_unsafe_settings_state_names_its_own_cause(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """`shim settings cannot be read safely` covers about a dozen checks —
+    symlink, hard link, ownership, size, changed mid-read. Collapsing them all
+    into one permissions message sends someone to chmod a file that is already
+    0600 when the real problem is that it is a symlink.
+    """
+    home = tmp_path / "cfg"
+    (home / "shim").mkdir(parents=True)
+    home.chmod(0o700)
+    target = home / "shim" / "config.toml"
+
+    def settings_error() -> str:
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(home))
+        return " ".join(unstyle(runner.invoke(app, ["config"]).output).split())
+
+    real = home / "real.toml"
+    real.write_text('enabled_entities = ["SECRET"]\n', encoding="utf-8")
+    real.chmod(0o600)
+    target.symlink_to(real)
+    assert "must not be a symlink" in settings_error()
+
+    target.unlink()
+    target.write_text('enabled_entities = ["SECRET"]\n', encoding="utf-8")
+    target.chmod(0o600)
+    (home / "shim" / "other.toml").hardlink_to(target)
+    assert "must not be hard-linked" in settings_error()
+
+    (home / "shim" / "other.toml").unlink()
+    text = settings_error()
+    assert "refused" not in text, "a private, regular, single-linked file is fine"
+
+    (home / "shim").chmod(0o777)
+    writable = settings_error()
+    assert "writable by another user" in writable
+    # Only this family gets the explanation; a symlink does not need it.
+    assert "turn detection off" in writable
