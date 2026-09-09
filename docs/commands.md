@@ -343,11 +343,20 @@ Send the synthetic report to <EMAIL_1> using token=<SECRET_1>
 is optional. `shim config` writes this file for you; edit it by hand when you
 want per-tool rules, which the flags do not cover.
 
-**The file and its directory must be private.** shim refuses to read settings
-from a world-writable directory, because anything that can rewrite your
-settings can turn detection off. `shim config` creates the directory `0700` and
-the file `0600`. If you point `SHIM_CONFIG` somewhere else — `/tmp`, a shared
-mount — shim will refuse it.
+**shim checks the file before reading it**, and refuses it if it is a symlink,
+a hard link, not a regular file, owned by someone else, writable by another
+user, larger than the inspection limit, or changed while being read. The
+message names which check refused it:
+
+```
+FAIL Settings at ~/.config/shim/config.toml were refused: target must not be
+a symlink.
+```
+
+For the ownership and writability cases it also says why: anything that can
+rewrite your settings can turn detection off. `shim config` creates the
+directory `0700` and the file `0600`. If you point `SHIM_CONFIG` at a shared
+location — `/tmp`, a group-writable mount — shim will refuse it.
 
 ```toml
 # Which types to look for. Default: all of them.
