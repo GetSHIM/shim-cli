@@ -19,11 +19,11 @@ classifiers = [
   "Topic :: Security",
 ]
 dependencies = [
-  "phonenumbers==9.0.37",
+  "phonenumbers==9.0.38",
   "rich==15.0.0",
-  "tomli==2.3.0; python_version < '3.11'",
+  "tomli==2.4.1; python_version < '3.11'",
   "tomli-w==1.2.0",
-  "typer==0.23.2",
+  "typer==0.27.2",
 ]
 
 [project.urls]
@@ -42,13 +42,13 @@ dev = [
   "pytest>=9.0.3,<10",
   "ruff>=0.15.22,<0.16",
   # Vendored for Python 3.10.
-  "tomli==2.3.0",
+  "tomli==2.4.1",
   "ty>=0.0.65,<0.1",
-  "uv-build==0.12.5",
+  "uv-build==0.12.10",
 ]
 
 [build-system]
-requires = ["uv_build==0.12.5"]
+requires = ["uv_build==0.12.10"]
 build-backend = "uv_build"
 
 [tool.uv]
