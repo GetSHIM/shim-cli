@@ -156,10 +156,13 @@ plugin's bundled hook also runs on 3.9, which is what a stock macOS provides.
 Choose one package manager:
 
 ```console
-uv tool install --compile-bytecode shim
+uv tool install --python 3.12 --compile-bytecode shim
 # or
-pipx install shim
+pipx install --python python3.12 shim
 ```
+
+`--python` matters on a machine whose only Python is the system 3.9:
+without it `uv` quietly installs the last release that ran there, 0.2.0.
 
 Preview and install the hook for your client:
 

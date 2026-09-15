@@ -54,3 +54,12 @@ def test_a_readme_says_the_archive_is_on_main_and_every_tag(path: str) -> None:
     assert "may not contain" not in text
     assert "may be absent" not in text
     assert "on `main` and on every tag" in text
+
+
+@pytest.mark.parametrize("readme", ("README.md", "plugins/shim-cli/README.md"))
+def test_the_install_block_names_the_interpreter(readme: str) -> None:
+    lines = (ROOT / readme).read_text(encoding="utf-8").splitlines()
+    uv = [line for line in lines if line.startswith("uv tool install")]
+    pipx = [line for line in lines if line.startswith("pipx install")]
+    assert uv and all("--python 3.12 " in line for line in uv)
+    assert pipx and all("--python python3.12 " in line for line in pipx)
