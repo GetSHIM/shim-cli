@@ -213,7 +213,18 @@ shim watch — 2m 34s, 3 requests
 `(exact)` means the provider reported that number. `(approximate)` means shim
 attributed it by byte share, and the `~` is there to keep you honest about it.
 If you sign in with a subscription, `spend` is what the same traffic would cost
-on an API key, not a bill.
+on an API key, not a bill, and the line says so. When some requests arrived
+while both inspection slots were busy, the section header adds `2 of 4 requests
+measured` and the response line gives the same reason as the inspection line.
+
+`--json` writes the same report as one object. Three of its fields say what a
+figure covers:
+
+| Field | Where | Values |
+| --- | --- | --- |
+| `spend_basis` | top level | `"api-key"`, `"subscription"`, `"mixed"`, or `"unknown"` when a priced request sent neither auth header or nothing was priced |
+| `auth_route` | each of `exchanges` | `"api-key"` (an `x-api-key` header), `"subscription"` (`authorization` and no `x-api-key`), `""` (neither) |
+| `response_scan_reason` | each of `exchanges` | `""` when the response was scanned; the request's `incomplete_reason` (`"slots busy"`, `"body too large"`, `"not JSON"`, `"too many fields"`) when it was not measured; otherwise `"unavailable"` or `"partial"` |
 
 **Claude Code only.** Codex is refused with a reason: it reads its endpoint
 from its own configuration, so the proxy would be bypassed and the session

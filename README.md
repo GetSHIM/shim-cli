@@ -83,7 +83,8 @@ at the provider's output limit adds a `cut off` line.
 
 Token counts come from the provider's own `usage` block and are exact. How
 they divide between sections has no ground truth on the wire, so it is
-inferred from byte share, marked `~`, and always sums to the exact total.
+inferred from byte share, marked `~`, and always sums to the exact total of the
+requests it measured.
 Exact and inferred figures never share a column.
 
 It also covers what hooks structurally cannot see: files pulled in with `@` are

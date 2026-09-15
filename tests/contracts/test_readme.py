@@ -63,3 +63,8 @@ def test_the_install_block_names_the_interpreter(readme: str) -> None:
     pipx = [line for line in lines if line.startswith("pipx install")]
     assert uv and all("--python 3.12 " in line for line in uv)
     assert pipx and all("--python python3.12 " in line for line in pipx)
+
+
+def test_the_readme_says_the_section_split_covers_only_measured_requests() -> None:
+    prose = " ".join((ROOT / "README.md").read_text(encoding="utf-8").split())
+    assert "always sums to the exact total of the requests it measured" in prose

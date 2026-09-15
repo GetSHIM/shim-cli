@@ -53,6 +53,13 @@ def spend(exchanges: list) -> tuple:
     return total, priced, sorted(unpriced)
 
 
+def spend_basis(exchanges: list) -> str:
+    routes = {e.auth_route for e in exchanges if _price(e.model or "")}
+    if routes in ({"api-key"}, {"subscription"}):
+        return routes.pop()
+    return "unknown" if not routes or "" in routes else "mixed"
+
+
 def totals(exchanges: list) -> Usage:
     combined = Usage()
     for exchange in exchanges:
@@ -156,6 +163,14 @@ def custom_totals(exchanges: list) -> dict:
             for name, count in source.items():
                 combined[where][name] = combined[where].get(name, 0) + count
     return combined
+
+
+def response_scan_reason(exchange) -> str:
+    if exchange.response_scan_status == "known":
+        return ""
+    if not exchange.measured and exchange.incomplete_reason:
+        return exchange.incomplete_reason
+    return exchange.response_scan_status
 
 
 def response_scan(exchanges: list) -> str:
@@ -278,7 +293,14 @@ def render(session, seconds: float) -> str:
     by_section = section_totals(exchanges)
     if by_section:
         total = sum(by_section.values())
-        lines.append("  where the input went  (approximate — split by byte share)")
+        coverage = (
+            f"; {len(exchanges) - incomplete} of {len(exchanges)} requests measured"
+            if incomplete
+            else ""
+        )
+        lines.append(
+            f"  where the input went  (approximate — split by byte share{coverage})"
+        )
         for name in _order(by_section):
             tokens = by_section[name]
             share = round(100 * tokens / total)
@@ -322,12 +344,16 @@ def render(session, seconds: float) -> str:
     if unscanned:
         states: dict[str, int] = {}
         for exchange in exchanges:
-            status = exchange.response_scan_status
-            if status != "known":
-                states[status] = states.get(status, 0) + 1
+            if exchange.response_scan_status == "known":
+                continue
+            reason = response_scan_reason(exchange)
+            said = _INCOMPLETE_SENTENCES.get(reason) or _RESPONSE_SENTENCES.get(
+                reason, reason
+            )
+            states[said] = states.get(said, 0) + 1
         why = ", ".join(
-            f"{count} {_RESPONSE_SENTENCES.get(status, status)}"
-            for status, count in sorted(states.items(), key=lambda p: (-p[1], p[0]))
+            f"{count} {said}"
+            for said, count in sorted(states.items(), key=lambda p: (-p[1], p[0]))
         )
         lines.append(
             f"  response scan unavailable or partial for {unscanned} request(s)"
@@ -338,7 +364,21 @@ def render(session, seconds: float) -> str:
 
     dollars, priced, unpriced = spend(exchanges)
     if priced:
-        lines.append(f"  spend     ~${dollars:,.2f}  (approximate, {PRICED_ON} prices)")
+        basis = spend_basis(exchanges)
+        if basis == "subscription":
+            on = "; API-key equivalent, this session is on a subscription, not a bill"
+        elif basis == "api-key":
+            on = ""
+        else:
+            subscribed = sum(
+                e.auth_route == "subscription"
+                for e in exchanges
+                if _price(e.model or "")
+            )
+            on = f"; {subscribed} of {priced} requests on a subscription"
+        lines.append(
+            f"  spend     ~${dollars:,.2f}  (approximate, {PRICED_ON} prices{on})"
+        )
     if unpriced:
         lines.append(f"  spend     not priced for {', '.join(unpriced)}")
 
@@ -392,6 +432,7 @@ def as_json(session, seconds: float) -> dict:
             "priced_on": PRICED_ON if priced else None,
             "unpriced_models": unpriced,
         },
+        "spend_basis": spend_basis(exchanges),
         "at_files": {"count": count, "bytes": size},
         "entities": entity_totals(exchanges),
         "entities_by_section": entity_section_totals(exchanges),
@@ -404,12 +445,14 @@ def as_json(session, seconds: float) -> dict:
                 "entities_by_section": exchange.entities_by_section,
                 "response_entities": exchange.response_entities,
                 "response_scan_status": exchange.response_scan_status,
+                "response_scan_reason": response_scan_reason(exchange),
                 "stop_reason": exchange.stop_reason,
                 # Per request, not just the session total: whether a change to
                 # the transcript breaks the provider's cache prefix is visible
                 # only in which requests read from it and which rewrite it.
                 "model": exchange.model,
                 "incomplete_reason": exchange.incomplete_reason,
+                "auth_route": exchange.auth_route,
                 "request_bytes": exchange.request_bytes,
                 "usage_status": exchange.usage_status,
                 "usage": {
@@ -435,10 +478,12 @@ __all__ = [
     "entity_section_totals",
     "entity_totals",
     "response_scan",
+    "response_scan_reason",
     "response_totals",
     "render",
     "section_totals",
     "spend",
+    "spend_basis",
     "stop_reason_totals",
     "totals",
 ]

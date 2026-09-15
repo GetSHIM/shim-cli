@@ -456,6 +456,7 @@ class Exchange:
     # Why `measured` is False, so the report can say it. One of
     # INCOMPLETE_REASONS; empty when the request was measured.
     incomplete_reason: str = ""
+    auth_route: str = ""
     usage_status: str = "unavailable"
 
     def __post_init__(self) -> None:

@@ -150,6 +150,14 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 if name.lower() not in HOP_BY_HOP
                 and name.lower() not in {"host", "content-length"}
             }
+            names = {name.lower() for name in headers}
+            exchange.auth_route = (
+                "api-key"
+                if "x-api-key" in names
+                else "subscription"
+                if "authorization" in names
+                else ""
+            )
             headers["Host"] = self.upstream_host
             headers["Content-Length"] = str(length)
             connection = http.client.HTTPSConnection(

@@ -951,3 +951,26 @@ def test_scanning_changes_none_of_the_bytes_the_client_receives(monkeypatch) -> 
     assert status == other_status
     assert gzip.decompress(body) == gzip.decompress(other_body)
     assert headers.get("Content-Encoding") == other_headers.get("Content-Encoding")
+
+
+@pytest.mark.parametrize(
+    ("sign_in", "route"),
+    (
+        (
+            {"X-Api-Key": "sk-ant-api-fake", "authorization": "Bearer sk-ant-oat-fake"},
+            "api-key",
+        ),
+        ({"Authorization": "Bearer sk-ant-oat-fake"}, "subscription"),
+        ({}, ""),
+    ),
+)
+def test_the_auth_route_is_read_from_header_names_only(watched, sign_in, route) -> None:
+    running, _upstream = watched
+    headers = {k: v for k, v in HEADERS.items() if k != "authorization"}
+
+    _post(running, BODY, {**headers, **sign_in})
+
+    (exchange,) = running.session.exchanges
+    assert exchange.auth_route == route
+    kept = set(_strings(vars(exchange)))
+    assert not kept & {"sk-ant-api-fake", "Bearer sk-ant-oat-fake", "sk-ant-oat-fake"}
