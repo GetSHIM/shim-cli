@@ -430,7 +430,7 @@ wrote back is `observe`, because it is not a leak.
 | `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `COPILOT_HOME` | Where each client keeps its settings; shim follows them. |
 
 `SHIM_GUARD_CONFIG` is the 0.2.0 name for `SHIM_CONFIG` and still works. It is
-removed in 0.5.0.
+removed in 1.0.
 
 ## Where shim keeps things
 
