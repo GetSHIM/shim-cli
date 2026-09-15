@@ -23,7 +23,7 @@ the first that works:
    the newest build and starts faster, because a zipapp has no bytecode cache
    and reparses its modules on every event.
 2. `shim-guard-hook` on `PATH` — the same script under the name 0.2.0 used,
-   kept until 0.5.0.
+   kept until 1.0.
 3. `<plugin-root>/bin/shim.pyz` — the bundled archive. The
    root is the second argument when one is given, else `CLAUDE_PLUGIN_ROOT`.
    Claude sets the variable; Codex sets no such variable, so its `hooks.json`

@@ -20,7 +20,7 @@ is 3.9, the plugin route needs no Python beyond 3.9 and the package route needs
 
 The package was renamed from `shim_guard` to `shim_cli` in 0.3.0. Three names
 survive so that an install written by 0.2.0 keeps working, and all three are
-removed in **0.5.0**, the second minor release after 0.3.0:
+removed in **1.0**, the release after 0.3.2:
 
 | Name | Replacement |
 | --- | --- |
@@ -34,7 +34,7 @@ deprecation warning: the hook is a cold-start subprocess whose stderr the
 client shows to the user, and a warning on every event is noise.
 
 The plugin marketplaces carry a second `shim-guard` entry pointing at the same
-directory, also removed in 0.5.0. On Claude Code that entry is enough: the
+directory, also removed in 1.0. On Claude Code that entry is enough: the
 marketplace key is whatever the user typed when they added it, so a plugin
 installed as `shim-guard@shim-guard` keeps loading and updating with no action.
 

@@ -211,7 +211,7 @@ to the new module name and, on Copilot, replaces the old hook file. Your
 settings and ledger move to `shim/` on the next `shim` command that touches
 them, and each move is reported once. The Claude Code plugin keeps loading and
 updating: `shim-guard@shim-guard` still resolves through a marketplace alias,
-which is removed in 0.5.0 along with the `shim-guard-hook` script, the
+which is removed in 1.0 along with the `shim-guard-hook` script, the
 `shim_guard` package and the `SHIM_GUARD_CONFIG` variable.
 
 Codex plugin users are the one exception and need four commands; see
