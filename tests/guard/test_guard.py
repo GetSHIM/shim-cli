@@ -29,12 +29,15 @@ def test_models_are_immutable_and_counts_follow_first_source_occurrence() -> Non
     later = Finding("EMAIL", 20, 30, 0.9, "")
     first = Finding("PHONE", 0, 10, 0.8, "")
     decision = GuardDecision(
-        (later, first, Finding("EMAIL", 40, 50, 0.7, "")), "x", False
+        (later, first, Finding("EMAIL", 40, 50, 0.7, "")), "x", False, 0
     )
 
     assert decision.counts == (("PHONE", 1), ("EMAIL", 2))
     with pytest.raises((AttributeError, TypeError)):
         decision.redacted_text = "changed"  # type: ignore[misc]
+    for count in (-1, True):
+        with pytest.raises(ValueError):
+            GuardDecision((), "x", False, count)
 
 
 def test_ordinals_are_per_category_in_source_order_without_a_value_map() -> None:
@@ -448,7 +451,7 @@ def test_a_piece_that_fails_leaves_the_others_masked() -> None:
     # `shim_cli.guard.evaluate` resolves to the re-exported function, not the
     # module it lives in.
     evaluate_module = sys.modules["shim_cli.guard.evaluate"]
-    real = evaluate_module.analyze
+    real = evaluate_module.analyze_counting
     calls = {"n": 0}
 
     def flaky(text, entities=(), custom=()):
@@ -460,10 +463,10 @@ def test_a_piece_that_fails_leaves_the_others_masked() -> None:
     line = "row %d contact user%d@example.com\n"
     text = "".join(line % (index, index) for index in range(14_000))
     try:
-        evaluate_module.analyze = flaky
+        evaluate_module.analyze_counting = flaky
         decision = evaluate(text, ("EMAIL",))
     finally:
-        evaluate_module.analyze = real
+        evaluate_module.analyze_counting = real
 
     assert decision.partial is True
     assert decision.findings, "one bad piece must not cost every other piece"
@@ -492,3 +495,54 @@ def test_a_url_carrying_an_address_keeps_its_url() -> None:
     decision = evaluate("See https://example.com/u?e=alice@example.com now")
 
     assert decision.redacted_text == "See https://example.com/u?e=<EMAIL_1> now"
+
+
+PHONE_SPANS = (
+    ('{"created": 1757496600, "amount": 2000}', []),
+    ('{"timestamp_ms": 1757496600123}', []),
+    ("$ date +%s\n1757496600", []),
+    ("3f9a2c1 1757496600 Fix parser timeout", []),
+    ("-rw-r--r-- 1 dev staff 2147480000 1757496600 build.tar", []),
+    ("Elapsed: 0.0376118499 s", []),
+    ("mean=0.1234567890", []),
+    ("2147483648", []),
+    ("order_id 2026091012", []),
+    ('"total_cost_usd": 0.03761184999', []),
+    ('{"name": "Test User", "phone": "4155552671"}', [[32, 42]]),
+    ("Telefon 5321234567", [[8, 18]]),
+    ("7,Test User,Ankara,05321234567", [[19, 30]]),
+    ("Reach the test desk at 5321234567 after lunch", [[23, 33]]),
+    ("Tel: 0212 555 12 34", [[5, 19]]),
+    ("Standard 01.23.45.67.89", [[9, 23]]),
+    ("phone    4155552671", [[9, 19]]),
+    ("phone     4155552671", []),
+    ('"ts": 1757496600', []),
+    ('"ts": 5321234567', [[6, 16]]),
+    ("hotel 1757496600", []),
+    ("Intel 4155552671", []),
+    ("order_no: 4155552671", [[10, 20]]),
+    ("phone number: 4155552671", [[14, 24]]),
+    ("Telefon numarası 4155552671", [[17, 27]]),
+    ("Reference number 1234567890", []),
+    ("5321234567.25", []),
+    ("x 0.05321234567", []),
+    ("1757496600 0.0376118499 s", []),
+)
+
+
+@pytest.mark.parametrize(("text", "spans"), PHONE_SPANS)
+def test_a_bare_number_is_a_phone_only_when_shaped_or_cued(
+    text: str, spans: list
+) -> None:
+    findings = evaluate(text).findings
+
+    assert [[f.start, f.end] for f in findings if f.entity_type == "PHONE"] == spans
+
+
+def test_bare_numbers_counts_the_ids_no_recogniser_claimed() -> None:
+    assert evaluate("ids 2147483648, 2026091012 and 1757496600").bare_numbers == 3
+    assert evaluate("Elapsed 0.0376118499 s, mean 0.1234567890").bare_numbers == 0
+    assert evaluate("Phone +90 532 123 45 67").bare_numbers == 0
+    assert evaluate("ids 2147483648 2026091012", ("EMAIL",)).bare_numbers == 0
+    assert evaluate("TCKN 12345678950", ("PHONE",)).bare_numbers == 1
+    assert evaluate("TCKN 12345678950").bare_numbers == 0

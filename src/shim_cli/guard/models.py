@@ -44,7 +44,7 @@ class Finding:
 
 @dataclass(frozen=True)
 class GuardDecision:
-    __slots__ = ("findings", "partial", "redacted_text")
+    __slots__ = ("bare_numbers", "findings", "partial", "redacted_text")
 
     findings: tuple[Finding, ...]
     redacted_text: str
@@ -53,6 +53,7 @@ class GuardDecision:
     # default: `__slots__` and a class-level default collide on the 3.9 the
     # zipapp runs, and `slots=True` is 3.10.
     partial: bool
+    bare_numbers: int
 
     def __post_init__(self) -> None:
         if not isinstance(self.findings, tuple) or not all(
@@ -63,6 +64,12 @@ class GuardDecision:
             raise ValueError("Invalid Guard redacted text.")
         if not isinstance(self.partial, bool):
             raise ValueError("Invalid Guard partial flag.")
+        if (
+            isinstance(self.bare_numbers, bool)
+            or not isinstance(self.bare_numbers, int)
+            or self.bare_numbers < 0
+        ):
+            raise ValueError("Invalid Guard bare number count.")
 
     @property
     def blocked(self) -> bool:

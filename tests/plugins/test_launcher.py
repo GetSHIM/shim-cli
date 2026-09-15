@@ -220,6 +220,11 @@ FIXTURES = {
         '{"hook_event_name":"PostToolUse","tool_name":"Read",'
         '"tool_response":{"content":"kanit \u2014 AKIAIOSFODNN7EXAMPLE"}}'
     ).encode("utf-8"),
+    "tool-json": (
+        '{"hook_event_name":"PostToolUse","tool_name":"Read",'
+        '"tool_response":{"content":"{\\"m\u00fc\u015fteri\\":\\"Test User\\",'
+        '\\"created\\":1757496600,\\"telefon\\":\\"0532 123 45 67\\"}"}}'
+    ).encode("utf-8"),
     "stop": (
         '{"hook_event_name":"Stop","session_id":"s1",'
         '"last_assistant_message":"bitti \u2014 alice@example.com"}'
@@ -236,7 +241,7 @@ def test_the_archive_answers_identically_on_39_and_the_current_interpreter(
         pytest.skip("python3.9 is not installed")
     config = tmp_path / "c.toml"
     config.write_text(
-        'enabled_entities = ["EMAIL", "IBAN", "SECRET"]\n\n'
+        'enabled_entities = ["EMAIL", "IBAN", "PHONE", "SECRET"]\n\n'
         '[mode]\nuser-prompt = "enforce"\n',
         encoding="utf-8",
     )
@@ -272,8 +277,12 @@ def test_the_archive_answers_identically_on_39_and_the_current_interpreter(
             result.stderr,
         )
 
+    answers = {name: answer(sys.executable, raw) for name, raw in FIXTURES.items()}
     for name, raw in FIXTURES.items():
-        assert answer(old, raw) == answer(sys.executable, raw), name
+        assert answer(old, raw) == answers[name], name
+    output = json.loads(answers["tool-json"][1])["hookSpecificOutput"]
+    document = json.loads(output["updatedToolOutput"]["content"])
+    assert (document["created"], document["telefon"]) == (1757496600, "<PHONE_1>")
 
 
 def _archive_members(path: Path) -> dict[str, bytes]:

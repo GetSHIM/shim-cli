@@ -27,6 +27,17 @@ Three things follow, and all three are limits rather than features:
   into a real file. Both are detected and can be warned about or denied.
 - Files referenced with `@` bypass hooks entirely, so nothing here sees them.
 
+A formatted phone number (`+90 532 123 45 67`, `(555) 123-4567`,
+`0212 555 12 34`) is masked. A bare run of digits is a phone number only when it
+is Turkish-shaped (`5321234567`, `05321234567`, `905321234567`, `02125551234`)
+or when a cue such as `tel`, `phone`, `gsm`, `cep` or `no` sits within 16
+characters before it; cues are Turkish and English only. A decimal is never a
+phone number. A bare timestamp or id is left as it was and counted on the
+summary's `warned` line. Bare numbers in other national
+formats without a cue are not detected, for example a CSV column of US numbers
+whose header is on another line. A [custom pattern](commands.md#shim-config)
+covers that case.
+
 ## Data flow
 
 ```text

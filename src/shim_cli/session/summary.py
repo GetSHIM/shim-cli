@@ -11,6 +11,7 @@ ACTION_LABELS = (
 MAX_SOURCES = 3
 BYTES_PER_TOKEN = 4
 MODEL_OUTPUT = "model-output"
+BARE_NUMBERS = "PHONE (bare numbers, left as they were)"
 NOT_LEAKS = "model-generated content, not leaks"
 
 
@@ -148,6 +149,16 @@ def _acted(records: list) -> list:
     ]
 
 
+def _bare(records: list) -> list:
+    return [
+        record
+        for record in records
+        if record.get("direction") != MODEL_OUTPUT
+        and type(record.get("bare_numbers")) is int
+        and record["bare_numbers"] > 0
+    ]
+
+
 def _model_output(records: list) -> list:
     return [
         record
@@ -182,6 +193,12 @@ def render(records: list, capped: bool = False) -> str:
             column = label if first else " " * len(label)
             first = False
             lines.append(f"  {column:<9} {count} {entity}{_where(relevant)}")
+    bare = _bare(records)
+    if bare:
+        warned = any(record.get("action") == "report" for record in acted)
+        column = "" if warned else "warned"
+        total = sum(record["bare_numbers"] for record in bare)
+        lines.append(f"  {column:<9} {total} {BARE_NUMBERS}{_where(bare)}")
     replies = _model_output(records)
     # The `custom` line sits under `masked` and has to agree with it. Counting
     # the model's own replies here made it read 4 under a `masked 2 CUSTOM`.
@@ -258,6 +275,7 @@ def as_json(records: list, capped: bool = False) -> dict:
             marker: {"count": count, "sources": _sources(_carrying(records, marker))}
             for marker, count in _marker_totals(records)
         },
+        "bare_numbers": sum(record["bare_numbers"] for record in _bare(records)),
         "model_output": dict(_totals(_model_output(records))),
         "custom": dict(_custom_totals(records)),
         "capped": capped,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import bisect
 import contextlib
 import signal
 import threading
@@ -9,7 +10,7 @@ from collections.abc import Iterable, Iterator
 from .entities import ENTITY_TYPES, normalize_entities
 from .models import Finding
 from .normalize import normalize
-from .recognizers import ENTITY_MAP, Match, analyze_text
+from .recognizers import BARE_NUMBER, ENTITY_MAP, Match, analyze_text
 
 ANALYSIS_DEADLINE_SECONDS = 20
 _PRIORITY = {
@@ -157,28 +158,53 @@ def _source_findings(
     return _resolve_overlaps(mapped)
 
 
+def _unclaimed(bare: list[Match], findings: list[Finding]) -> int:
+    starts = [finding.start for finding in findings]
+    count = 0
+    for item in bare:
+        index = bisect.bisect_left(starts, item.end)
+        if not index or findings[index - 1].end <= item.start:
+            count += 1
+    return count
+
+
 def analyze(
     text: str,
     enabled_entities: Iterable[str] = ENTITY_TYPES,
     custom: tuple = (),
 ) -> tuple[Finding, ...]:
+    return analyze_counting(text, enabled_entities, custom)[0]
+
+
+def analyze_counting(
+    text: str,
+    enabled_entities: Iterable[str] = ENTITY_TYPES,
+    custom: tuple = (),
+) -> tuple[tuple[Finding, ...], int]:
     enabled = frozenset(normalize_entities(enabled_entities))
     if not enabled:
-        return ()
+        return (), 0
     normalized = normalize(text)
     if not normalized.text:
-        return ()
+        return (), 0
     source_entities = tuple(
         source for source, public in ENTITY_MAP.items() if public in enabled
     )
     try:
         with _deadline():
             raw = analyze_text(normalized.text, source_entities, custom)
-        normalized_findings = _resolve_overlaps(_validated(raw, len(normalized.text)))
+        bare = [item for item in raw if item.entity_type == BARE_NUMBER]
+        claimed = [item for item in raw if item.entity_type != BARE_NUMBER]
+        normalized_findings = _resolve_overlaps(
+            _validated(claimed, len(normalized.text))
+        )
     except TimeoutError as error:
         raise ValueError("Guard analysis exceeded its runtime limit.") from error
     except ValueError:
         raise
     except Exception as error:
         raise ValueError("Guard analysis failed safely.") from error
-    return tuple(_source_findings(normalized_findings, normalized.source_spans))
+    return (
+        tuple(_source_findings(normalized_findings, normalized.source_spans)),
+        _unclaimed(bare, normalized_findings),
+    )

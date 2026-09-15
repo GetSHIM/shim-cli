@@ -55,6 +55,144 @@
       "expected_output": "Version 1.2.3 build 4567"
     },
     {
+      "id": "number-epoch-json",
+      "text": "{\"created\": 1757496600, \"amount\": 2000}",
+      "categories": [],
+      "expected_output": "{\"created\": 1757496600, \"amount\": 2000}"
+    },
+    {
+      "id": "number-epoch-milliseconds-json",
+      "text": "{\"timestamp_ms\": 1757496600123}",
+      "categories": [],
+      "expected_output": "{\"timestamp_ms\": 1757496600123}"
+    },
+    {
+      "id": "number-date-epoch-output",
+      "text": "$ date +%s\n1757496600",
+      "categories": [],
+      "expected_output": "$ date +%s\n1757496600",
+      "expected_spans": []
+    },
+    {
+      "id": "number-git-log-author-epoch",
+      "text": "3f9a2c1 1757496600 Fix parser timeout",
+      "categories": [],
+      "expected_output": "3f9a2c1 1757496600 Fix parser timeout"
+    },
+    {
+      "id": "number-ls-size-and-epoch-mtime",
+      "text": "-rw-r--r-- 1 dev staff 2147480000 1757496600 build.tar",
+      "categories": [],
+      "expected_output": "-rw-r--r-- 1 dev staff 2147480000 1757496600 build.tar"
+    },
+    {
+      "id": "number-float-ten-decimals",
+      "text": "Elapsed: 0.0376118499 s",
+      "categories": [],
+      "expected_output": "Elapsed: 0.0376118499 s"
+    },
+    {
+      "id": "number-mean-ten-decimals",
+      "text": "mean=0.1234567890",
+      "categories": [],
+      "expected_output": "mean=0.1234567890"
+    },
+    {
+      "id": "number-int32-overflow",
+      "text": "2147483648",
+      "categories": [],
+      "expected_output": "2147483648"
+    },
+    {
+      "id": "number-order-id",
+      "text": "order_id 2026091012",
+      "categories": [],
+      "expected_output": "order_id 2026091012"
+    },
+    {
+      "id": "number-cost-usd-eleven-decimals",
+      "text": "\"total_cost_usd\": 0.03761184999",
+      "categories": [],
+      "expected_output": "\"total_cost_usd\": 0.03761184999"
+    },
+    {
+      "id": "number-epoch-then-duration",
+      "text": "1757496600 0.0376118499 s",
+      "categories": [],
+      "expected_output": "1757496600 0.0376118499 s"
+    },
+    {
+      "id": "phone-json-cue",
+      "text": "{\"name\": \"Test User\", \"phone\": \"4155552671\"}",
+      "categories": [
+        "PHONE"
+      ],
+      "expected_output": "{\"name\": \"Test User\", \"phone\": \"<PHONE_1>\"}"
+    },
+    {
+      "id": "phone-number-cue",
+      "text": "Support phone number: 4155552671",
+      "categories": [
+        "PHONE"
+      ],
+      "expected_output": "Support phone number: <PHONE_1>"
+    },
+    {
+      "id": "phone-numarasi-cue",
+      "text": "Telefon numarası: 4155552671",
+      "categories": [
+        "PHONE"
+      ],
+      "expected_output": "Telefon numarası: <PHONE_1>",
+      "expected_spans": [
+        [
+          18,
+          28,
+          "PHONE"
+        ]
+      ]
+    },
+    {
+      "id": "phone-telefon-cue-bare",
+      "text": "Telefon 5321234567",
+      "categories": [
+        "PHONE"
+      ],
+      "expected_output": "Telefon <PHONE_1>"
+    },
+    {
+      "id": "phone-turkish-bare-csv",
+      "text": "7,Test User,Ankara,05321234567",
+      "categories": [
+        "PHONE"
+      ],
+      "expected_output": "7,Test User,Ankara,<PHONE_1>"
+    },
+    {
+      "id": "phone-turkish-bare-prose",
+      "text": "Reach the test desk at 5321234567 after lunch",
+      "categories": [
+        "PHONE"
+      ],
+      "expected_output": "Reach the test desk at <PHONE_1> after lunch"
+    },
+    {
+      "id": "phone-tel-formatted-landline",
+      "text": "Tel: 0212 555 12 34",
+      "categories": [
+        "PHONE"
+      ],
+      "expected_output": "Tel: <PHONE_1>"
+    },
+    {
+      "id": "phone-dotted-french",
+      "text": "Standard 01.23.45.67.89",
+      "categories": [
+        "PHONE"
+      ],
+      "expected_output": "Standard <PHONE_1>"
+    },
+    {
       "id": "credit-card-positive",
       "text": "Card 4111 1111 1111 1111",
       "categories": [

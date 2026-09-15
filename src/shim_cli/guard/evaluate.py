@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable, Iterator
 
-from .analyze import analyze
+from .analyze import analyze_counting
 from .entities import ENTITY_TYPES, MAX_REVEAL_DIGITS
 from .models import Finding, GuardDecision
 from .normalize import MAX_SOURCE_CHARACTERS
@@ -37,7 +37,7 @@ def _pieces(text: str) -> Iterator[tuple[int, str]]:
 
 def _findings_in_pieces(
     text: str, enabled_entities: Iterable[str], custom: tuple
-) -> tuple[tuple[Finding, ...], bool]:
+) -> tuple[tuple[Finding, ...], bool, int]:
     """Findings over the whole text, in source order, and whether a piece failed.
 
     The detector refuses more than `MAX_SOURCE_CHARACTERS` at once, and the
@@ -48,13 +48,15 @@ def _findings_in_pieces(
     entities = tuple(enabled_entities)
     found: list[Finding] = []
     partial = False
+    bare_numbers = 0
     for offset, piece in _pieces(text):
         try:
-            findings = analyze(piece, entities, custom)
+            findings, bare = analyze_counting(piece, entities, custom)
         except (ValueError, TimeoutError):
             # One bad piece must not cost the masking of every other piece.
             partial = True
             continue
+        bare_numbers += bare
         found.extend(
             Finding(
                 entity_type=finding.entity_type,
@@ -65,7 +67,7 @@ def _findings_in_pieces(
             )
             for finding in findings
         )
-    return tuple(found), partial
+    return tuple(found), partial, bare_numbers
 
 
 def evaluate(
@@ -76,11 +78,13 @@ def evaluate(
 ) -> GuardDecision:
     partial = False
     if len(text) > MAX_SOURCE_CHARACTERS:
-        findings, partial = _findings_in_pieces(text, enabled_entities, custom)
+        findings, partial, bare_numbers = _findings_in_pieces(
+            text, enabled_entities, custom
+        )
     else:
-        findings = analyze(text, enabled_entities, custom)
+        findings, bare_numbers = analyze_counting(text, enabled_entities, custom)
     if not findings:
-        return GuardDecision((), text, partial)
+        return GuardDecision((), text, partial, bare_numbers)
 
     counts: dict[str, int] = {}
     pieces: list[str] = []
@@ -94,4 +98,4 @@ def evaluate(
         pieces.append(f"<{marker}:{tail}>" if tail else f"<{marker}>")
         cursor = finding.end
     pieces.append(text[cursor:])
-    return GuardDecision(findings, "".join(pieces), partial)
+    return GuardDecision(findings, "".join(pieces), partial, bare_numbers)
