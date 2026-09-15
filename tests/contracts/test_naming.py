@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
 
 import pytest
+
+from shim_cli.clients.claude.settings import TESTED_CLAUDE_VERSION
+from shim_cli.clients.codex.settings import TESTED_CODEX_VERSION
+from shim_cli.clients.copilot.settings import TESTED_COPILOT_VERSION
 
 try:
     import tomllib
@@ -121,3 +126,22 @@ def test_the_release_notes_exist_for_the_declared_version() -> None:
 
     assert notes.is_file(), f"release.yml expects {notes.relative_to(ROOT)}"
     assert notes.read_text(encoding="utf-8").startswith(f"# shim-cli {version}\n")
+
+
+def test_the_tested_client_versions_match_the_newest_release_evidence() -> None:
+    record = (ROOT / "docs" / "compatibility.md").read_text(encoding="utf-8")
+    sections = re.findall(
+        r"^## (\d+)\.(\d+)\.(\d+) release evidence\n(.*?)(?=^## |\Z)",
+        record,
+        flags=re.MULTILINE | re.DOTALL,
+    )
+    *_, body = max(sections, key=lambda section: tuple(map(int, section[:3])))
+    tested = dict(
+        re.findall(r"^\| ([^|]+?) \|.*?\btested: (\d+\.\d+\.\d+)", body, re.M)
+    )
+
+    assert tested == {
+        "Claude Code": TESTED_CLAUDE_VERSION,
+        "Codex CLI": TESTED_CODEX_VERSION,
+        "GitHub Copilot CLI": TESTED_COPILOT_VERSION,
+    }

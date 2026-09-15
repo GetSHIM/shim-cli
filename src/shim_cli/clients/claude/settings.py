@@ -14,7 +14,7 @@ from shim_cli.clients.hook_settings import (
 )
 from shim_cli.session import SESSION_EVENTS
 
-TESTED_CLAUDE_VERSION = "2.1.251"
+TESTED_CLAUDE_VERSION = "2.1.263"
 MINIMUM_CLAUDE_VERSION = "2.1.210"
 HOOK_TIMEOUT_SECONDS = 30
 MAX_CONFIG_BYTES = MAX_SETTINGS_BYTES
