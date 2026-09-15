@@ -11,11 +11,6 @@ import pytest
 ROOT = Path(__file__).parents[2]
 
 
-@pytest.fixture(autouse=True)
-def _isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("SHIM_GUARD_SESSION_DIR", str(tmp_path / "spools"))
-
-
 def _run(raw: bytes, client: str = "claude") -> bytes:
     result = subprocess.run(
         (sys.executable, "-I", "-B", "-m", "shim_cli.hook", client),
@@ -143,7 +138,6 @@ def test_tool_labels_are_safe_in_the_spool_and_summary(tool: str) -> None:
 
 
 def test_an_uninspectable_tool_event_is_still_recorded(monkeypatch, tmp_path) -> None:
-    monkeypatch.setenv("SHIM_GUARD_SESSION_DIR", str(tmp_path / "spools"))
     from shim_cli import hook
     from shim_cli.session import spool
     from shim_cli.session.record import NOT_INSPECTED
@@ -176,7 +170,6 @@ def test_an_uninspectable_tool_event_is_still_recorded(monkeypatch, tmp_path) ->
 def test_uninspected_records_never_keep_raw_event_or_tool_labels(
     monkeypatch, tmp_path
 ) -> None:
-    monkeypatch.setenv("SHIM_GUARD_SESSION_DIR", str(tmp_path / "spools"))
     from shim_cli import hook
     from shim_cli.session import spool, summary
 
@@ -229,7 +222,6 @@ def test_detector_failure_still_records_an_unknown_tool(monkeypatch) -> None:
 
 
 def test_the_summary_names_an_uninspected_event(monkeypatch, tmp_path) -> None:
-    monkeypatch.setenv("SHIM_GUARD_SESSION_DIR", str(tmp_path / "spools"))
     from shim_cli.session import spool, summary
     from shim_cli.session.record import NOT_INSPECTED
 

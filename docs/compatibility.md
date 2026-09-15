@@ -16,29 +16,32 @@ The package runs on CPython 3.10 through 3.13. On a machine whose only Python
 is 3.9, the plugin route needs no Python beyond 3.9 and the package route needs
 `--python`: `uv tool install --python 3.12 --compile-bytecode shim`.
 
-## Deprecated names
+## The 0.2.0 names
 
-The package was renamed from `shim_guard` to `shim_cli` in 0.3.0. Three names
-survive so that an install written by 0.2.0 keeps working, and all three are
-removed in **1.0**, the release after 0.3.2:
+The package was renamed from `shim_guard` to `shim_cli` in 0.3.0. From 0.3.0
+through 0.3.2 a re-exporting compatibility package, a second console script,
+the old settings variable and a second `shim-guard` marketplace entry kept an
+install written by 0.2.0 working. 0.3.0 scheduled their removal for 0.5.0; 1.0
+removed them, announced one release ahead in the 0.3.2 notes and in
+`shim doctor`.
 
-| Name | Replacement |
-| --- | --- |
-| the importable `shim_guard` package, including `python -m shim_guard.hook` | `shim_cli`, `python -m shim_cli.hook` |
-| the `shim-guard-hook` console script | `shim-hook` |
-| the `SHIM_GUARD_CONFIG` variable | `SHIM_CONFIG`, which outranks it |
-| the `shim-guard` marketplace entry in both plugin manifests | the `shim-cli` entry |
+In 1.0 a client settings file that still carries `-m shim_guard.hook` makes the
+client report `No module named shim_guard` on every prompt, and nothing is
+inspected, until `shim install <client>` rewrites the line. `shim doctor
+<client>` reports that shape, and a Copilot hook file under its 0.2.0 name, as
+`FAIL` with that command, and counts no event from it as installed. Settings,
+the ledger and the Copilot hook file still move on first contact.
 
-The compatibility package re-exports and does nothing else. It emits no
-deprecation warning: the hook is a cold-start subprocess whose stderr the
-client shows to the user, and a warning on every event is noise.
+A Claude Code plugin installed as `shim-guard@shim-guard` stopped updating at
+0.3.2 and moves with:
 
-The plugin marketplaces carry a second `shim-guard` entry pointing at the same
-directory, also removed in 1.0. On Claude Code that entry is enough: the
-marketplace key is whatever the user typed when they added it, so a plugin
-installed as `shim-guard@shim-guard` keeps loading and updating with no action.
+```
+/plugin uninstall shim-guard@shim-guard
+/plugin marketplace add GetSHIM/shim-cli
+/plugin install shim-cli@shim-cli
+```
 
-**Codex needs one migration.** There the marketplace name in the manifest *is*
+**Codex needed one migration in 0.3.0.** There the marketplace name in the manifest *is*
 the identity, so renaming it to `shim-cli` orphans an install made under the old
 name — `config.toml` still says the plugin is enabled while `codex plugin list`
 reports nothing installed. A Codex user who installed the 0.2.0 plugin runs:
@@ -52,7 +55,7 @@ codex plugin add shim-cli@shim-cli
 
 This affects the plugin only. A Codex user who installed the PyPI package is
 unaffected, and the zero-install plugin path could not reach the archive under
-Codex before 0.3.0, so no working Codex plugin install is being broken.
+Codex before 0.3.0, so no working Codex plugin install was broken.
 
 Codex and Copilot install prompt hooks only. The repository contains no
 Codex, Copilot, `PostToolUseFailure`, or `PostToolBatch` tool adapter. Tool
@@ -94,6 +97,27 @@ cannot read that record and does not write it; a diagnosis that claimed to
 would be guessing. `codex exec --dangerously-bypass-hook-trust` runs enabled
 hooks without it, which is useful to confirm an install and wrong as a habit.
 
+## 1.0.0 release evidence
+
+Recorded PENDING_RELEASE_EVIDENCE (date, macOS version and architecture, CPython and uv versions).
+Every row is pasted from the terminal of the day, on the 1.0.0 candidate.
+
+| Evidence | Recorded result |
+| --- | --- |
+| Local gate | `python scripts/check.py` green on the candidate: PENDING_RELEASE_EVIDENCE (test count). |
+| Tag-time re-verification | `release.yml` re-runs the same gate on the tagged tree, rebuilds from a clean snapshot and requires the fresh build to match the tested artifacts byte for byte. It refuses the tag while this record carries a pending marker. |
+| Claude Code | tested: 2.1.263. PENDING_RELEASE_EVIDENCE: plugin from the marketplace with a `PATH` whose only `python3` is 3.9; the Turkish prompt (J1); a `Read` of a JSON file with a 2026 epoch, left intact; a `Read` of a `.env`, the model saying values were masked; `shim doctor claude` with no version `WARN`. |
+| Claude Code `shim watch` | PENDING_RELEASE_EVIDENCE: a live session on a subscription sign-in (J6). |
+| Codex CLI | tested: 0.151.0. PENDING_RELEASE_EVIDENCE: prompt hook trusted, `observe` and `enforce` (J7); `shim watch -- codex` refused with the sentence. |
+| GitHub Copilot CLI | tested: 1.0.80. PENDING_RELEASE_EVIDENCE: `shim install copilot`, hook reviewed and enabled; a safe prompt printed nothing; a synthetic email reached the model redacted (its verbatim repeat quoted); a forced hook error failed open. |
+| Package on a 3.9-first `PATH` | PENDING_RELEASE_EVIDENCE: `uv` with `--python` installed 1.0.0 (J2). |
+| Upgrade from 0.2.0 | PENDING_RELEASE_EVIDENCE: a 0.2.0 machine upgraded to 1.0 sees `No module named shim_guard` on a prompt, `shim doctor` `FAIL` with the command, runs it, and is clean (J3). |
+| When something is wrong | PENDING_RELEASE_EVIDENCE: the numbers table (J8). |
+| Leaving | PENDING_RELEASE_EVIDENCE: revert, uninstall, and what is left on disk (J9). |
+| Python floor | PENDING_RELEASE_EVIDENCE: `check.py` green in CI on 3.10 and 3.13; the committed archive answers identically on 3.9 and 3.13 (`archive-on-3-9`). |
+| SBOM and attestation | PENDING_RELEASE_EVIDENCE: SBOM component count for the tag and the `gh attestation verify` command. |
+| Supply-chain workflows | PENDING_RELEASE_EVIDENCE: the first green run of CodeQL, Scorecard, Dependabot and the prose check. |
+
 ## 0.3.0 release evidence
 
 Recorded 8 September 2026 on macOS 26.4 arm64, CPython 3.13.5, uv 0.12.5.
@@ -105,7 +129,7 @@ Recorded 8 September 2026 on macOS 26.4 arm64, CPython 3.13.5, uv 0.12.5.
 | Claude Code | tested: 2.1.263. Prompt and tool hooks exercised live; `shim watch` measured request and response, both directions reported apart, `stop_reason` read from the wire. The `Stop` last-block limitation is captured as a fixture. |
 | Codex CLI | tested: 0.151.0. Prompt hook installed into a real `~/.codex` and exercised live: `observe` passed the prompt through, `enforce` blocked it before the model call. Hook trust is a client-side record shim cannot read; an untrusted hook runs silently not at all. |
 | Codex `shim watch` | Refused, with the reason measured rather than assumed. See [the September 2026 probe](probe-2026-09-codex-watch.md). The transport works; the shipped implementation set an environment variable Codex ignores. |
-| GitHub Copilot CLI | **Not re-verified this cycle.** 1.0.83 is installed locally; tested: 1.0.80. Install and diagnosis paths are covered by the suite; no live client run was made for 0.3.0. |
+| GitHub Copilot CLI | **Not run live for 0.3.0.** 1.0.83 is installed locally; tested: 1.0.80. Install and diagnosis paths are covered by the suite; no live client run was made for 0.3.0. |
 | Context diet under the proxy | Seven scripted Claude Code sessions, 8 September 2026. The cache prefix held in every one, including a session whose configuration changed mid-run. A 22,199-byte tool result became 13,374 with the diet on and 21,690 with it off. [Study](study-2026-09-08-image-repeat-cache.md). |
 | Python floor | 3.10 is exercised by CI only; no local 3.10 run was made. The bundled archive targets 3.9 and is rebuilt and compared by a contract test. |
 | Supply-chain workflows | CodeQL, Scorecard, Dependabot and the prose check are configured and their pinning is asserted by `tests/contracts/test_workflows.py`. They run on pull requests into `main` and on pushes to `main`; a first green run of each is a condition of the release, not a claim of this document. |

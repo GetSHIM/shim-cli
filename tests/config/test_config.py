@@ -63,24 +63,19 @@ def test_unsafe_or_relative_settings_paths_are_rejected(
     with pytest.raises(ValueError, match="safely"):
         load_entities(link)
 
-    monkeypatch.setenv("SHIM_GUARD_CONFIG", "relative/config.toml")
+    monkeypatch.setenv("SHIM_CONFIG", "relative/config.toml")
     with pytest.raises(ValueError, match="path"):
         config_path()
 
-    monkeypatch.setenv("SHIM_GUARD_CONFIG", "~shim_cli_missing_user/config.toml")
+    monkeypatch.setenv("SHIM_CONFIG", "~shim_cli_missing_user/config.toml")
     with pytest.raises(ValueError, match="path"):
         config_path()
 
 
-def test_the_new_configuration_variable_outranks_the_old_one(
+def test_the_configuration_variable_names_the_file(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     new = tmp_path / "new.toml"
-    old = tmp_path / "old.toml"
-
-    monkeypatch.setenv("SHIM_GUARD_CONFIG", str(old))
-    assert config_path() == old
-
     monkeypatch.setenv("SHIM_CONFIG", str(new))
     assert config_path() == new
 

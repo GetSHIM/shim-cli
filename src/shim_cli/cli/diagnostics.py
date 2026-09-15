@@ -129,7 +129,7 @@ def _codex_hooks_feature() -> Check:
     return Check("hooks_feature", "PASS", "Codex hook support is enabled.")
 
 
-def _legacy_state(client: str) -> Check:
+def _legacy_state(client: str, fragment: bool) -> Check:
     """R7: name every 0.2.0 shape that is still on disk. Changes nothing."""
     from shim_cli.clients.copilot import settings as copilot_settings
     from shim_cli.config import legacy_config_path
@@ -137,7 +137,7 @@ def _legacy_state(client: str) -> Check:
     from shim_cli.settings_files import StateKind, inspect_file
 
     found: list[str] = []
-    if client == "copilot":
+    if client == "copilot" and not fragment:
         legacy = copilot_settings.legacy_target_path()
         state = inspect_file(legacy, copilot_settings.MAX_CONFIG_BYTES)
         if state.kind is StateKind.FILE and state.content is not None:
@@ -146,10 +146,10 @@ def _legacy_state(client: str) -> Check:
                     f"Hook file uses the old name at {legacy}; "
                     "run shim install copilot to rename it"
                 )
-    if _has_legacy_fragment(client):
+    if fragment:
         found.append(
-            f"Hook installed in the 0.2.0 shape; run shim install {client} to "
-            "rewrite it, because 1.0 will not run this shape"
+            f"Hook installed in the 0.2.0 shape, which 1.0 does not run; "
+            f"run shim install {client}"
         )
     settings_file = legacy_config_path()
     if settings_file is not None and settings_file.is_file():
@@ -169,7 +169,11 @@ def _legacy_state(client: str) -> Check:
     if not found:
         return Check("legacy_names", "PASS", "No 0.2.0 names are left on disk.")
     detail = ". ".join(found)
-    return Check("legacy_names", "WARN", f"{detail[0].lower()}{detail[1:]}.")
+    return Check(
+        "legacy_names",
+        "FAIL" if fragment else "WARN",
+        f"{detail[0].lower()}{detail[1:]}.",
+    )
 
 
 def _has_legacy_fragment(client: str) -> bool:
@@ -331,10 +335,7 @@ def _runner_check(client: str) -> Check:
     try:
         with tempfile.TemporaryDirectory(prefix="shim-doctor-") as directory:
             environment = os.environ.copy()
-            # SHIM_CONFIG outranks the 0.2.0 name; set both or the fixture
-            # runs under the user's own settings and reports a false failure.
             environment["SHIM_CONFIG"] = str(Path(directory).resolve() / "config.toml")
-            environment.pop("SHIM_GUARD_CONFIG", None)
             environment["TMPDIR"] = directory
             safe_result = _run_hook(command, safe, environment, timeout)
             block_result = _run_hook(command, blocked, environment, timeout)
@@ -551,14 +552,13 @@ def doctor(*, client: str, as_json: bool) -> None:
     legacy_fragment = _has_legacy_fragment(client)
     hook_state = _hook_state(client, legacy_fragment)
     rows = _coverage_rows(
-        client,
-        legacy_fragment or (hook_state is not None and hook_state.status == "PASS"),
+        client, hook_state is not None and hook_state.status == "PASS"
     )
     checks.extend(
         check
         for check in (
             hook_state,
-            _legacy_state(client),
+            _legacy_state(client, legacy_fragment),
             _entity_settings(),
             _custom_patterns(),
             _session_record_check(),

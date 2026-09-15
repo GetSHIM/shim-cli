@@ -26,12 +26,6 @@ def _identity() -> int:
 
 
 def root_path() -> Path:
-    configured = os.environ.get("SHIM_GUARD_SESSION_DIR")
-    if configured:
-        root = Path(configured).expanduser()
-        if not root.is_absolute() or ".." in root.parts:
-            raise SpoolError("session directory is invalid")
-        return root
     return Path(tempfile.gettempdir()) / f"shim-session-{_identity()}"
 
 

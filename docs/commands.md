@@ -107,8 +107,9 @@ The coverage line counts the events whose hook is in the client's settings
 file, and the table's `Installed` column reads the same file:
 `PASS Coverage: 5 of 5 events installed.` once shim is installed, and
 `WARN Coverage: 0 of 5 events installed; run shim install claude.` before. A
-hook still in the 0.2.0 shape counts as installed. The exit codes do not
-change: the coverage `WARN` exits `0`.
+hook still in the 0.2.0 shape does not count, because 1.0 does not run it:
+doctor reports it as `FAIL` with `run shim install <client>`. The coverage
+`WARN` on its own exits `0`.
 
 Every `FAIL` names the command that fixes it. A malformed settings file, for
 example, gives you the path, the parser's message with its line number, and
@@ -426,12 +427,8 @@ wrote back is `observe`, because it is not a leak.
 | `SHIM_CONFIG` | Use this settings file instead of the default path. |
 | `XDG_CONFIG_HOME` | Where `shim/config.toml` lives. |
 | `XDG_STATE_HOME` | Where the ledger lives. |
-| `SHIM_GUARD_STATE_DIR` | Pin the ledger directory outright. |
-| `SHIM_GUARD_SESSION_DIR` | Pin the session spool directory. |
+| `TMPDIR` | Where session records and withheld prompts are written. |
 | `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `COPILOT_HOME` | Where each client keeps its settings; shim follows them. |
-
-`SHIM_GUARD_CONFIG` is the 0.2.0 name for `SHIM_CONFIG` and still works. It is
-removed in 1.0.
 
 ## Where shim keeps things
 

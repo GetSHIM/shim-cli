@@ -131,14 +131,13 @@ def _environment(config: Path, state: Path | None = None) -> dict[str, str]:
         key: value for key, value in os.environ.items() if not key.startswith("CLAUDE")
     }
     environment["SHIM_CONFIG"] = str(config)
-    environment.pop("SHIM_GUARD_CONFIG", None)
     if state is not None:
         # Never the real ledger; the study writes its own and reads it back.
         # 0700 or shim refuses the directory as not private, and the failure is
         # swallowed: an empty ledger looks exactly like a session that did
         # nothing worth recording.
         state.mkdir(mode=0o700, parents=True, exist_ok=True)
-        environment["SHIM_GUARD_STATE_DIR"] = str(state)
+        environment["XDG_STATE_HOME"] = str(state)
     return environment
 
 

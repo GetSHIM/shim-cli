@@ -30,7 +30,7 @@ def _enforcing(tmp_path: Path, **extra: str) -> dict:
     target = tmp_path / "enforce.toml"
     target.write_text(ENFORCE_PROMPT, encoding="utf-8")
     environment = os.environ.copy()
-    environment["SHIM_GUARD_CONFIG"] = str(target)
+    environment["SHIM_CONFIG"] = str(target)
     environment["TMPDIR"] = str(tmp_path)
     environment.update(extra)
     return environment
@@ -124,7 +124,7 @@ def test_hook_honors_entity_settings_and_rejects_invalid_settings(
         render_entities(("PHONE",)) + b'\n[mode]\nuser-prompt = "enforce"\n'
     )
     environment = _enforcing(tmp_path)
-    environment["SHIM_GUARD_CONFIG"] = str(target)
+    environment["SHIM_CONFIG"] = str(target)
 
     _assert_output(_run(_payload("Contact alice@example.com"), env=environment), b"")
     phone = _run(_payload("Call +90 532 123 45 67"), env=environment)
@@ -333,7 +333,7 @@ runner.main()
     env["SHIM_TEST_SECRET"] = "raw-value-must-not-leak"
     settings = tmp_path.parent / f"{tmp_path.name}-enforce.toml"
     settings.write_text(ENFORCE_PROMPT, encoding="utf-8")
-    env["SHIM_GUARD_CONFIG"] = str(settings)
+    env["SHIM_CONFIG"] = str(settings)
     env["TMPDIR"] = str(tmp_path)
     result = subprocess.run(
         (sys.executable, "-I", "-B", "-c", code),
@@ -477,7 +477,7 @@ def test_hook_persists_only_the_redacted_prompt_in_os_temp(tmp_path: Path) -> No
     )
     config = tmp_path / "enforce.toml"
     config.write_text(ENFORCE_PROMPT, encoding="utf-8")
-    env["SHIM_GUARD_CONFIG"] = str(config)
+    env["SHIM_CONFIG"] = str(config)
     prompt = "Contact persistence-canary@example.com"
     before = {item for item in tmp_path.rglob("*") if item.is_file()}
 

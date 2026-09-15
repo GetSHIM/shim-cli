@@ -76,7 +76,7 @@ def _copilot(monkeypatch, tmp_path: Path, version: str = "1.0.80") -> None:
 
 def _guard_config(monkeypatch, tmp_path: Path) -> Path:
     target = tmp_path / "settings" / "config.toml"
-    monkeypatch.setenv("SHIM_GUARD_CONFIG", str(target))
+    monkeypatch.setenv("SHIM_CONFIG", str(target))
     return target
 
 
@@ -495,7 +495,7 @@ def test_doctor_coverage_reads_the_hook_file(
 
 
 @pytest.mark.parametrize("client", sorted(_CLIENT_FIXTURES))
-def test_doctor_counts_a_020_hook_as_installed(
+def test_doctor_fails_a_020_hook_that_1_0_does_not_run(
     client: str, monkeypatch, tmp_path: Path
 ) -> None:
     from shim_cli.cli.integrations import client_plan
@@ -519,24 +519,26 @@ def test_doctor_counts_a_020_hook_as_installed(
             )
             + "\n"
         )
-        warning = "WARN hook file uses the old name at"
     else:
         module = {"claude": claude_settings, "codex": codex_settings}[client]
         client_plan(client, "install").target.write_bytes(
             add_groups(b"{}", module.legacy_hook_groups())
         )
-        warning = (
-            f"WARN hook installed in the 0.2.0 shape; run shim install {client} to "
-            "rewrite it, because 1.0 will not run this shape."
-        )
 
     text, table, installed = _coverage(client)
 
-    assert f"PASS Coverage: {events} of {events} events installed." in text
-    assert table == ["yes"] * events
-    assert installed == [True] * events
-    assert warning in text
+    assert (
+        f"WARN Coverage: 0 of {events} events installed; run shim install {client}."
+        in text
+    )
+    assert table == ["no"] * events
+    assert installed == [False] * events
+    assert (
+        f"FAIL hook installed in the 0.2.0 shape, which 1.0 does not run; "
+        f"run shim install {client}." in text
+    )
     assert "hook group is not installed" not in text
+    assert runner.invoke(app, ["doctor", client]).exit_code == 2
 
 
 def test_doctor_not_installed_names_the_command(monkeypatch, tmp_path: Path) -> None:
@@ -784,7 +786,6 @@ def test_reset_restores_every_section_not_only_the_entity_list(
 
 
 def test_report_says_so_when_there_is_no_session(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("SHIM_GUARD_SESSION_DIR", str(tmp_path / "spools"))
 
     result = runner.invoke(app, ["report"])
 
@@ -793,7 +794,6 @@ def test_report_says_so_when_there_is_no_session(monkeypatch, tmp_path: Path) ->
 
 
 def test_report_renders_the_most_recent_session(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("SHIM_GUARD_SESSION_DIR", str(tmp_path / "spools"))
     from shim_cli.session import spool
 
     spool.append(
@@ -816,8 +816,6 @@ def test_report_renders_the_most_recent_session(monkeypatch, tmp_path: Path) -> 
 
 
 def test_ledger_purge_deletes_only_what_is_retained(monkeypatch, tmp_path: Path):
-    monkeypatch.setenv("SHIM_GUARD_STATE_DIR", str(tmp_path / "state"))
-    monkeypatch.setenv("SHIM_GUARD_SESSION_DIR", str(tmp_path / "spools"))
     from shim_cli.session import ledger, spool
 
     ledger.append({"action": "mask", "entities": {"SECRET": 1}})
@@ -985,7 +983,7 @@ def test_install_creates_a_config_directory_that_does_not_exist_yet(
 def test_config_refuses_change_during_confirmation(monkeypatch, tmp_path):
     target = tmp_path / "config.toml"
     target.write_text('enabled_entities = ["EMAIL"]\n')
-    monkeypatch.setenv("SHIM_GUARD_CONFIG", str(target))
+    monkeypatch.setenv("SHIM_CONFIG", str(target))
     concurrent = b'enabled_entities = ["SECRET"]\n[mode]\nuser-prompt = "enforce"\n'
 
     def confirm(*args, **kwargs):
@@ -1000,7 +998,7 @@ def test_config_refuses_change_during_confirmation(monkeypatch, tmp_path):
 
 def test_config_refuses_file_created_during_confirmation(monkeypatch, tmp_path):
     target = tmp_path / "new-parent" / "config.toml"
-    monkeypatch.setenv("SHIM_GUARD_CONFIG", str(target))
+    monkeypatch.setenv("SHIM_CONFIG", str(target))
     concurrent = b"ledger = true\n"
 
     def confirm(*args, **kwargs):
@@ -1170,7 +1168,6 @@ def test_a_reveal_that_is_not_allowed_is_refused(
 def test_the_doctor_fixture_ignores_the_user_s_own_settings(
     monkeypatch, tmp_path
 ) -> None:
-    """SHIM_CONFIG outranks the 0.2.0 name; the self-test must still be isolated."""
     from shim_cli.cli.diagnostics import _runner_check
 
     target = tmp_path / "settings" / "config.toml"
@@ -1178,7 +1175,6 @@ def test_the_doctor_fixture_ignores_the_user_s_own_settings(
     target.write_text('[mode]\nuser-prompt = "enforce"\n', encoding="utf-8")
     target.chmod(0o600)
     monkeypatch.setenv("SHIM_CONFIG", str(target))
-    monkeypatch.delenv("SHIM_GUARD_CONFIG", raising=False)
 
     assert _runner_check("claude").status == "PASS"
 
@@ -1246,8 +1242,6 @@ def _legacy_claude_settings(home: Path, *, foreign: bool = False) -> Path:
 def test_doctor_on_a_020_fragment_does_not_also_say_it_is_not_installed(
     monkeypatch, tmp_path: Path
 ) -> None:
-    """The review found both lines two apart. The first one is false: the hook
-    is installed, in the shape 0.2.0 wrote."""
     home = _claude_home(monkeypatch, tmp_path)
     _claude(monkeypatch, tmp_path)
     _legacy_claude_settings(home)
@@ -1256,8 +1250,8 @@ def test_doctor_on_a_020_fragment_does_not_also_say_it_is_not_installed(
     text = " ".join(unstyle(result.output).split())
 
     assert (
-        "hook installed in the 0.2.0 shape; run shim install claude to rewrite it, "
-        "because 1.0 will not run this shape." in text
+        "FAIL hook installed in the 0.2.0 shape, which 1.0 does not run; "
+        "run shim install claude." in text
     )
     assert "hook group is not installed" not in text
 

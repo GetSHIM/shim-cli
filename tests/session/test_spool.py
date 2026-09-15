@@ -12,11 +12,6 @@ from shim_cli.session import spool
 SESSION = "0199aa11-2233-4455-6677-889900aabbcc"
 
 
-@pytest.fixture(autouse=True)
-def _isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("SHIM_GUARD_SESSION_DIR", str(tmp_path / "spools"))
-
-
 def _entry(action: str = "mask", **changes: object) -> dict:
     entry = {
         "client": "claude",
@@ -83,8 +78,8 @@ def test_the_spool_is_private_to_its_owner() -> None:
         assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
 
-def test_a_directory_other_users_can_read_is_refused(tmp_path: Path) -> None:
-    root = tmp_path / "spools"
+def test_a_directory_other_users_can_read_is_refused() -> None:
+    root = spool.root_path()
     root.mkdir(mode=0o755, parents=True)
 
     with pytest.raises(spool.SpoolError):
@@ -92,7 +87,7 @@ def test_a_directory_other_users_can_read_is_refused(tmp_path: Path) -> None:
 
 
 def test_a_symlinked_spool_is_not_followed(tmp_path: Path) -> None:
-    root = tmp_path / "spools"
+    root = spool.root_path()
     root.mkdir(mode=0o700, parents=True)
     target = tmp_path / "stolen.jsonl"
     target.write_text("", encoding="utf-8")
@@ -190,16 +185,6 @@ def test_a_stem_that_is_not_a_bare_name_is_refused(stem: str) -> None:
         spool.entries_for_stem(stem)
 
 
-@pytest.mark.parametrize("configured", ["relative/path", "/tmp/../etc"])
-def test_a_configured_directory_that_is_not_a_plain_path_is_refused(
-    configured: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("SHIM_GUARD_SESSION_DIR", configured)
-
-    with pytest.raises(spool.SpoolError):
-        spool.root_path()
-
-
 def test_the_largest_record_this_code_can_produce_fits_the_entry_cap() -> None:
     from shim_cli.guard import ENTITY_TYPES
     from shim_cli.session.record import Record
@@ -262,7 +247,6 @@ def test_concurrent_hook_processes_do_not_lose_or_tear_records(
             env={
                 **os.environ,
                 "PYTHONPATH": str(root / "src"),
-                "SHIM_GUARD_SESSION_DIR": str(tmp_path / "spools"),
             },
         )
         for _ in range(workers)
@@ -271,7 +255,6 @@ def test_concurrent_hook_processes_do_not_lose_or_tear_records(
         process.communicate(input=payload, timeout=120)
     assert {process.returncode for process in processes} == {0}
 
-    monkeypatch.setenv("SHIM_GUARD_SESSION_DIR", str(tmp_path / "spools"))
     raw = next(spool.root_path().glob("*.jsonl")).read_text(encoding="utf-8")
     written = [line for line in raw.splitlines() if line.strip()]
 
@@ -280,7 +263,6 @@ def test_concurrent_hook_processes_do_not_lose_or_tear_records(
 
 
 def test_a_full_spool_says_so_to_the_reader(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("SHIM_GUARD_SESSION_DIR", str(tmp_path / "spools"))
     monkeypatch.setattr(spool, "MAX_SPOOL_BYTES", 4_000)
     monkeypatch.setattr(spool, "MAX_ENTRY_BYTES", 400)
 
@@ -294,7 +276,6 @@ def test_a_full_spool_says_so_to_the_reader(monkeypatch, tmp_path: Path) -> None
 
 
 def test_an_untouched_spool_is_not_capped(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("SHIM_GUARD_SESSION_DIR", str(tmp_path / "spools"))
 
     assert spool.capped("never-seen") is False
 

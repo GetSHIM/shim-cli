@@ -29,10 +29,7 @@ def _default_path(directory: str, home: Path | None) -> Path:
 
 def config_path(home: Path | None = None) -> Path:
     try:
-        if home is None and (
-            configured := os.environ.get("SHIM_CONFIG")
-            or os.environ.get("SHIM_GUARD_CONFIG")
-        ):
+        if home is None and (configured := os.environ.get("SHIM_CONFIG")):
             target = Path(configured).expanduser()
         else:
             target = _default_path("shim", home)
@@ -43,9 +40,7 @@ def config_path(home: Path | None = None) -> Path:
 
 def legacy_config_path(home: Path | None = None) -> Path | None:
     """The 0.2.0 location, or None when a variable pins the path."""
-    if home is None and (
-        os.environ.get("SHIM_CONFIG") or os.environ.get("SHIM_GUARD_CONFIG")
-    ):
+    if home is None and os.environ.get("SHIM_CONFIG"):
         return None
     try:
         return _validated_path(_default_path("shim-guard", home))

@@ -35,10 +35,7 @@ class Resolution:
 def archive_version(archive: Path) -> str | None:
     try:
         with zipfile.ZipFile(archive) as bundle:
-            try:
-                source = bundle.read("shim_cli/__init__.py").decode("utf-8")
-            except KeyError:
-                source = bundle.read("shim_guard/__init__.py").decode("utf-8")
+            source = bundle.read("shim_cli/__init__.py").decode("utf-8")
     except (OSError, KeyError, UnicodeDecodeError, zipfile.BadZipFile):
         return None
     found = _VERSION.search(source)
@@ -69,7 +66,7 @@ def installed_plugins(home: Path | None = None) -> list[dict]:
 
 
 def resolve(plugin_root: Path | None = None, which=shutil.which) -> Resolution:
-    on_path = which("shim-hook") or which("shim-guard-hook")
+    on_path = which("shim-hook")
     root = plugin_root
     if root is None:
         configured = os.environ.get("CLAUDE_PLUGIN_ROOT")

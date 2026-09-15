@@ -15,7 +15,7 @@ FEBRUARY = datetime.datetime(2026, 2, 15, tzinfo=datetime.timezone.utc)
 
 @pytest.fixture(autouse=True)
 def _isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("SHIM_GUARD_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
 
 
 def _entry(**changes: object) -> dict:
@@ -143,15 +143,15 @@ def test_an_absent_ledger_reads_as_empty() -> None:
 
 
 def test_a_directory_other_users_can_read_is_refused(tmp_path: Path) -> None:
-    (tmp_path / "state").mkdir(mode=0o755, parents=True)
+    (tmp_path / "shim").mkdir(mode=0o755)
 
     with pytest.raises(ledger.LedgerError):
         ledger.append(_entry(), JANUARY)
 
 
 def test_a_symlinked_month_is_not_followed(tmp_path: Path) -> None:
-    root = tmp_path / "state"
-    root.mkdir(mode=0o700, parents=True)
+    root = tmp_path / "shim"
+    root.mkdir(mode=0o700)
     target = tmp_path / "stolen.jsonl"
     target.write_text("", encoding="utf-8")
     (root / "ledger-2026-01.jsonl").symlink_to(target)
@@ -162,8 +162,8 @@ def test_a_symlinked_month_is_not_followed(tmp_path: Path) -> None:
 
 
 def test_a_symlinked_month_is_not_read(tmp_path: Path) -> None:
-    root = tmp_path / "state"
-    root.mkdir(mode=0o700, parents=True)
+    root = tmp_path / "shim"
+    root.mkdir(mode=0o700)
     target = tmp_path / "stolen.jsonl"
     target.write_text(json.dumps(_entry()) + "\n", encoding="utf-8")
     (root / "ledger-2026-01.jsonl").symlink_to(target)
@@ -177,7 +177,6 @@ def test_remember_persists_only_a_session_key_and_keeps_storage_best_effort(
     from shim_cli.session import spool
     from shim_cli.session.record import Record
 
-    monkeypatch.setenv("SHIM_GUARD_SESSION_DIR", str(tmp_path / "spools"))
     record = Record(
         client="claude",
         event="PostToolUse",
@@ -220,7 +219,7 @@ def test_remember_persists_only_a_session_key_and_keeps_storage_best_effort(
 
 
 def test_unsafe_directory_is_refused_before_pruning(tmp_path):
-    root = tmp_path / "state"
+    root = tmp_path / "shim"
     root.mkdir(mode=0o755)
     old = root / "ledger-2020-01.jsonl"
     old.write_bytes(b"keep\n")
@@ -269,7 +268,6 @@ def test_a_month_present_on_both_sides_of_the_rename_is_merged(
     """
     from shim_cli.cli import migration
 
-    monkeypatch.delenv("SHIM_GUARD_STATE_DIR", raising=False)
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     legacy = tmp_path / "state" / "shim-guard"
     current = tmp_path / "state" / "shim"
@@ -292,7 +290,6 @@ def test_a_merge_that_would_cross_the_size_cap_leaves_the_old_file_alone(
 ) -> None:
     from shim_cli.cli import migration
 
-    monkeypatch.delenv("SHIM_GUARD_STATE_DIR", raising=False)
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     monkeypatch.setattr(ledger, "MAX_LEDGER_BYTES", 200)
     legacy = tmp_path / "state" / "shim-guard"

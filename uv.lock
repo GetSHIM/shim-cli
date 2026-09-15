@@ -177,7 +177,7 @@ wheels = [
 
 [[package]]
 name = "shim"
-version = "0.3.3"
+version = "1.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "phonenumbers" },

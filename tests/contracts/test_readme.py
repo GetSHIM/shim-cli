@@ -33,6 +33,16 @@ def test_the_readme_does_not_claim_more_tests_than_exist() -> None:
     assert int(collected.group(1)) >= int(claimed.group(1).replace(",", ""))
 
 
+def test_the_readme_does_not_call_1_0_alpha() -> None:
+    text = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "alpha" not in text.lower()
+    assert (
+        "shim-cli is a best-effort guard, not a data-loss prevention boundary."
+        in " ".join(text.split())
+    )
+
+
 def test_the_readme_says_bare_numbers_are_not_phone_numbers() -> None:
     assert "timestamps, ids and decimals" in (ROOT / "README.md").read_text(
         encoding="utf-8"
