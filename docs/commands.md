@@ -275,7 +275,8 @@ shim config --remove-custom PROJECT_CODENAME --yes
 
 `--custom` takes a regular expression, `--custom-literal` takes text to match
 exactly — use the literal form when the value contains regex characters. Names
-are `UPPER_CASE` letters, digits and underscores, up to 32 characters.
+are `UPPER_CASE` letters, digits and underscores, up to 32 characters. Adding
+a pattern turns on `CUSTOM` unless the same command disables it.
 
 A pattern that backtracks badly is refused before it is saved:
 
