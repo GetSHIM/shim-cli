@@ -338,6 +338,12 @@ reason, a token count from the provider, the model name and the request path. **
 proxy and then searching every file written anywhere beneath the temporary root
 for it.
 
+To label the `spend` line, the proxy reads the *names* of the request headers
+it already forwards: `x-api-key` means an API key, `authorization` without it
+means a subscription. It stores the route it concluded and neither header's
+value; `tests/watch/test_proxy.py` checks that no string kept on the exchange
+equals either value.
+
 The proxy binds to loopback only. It is forwarding a live credential, and
 binding to anything reachable would hand that credential to the network. It
 lives for the length of one `shim watch` command, edits no shell profile, and

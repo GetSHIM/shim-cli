@@ -335,9 +335,11 @@ def test_the_json_report_carries_both_directions_and_each_request() -> None:
             "entities_by_section": {"messages": {"IBAN": 60, "EMAIL": 3}},
             "response_entities": {"text": {"EMAIL": 2}, "thinking": {"IBAN": 1}},
             "response_scan_status": "known",
+            "response_scan_reason": "",
             "stop_reason": "",
             "model": "claude-sonnet-5",
             "incomplete_reason": "",
+            "auth_route": "",
             "request_bytes": 194_236,
             "usage_status": "unavailable",
             "usage": {
@@ -368,3 +370,126 @@ def test_a_measured_request_carries_no_reason() -> None:
     text = report.render(_session(_exchange()), 90.0)
 
     assert "inspection incomplete" not in text
+
+
+def _spend_line(*exchanges) -> str:
+    text = report.render(_session(*exchanges), 9.0)
+    return next(row for row in text.splitlines() if row.startswith("  spend"))
+
+
+def test_a_subscription_session_says_the_spend_is_not_a_bill() -> None:
+    line = _spend_line(_exchange(auth_route="subscription"))
+
+    assert line.endswith(
+        f"(approximate, {report.PRICED_ON} prices; API-key equivalent, "
+        "this session is on a subscription, not a bill)"
+    )
+    assert "$" in line
+
+
+def test_an_api_key_session_keeps_the_spend_line_as_it_was() -> None:
+    line = _spend_line(_exchange(auth_route="api-key"), _exchange(auth_route="api-key"))
+
+    assert line.endswith(f"(approximate, {report.PRICED_ON} prices)")
+
+
+@pytest.mark.parametrize(
+    ("routes", "basis"),
+    (
+        (("subscription",) * 3 + ("api-key",), "mixed"),
+        (("subscription",) * 3 + ("",), "unknown"),
+    ),
+)
+def test_a_mixed_or_unknown_session_counts_the_subscription_requests(
+    routes, basis
+) -> None:
+    exchanges = [_exchange(auth_route=route) for route in routes]
+    unpriced = _exchange(model="some-future-model", auth_route="subscription")
+
+    assert _spend_line(*exchanges, unpriced).endswith(
+        "prices; 3 of 4 requests on a subscription)"
+    )
+    assert report.as_json(_session(*exchanges, unpriced), 5.0)["spend_basis"] == basis
+
+
+@pytest.mark.parametrize(
+    ("routes", "basis"),
+    (
+        (("api-key",), "api-key"),
+        (("subscription", "subscription"), "subscription"),
+        (("api-key", "subscription"), "mixed"),
+        (("",), "unknown"),
+        ((), "unknown"),
+    ),
+)
+def test_the_json_names_the_spend_basis(routes, basis) -> None:
+    document = report.as_json(
+        _session(*(_exchange(auth_route=route) for route in routes)), 5.0
+    )
+
+    assert document["spend_basis"] == basis
+    assert [row["auth_route"] for row in document["exchanges"]] == list(routes)
+
+
+def _four_parallel():
+    measured = [_exchange(response_scan_status="known") for _ in range(2)]
+    skipped = [
+        _exchange(
+            measured=False,
+            incomplete_reason=measure.SLOTS_BUSY,
+            sections={},
+            response_scan_status="unavailable",
+        )
+        for _ in range(2)
+    ]
+    return _session(*measured, *skipped)
+
+
+def test_the_section_header_says_how_many_requests_it_covers() -> None:
+    text = report.render(_four_parallel(), 9.0)
+
+    assert (
+        "  where the input went  (approximate — split by byte share; "
+        "2 of 4 requests measured)"
+    ) in text.splitlines()
+
+
+def test_a_fully_measured_session_keeps_the_section_header() -> None:
+    text = report.render(_session(_exchange(), _exchange()), 9.0)
+
+    assert (
+        "  where the input went  (approximate — split by byte share)"
+        in text.splitlines()
+    )
+
+
+def test_an_unmeasured_request_has_one_reason_on_every_line() -> None:
+    text = report.render(_four_parallel(), 9.0)
+    busy = "2 arrived while both inspection slots were busy (parallel agents do this)"
+
+    rows = text.splitlines()
+    assert f"  inspection incomplete for 2 request(s): {busy}" in rows
+    assert f"  response scan unavailable or partial for 2 request(s): {busy}" in rows
+    assert "not streamed in a shape shim can read" not in text
+
+
+def test_a_measured_unreadable_stream_still_says_so() -> None:
+    session = _four_parallel()
+    session.record(_exchange(response_scan_status="unavailable"))
+
+    text = report.render(session, 9.0)
+
+    line = next(row for row in text.splitlines() if "response scan" in row)
+    assert "2 arrived while both inspection slots were busy" in line
+    assert "1 not streamed in a shape shim can read" in line
+
+
+def test_the_json_carries_the_response_scan_reason() -> None:
+    session = _four_parallel()
+    session.record(_exchange(response_scan_status="partial"))
+
+    reasons = [
+        row["response_scan_reason"] for row in report.as_json(session, 5.0)["exchanges"]
+    ]
+
+    assert reasons == ["", "", measure.SLOTS_BUSY, measure.SLOTS_BUSY, "partial"]
