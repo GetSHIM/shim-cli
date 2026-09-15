@@ -260,19 +260,19 @@ def _entity_settings() -> Check:
     )
 
 
-def _custom_patterns() -> Check:
-    """A pattern that backtracks would overrun the hook's deadline in the client."""
+def _custom_patterns() -> Check | None:
+    """A pattern that backtracks would overrun the hook's deadline in the client.
+
+    None when the settings file itself cannot be read: the entity check already
+    names that file and its fix.
+    """
     from shim_cli.config import load_policy
     from shim_cli.guard.entities import entry_source, unsafe_pattern
 
     try:
         patterns = load_policy().custom
     except (OSError, ValueError):
-        return Check(
-            "custom_patterns",
-            "FAIL",
-            "Custom patterns cannot be read; run `shim config` to review them.",
-        )
+        return None
     if not patterns:
         return Check("custom_patterns", "PASS", "No custom patterns are configured.")
     reasons = [

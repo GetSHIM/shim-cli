@@ -1138,6 +1138,19 @@ def test_doctor_reports_a_pattern_that_is_already_in_the_file(
     assert checks["custom_patterns"]["status"] == "FAIL"
 
 
+def test_doctor_names_an_unreadable_settings_file_once(monkeypatch, tmp_path) -> None:
+    target = _guard_config(monkeypatch, tmp_path)
+    target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    target.write_text('enabled_entities = ["EMAIL"\n', encoding="utf-8")
+    target.chmod(0o600)
+
+    result = runner.invoke(app, ["doctor", "claude", "--json"])
+
+    checks = {item["name"]: item for item in json.loads(result.output)["checks"]}
+    assert checks["entity_settings"]["status"] == "FAIL"
+    assert "custom_patterns" not in checks
+
+
 def test_reveal_is_written_honoured_and_removed(monkeypatch, tmp_path) -> None:
     target = _guard_config(monkeypatch, tmp_path)
     iban = "TR330006100519786457841326"
@@ -1410,6 +1423,19 @@ def test_an_empty_ledger_says_how_to_turn_it_on(monkeypatch, tmp_path) -> None:
 
     assert result.exit_code == 0
     assert "shim config --ledger" in unstyle(result.output)
+
+
+def test_an_empty_ledger_that_is_on_does_not_say_turn_it_on(
+    monkeypatch, tmp_path
+) -> None:
+    _guard_config(monkeypatch, tmp_path)
+    runner.invoke(app, ["config", "--ledger", "--yes"])
+
+    result = runner.invoke(app, ["ledger", "show"])
+
+    assert result.exit_code == 0
+    assert "The ledger is on and has recorded nothing yet." in unstyle(result.output)
+    assert "shim config --ledger" not in unstyle(result.output)
 
 
 def test_a_failed_removal_is_not_reported_as_a_removal(monkeypatch, tmp_path) -> None:
