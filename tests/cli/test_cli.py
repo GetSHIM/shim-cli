@@ -80,6 +80,17 @@ def _guard_config(monkeypatch, tmp_path: Path) -> Path:
     return target
 
 
+TAGLINE = "Local traffic visibility and privacy controls for coding agents."
+
+
+@pytest.mark.parametrize("args", (["help"], ["--help"]), ids=("help", "--help"))
+def test_help_opens_with_the_readme_tagline(args: list[str]) -> None:
+    result = runner.invoke(app, args)
+
+    assert result.exit_code == 0
+    assert TAGLINE in " ".join(unstyle(result.output).split())
+
+
 def test_help_does_not_load_detector() -> None:
     script = (
         "import sys; from typer.testing import CliRunner; "

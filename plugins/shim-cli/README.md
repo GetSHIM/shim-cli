@@ -4,10 +4,9 @@ This plugin registers shim's local hooks. Claude Code gets the prompt,
 verified `PreToolUse` and `PostToolUse`, `Stop`, and `SessionEnd` events. Codex
 gets the prompt event only.
 
-Release-tag plugins carry a self-contained hook in `bin/shim.pyz`, so they
-need no package-manager step and no prerequisite beyond Python 3.9 or newer,
-which is what a stock macOS provides. Both clients reach it. A development
-checkout may not contain the release archive.
+The plugin carries a self-contained hook in `bin/shim.pyz` on `main` and on
+every tag, so it needs no package-manager step and no prerequisite beyond
+Python 3.9 or newer, which is what a stock macOS provides. Both clients reach it.
 
 **The plugin is the hooks, and only the hooks.** `shim watch`, `shim report`,
 and `shim config` are CLI commands and are not in the archive. The hook is a
@@ -25,7 +24,7 @@ the first that works:
    and reparses its modules on every event.
 2. `shim-guard-hook` on `PATH` — the same script under the name 0.2.0 used,
    kept until 0.5.0.
-3. `<plugin-root>/bin/shim.pyz` — the archive bundled in a release tag. The
+3. `<plugin-root>/bin/shim.pyz` — the bundled archive. The
    root is the second argument when one is given, else `CLAUDE_PLUGIN_ROOT`.
    Claude sets the variable; Codex sets no such variable, so its `hooks.json`
    passes `${PLUGIN_ROOT}` as the argument.
@@ -54,6 +53,6 @@ uv tool install shim
 shim help
 ```
 
-`bin/shim.pyz` is built by `scripts/build_zipapp.py` and committed only for a
-release tag. Between tags it may be absent; the launcher then falls back to
-`PATH` or to case 4.
+`bin/shim.pyz` is built by `scripts/build_zipapp.py` and committed on `main` and
+on every tag. A fork or partial copy without it falls back to `PATH` or to
+case 4.
