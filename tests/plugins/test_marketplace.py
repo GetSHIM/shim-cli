@@ -79,6 +79,15 @@ def test_both_listings_name_the_same_plugin() -> None:
 
     assert claude == codex == {"shim-cli", "shim-guard"}
 
+    for listing, manifest in (
+        (CLAUDE, ROOT / "plugins/shim-cli/.claude-plugin/plugin.json"),
+        (CODEX, ROOT / "plugins/shim-cli/.codex-plugin/plugin.json"),
+    ):
+        assert (
+            json.loads(listing.read_text())["plugins"][0]["description"]
+            == json.loads(manifest.read_text())["description"]
+        )
+
 
 ALIAS_DESCRIPTION = (
     "Former name of shim-cli. Existing installs keep updating; "

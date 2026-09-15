@@ -28,7 +28,7 @@ Entity = _StringEnum("Entity", {name: name for name in ENTITY_TYPES})
 app = typer.Typer(
     name="shim",
     add_completion=False,
-    help="Local, stdin-first prompt privacy for coding-agent CLIs.",
+    help="Local traffic visibility and privacy controls for coding agents.",
     no_args_is_help=False,
 )
 
@@ -44,7 +44,9 @@ def root(
         typer.echo(f"shim {__version__}")
         raise typer.Exit
     if context.invoked_subcommand is None:
-        typer.echo("shim — local prompt privacy for coding-agent CLIs. Try: shim help")
+        typer.echo(
+            "shim — local traffic visibility and privacy controls for coding agents. Try: shim help"
+        )
 
 
 @app.command()

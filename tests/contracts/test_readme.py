@@ -37,3 +37,20 @@ def test_the_readme_says_bare_numbers_are_not_phone_numbers() -> None:
     assert "timestamps, ids and decimals" in (ROOT / "README.md").read_text(
         encoding="utf-8"
     )
+
+
+def test_the_readme_carries_the_cli_tagline() -> None:
+    assert "Local traffic visibility and privacy controls for coding agents." in (
+        ROOT / "README.md"
+    ).read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    "path", ("README.md", "plugins/shim-cli/README.md"), ids=("root", "plugin")
+)
+def test_a_readme_says_the_archive_is_on_main_and_every_tag(path: str) -> None:
+    text = " ".join((ROOT / path).read_text(encoding="utf-8").split())
+
+    assert "may not contain" not in text
+    assert "may be absent" not in text
+    assert "on `main` and on every tag" in text

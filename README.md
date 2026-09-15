@@ -194,9 +194,8 @@ codex plugin add shim-cli@shim-cli
 
 The marketplace plugin and `shim install` are alternative hook-registration
 methods. Do not use both for the same client; `shim doctor` fails when it finds
-two. Release-tag plugins bundle the hook archive, which needs only Python 3.9 or
-newer and nothing else installed, on both clients. A development checkout may not
-contain the release archive.
+two. The plugin carries the hook archive, `bin/shim.pyz`, on `main` and on every
+tag; it needs Python 3.9 or newer and nothing else installed, on both clients.
 
 ### Upgrading from 0.2.0
 
