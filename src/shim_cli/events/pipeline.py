@@ -72,6 +72,9 @@ def _summary(counts) -> str:
     return ", ".join(f"{entity} ({count})" for entity, count in counts)
 
 
+INCOMPLETE_MESSAGE = (
+    "shim: inspection incomplete; uninspected content was not modified."
+)
 MAX_TARGET_CHARS = 120
 MAX_TARGET_SCAN_CHARS = 512
 
@@ -176,7 +179,7 @@ def process(
         counts = _counts(result.findings)
         action = decide(direction, mode) if counts else ALLOW
         can_rewrite = action == MASK or (not counts and shrinkable and result.changed)
-        message = "shim: inspection incomplete; uninspected content was not modified."
+        message = INCOMPLETE_MESSAGE
         if counts:
             message = _message(tool_label, counts, action) + " " + message
         emitted = result.value if can_rewrite else body
@@ -239,7 +242,7 @@ def process(
 
     message = _message(tool_label, counts, action)
     emitted = rewritten if action == MASK and changed else body
-    output = entry.encode(action, emitted, message if action != MASK else "")
+    output = entry.encode(action, emitted, message)
     out_bytes = _size(emitted) if action == MASK else in_bytes
     return Outcome(
         output,
@@ -256,4 +259,4 @@ def process(
     )
 
 
-__all__ = ["Adapter", "Event", "Outcome", "process"]
+__all__ = ["INCOMPLETE_MESSAGE", "Adapter", "Event", "Outcome", "process"]

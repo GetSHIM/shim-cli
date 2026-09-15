@@ -162,3 +162,102 @@ def test_an_oversized_tool_event_passes_through_and_still_reaches_the_summary(
     # The record keeps the path; the summary is what shortens it to a name.
     assert records[0]["target"] == "/work/big.txt"
     assert records[0]["note"].startswith("not inspected")
+
+
+def _read(tool: str, tool_input: dict, response: dict) -> bytes:
+    return json.dumps(
+        {
+            "session_id": "contract",
+            "hook_event_name": "PostToolUse",
+            "tool_name": tool,
+            "tool_input": tool_input,
+            "tool_response": response,
+        },
+        separators=(",", ":"),
+    ).encode()
+
+
+def test_a_masked_read_tells_the_model_and_records_what_it_always_did(
+    tmp_path: Path,
+) -> None:
+    session = tmp_path / "session"
+    session.mkdir(mode=0o700)
+    raw = _read(
+        "Read",
+        {"file_path": "/work/service/.env"},
+        {
+            "type": "text",
+            "file": {
+                "content": "SUPPORT_EMAIL=alice@example.com\n"
+                "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE\n"
+            },
+        },
+    )
+
+    result = _run(raw, tmp_path, {"SHIM_GUARD_SESSION_DIR": str(session)})
+
+    assert (result.returncode, result.stderr) == (0, b"")
+    assert result.stdout == (
+        b'{"hookSpecificOutput":{"hookEventName":"PostToolUse",'
+        b'"updatedToolOutput":{"type":"text","file":{"content":'
+        b'"SUPPORT_EMAIL=<EMAIL_1>\\nAWS_ACCESS_KEY_ID=<SECRET_1>\\n"}},'
+        b'"additionalContext":"shim: masked EMAIL (1), SECRET (1) in Read. '
+        b"Placeholders such as <EMAIL_1> stand for real values in the source; "
+        b'the source does not contain placeholders."}}'
+    )
+    [line] = [
+        line
+        for path in session.rglob("*.jsonl")
+        for line in path.read_text(encoding="utf-8").splitlines()
+    ]
+    record = json.loads(line)
+    for volatile in ("session_id", "latency_ms", "ts"):
+        del record[volatile]
+    assert record == {
+        "client": "claude",
+        "event": "PostToolUse",
+        "tool_name": "Read",
+        "target": "/work/service/.env",
+        "direction": "inbound",
+        "mode": "enforce",
+        "action": "mask",
+        "entities": {"EMAIL": 1, "SECRET": 1},
+        "in_bytes": 114,
+        "out_bytes": 96,
+        "fields": 1,
+        "transforms": [],
+        "markers": [],
+        "custom": {},
+        "bare_numbers": 0,
+        "note": "",
+    }
+
+
+def test_a_safe_read_is_still_zero_bytes(tmp_path: Path) -> None:
+    raw = _read(
+        "Read",
+        {"file_path": "/work/service/readme.md"},
+        {"type": "text", "file": {"content": "nothing here\n"}},
+    )
+
+    result = _run(raw, tmp_path)
+
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"", b"")
+
+
+def test_a_compacted_result_says_nothing_to_the_model(tmp_path: Path) -> None:
+    rows = json.dumps({"rows": [{"id": n} for n in range(4)]}, indent=4)
+    raw = _read(
+        "WebFetch",
+        {"url": "https://example.com/rows"},
+        {"type": "text", "content": rows},
+    )
+
+    result = _run(raw, tmp_path)
+
+    assert (result.returncode, result.stderr) == (0, b"")
+    assert result.stdout == (
+        b'{"hookSpecificOutput":{"hookEventName":"PostToolUse",'
+        b'"updatedToolOutput":{"type":"text","content":'
+        b'"{\\"rows\\":[{\\"id\\":0},{\\"id\\":1},{\\"id\\":2},{\\"id\\":3}]}"}}}'
+    )

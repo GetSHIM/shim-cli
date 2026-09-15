@@ -90,7 +90,10 @@ all three clients:
 
 Claude's verified event list and encoders live together in
 `clients/claude/tool_events.py`; its settings also install `Stop` for summaries
-and `SessionEnd` for cleanup. Codex and Copilot have prompt codecs and settings
+and `SessionEnd` for cleanup. A masked `PostToolUse` result is emitted as
+`updatedToolOutput` with `additionalContext` beside it, the one-line summary of
+what was masked for the model; the user-facing `systemMessage` is kept for
+reports and incomplete inspection. Codex and Copilot have prompt codecs and settings
 only. A new tool adapter requires a live protocol probe, a synthetic fixture,
 and a verified mutation or report channel; it is not enabled by a flag.
 
