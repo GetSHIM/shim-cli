@@ -143,6 +143,7 @@ def process(
         transforms=(),
         markers=(),
         custom=(),
+        bare_numbers=0,
     ) -> Record:
         return Record(
             client=entry.client,
@@ -160,6 +161,7 @@ def process(
             transforms=transforms,
             markers=markers,
             custom=custom,
+            bare_numbers=bare_numbers,
         )
 
     if body is None:
@@ -193,6 +195,7 @@ def process(
                 transforms=result.transforms if can_rewrite else (),
                 markers=result.markers,
                 custom=_custom_counts(result.findings),
+                bare_numbers=result.bare_numbers,
             ),
         )
 
@@ -200,7 +203,15 @@ def process(
 
     if not findings:
         if not changed:
-            return Outcome(b"", record(ALLOW, fields=0, markers=result.markers))
+            return Outcome(
+                b"",
+                record(
+                    ALLOW,
+                    fields=0,
+                    markers=result.markers,
+                    bare_numbers=result.bare_numbers,
+                ),
+            )
         return Outcome(
             entry.encode(MASK, rewritten, ""),
             record(
@@ -208,6 +219,7 @@ def process(
                 out_bytes=_size(rewritten),
                 transforms=result.transforms,
                 markers=result.markers,
+                bare_numbers=result.bare_numbers,
             ),
         )
 
@@ -217,7 +229,11 @@ def process(
         return Outcome(
             b"",
             record(
-                ALLOW, counts, fields=len(findings), custom=_custom_counts(findings)
+                ALLOW,
+                counts,
+                fields=len(findings),
+                custom=_custom_counts(findings),
+                bare_numbers=result.bare_numbers,
             ),
         )
 
@@ -235,6 +251,7 @@ def process(
             transforms=result.transforms if action == MASK else (),
             markers=result.markers,
             custom=_custom_counts(findings),
+            bare_numbers=result.bare_numbers,
         ),
     )
 

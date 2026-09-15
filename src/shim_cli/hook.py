@@ -277,6 +277,7 @@ def _prompt_record(client, event, mode, action, decision, prompt):
         out_bytes=0,
         fields=1 if decision.counts else 0,
         custom=decision.custom_counts,
+        bare_numbers=decision.bare_numbers,
     )
 
 

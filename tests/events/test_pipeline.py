@@ -641,7 +641,7 @@ def test_a_failed_piece_marks_the_leaf_partial_and_keeps_the_rest() -> None:
 
     def evaluate(text: str) -> GuardDecision:
         found = (Finding("SECRET", 2, 8, 0.9, ""),)
-        return GuardDecision(found, text.replace("secret", "<SECRET_1>"), True)
+        return GuardDecision(found, text.replace("secret", "<SECRET_1>"), True, 0)
 
     result = inspect({"tool_response": "a secret here"}, evaluate)
 
@@ -676,3 +676,46 @@ def test_a_sibling_past_the_detectors_single_pass_limit_is_now_masked() -> None:
     assert "<SECRET_" in rewritten["big"]
     assert "inspection incomplete" not in output.get("systemMessage", "")
     assert not outcome.record.note
+
+
+def _updated_content(outcome) -> str:
+    document = json.loads(outcome.output)
+    return document["hookSpecificOutput"]["updatedToolOutput"]["file"]["content"]
+
+
+def test_bare_epochs_are_counted_and_only_the_cued_phone_is_masked() -> None:
+    content = (
+        "created 1757496600\nupdated 1757496700\nshipped 1757496800\nTel: 4155552671\n"
+    )
+
+    outcome = _process(_read_result("/work/orders.txt", content), ENFORCE)
+
+    assert outcome.record.entities == (("PHONE", 1),)
+    assert outcome.record.bare_numbers == 3
+    assert _updated_content(outcome) == content.replace("4155552671", "<PHONE_1>")
+
+
+def test_a_json_file_keeps_its_epochs_and_floats_and_masks_the_phone() -> None:
+    original = {
+        "created": 1757496600,
+        "updated": 1757583000,
+        "price": 0.0376118499,
+        "rate": 1.2345678901,
+        "phone": "+90 532 123 45 67",
+    }
+
+    outcome = _process(_read_result("/work/orders.json", json.dumps(original)), ENFORCE)
+
+    assert json.loads(_updated_content(outcome)) == {**original, "phone": "<PHONE_1>"}
+
+
+def test_bare_numbers_alone_are_recorded_without_any_output() -> None:
+    outcome = _process(
+        _read_result("/work/orders.json", '{"created": 1757496600, "n": 1757583000}'),
+        ENFORCE,
+    )
+
+    assert outcome.output == b""
+    assert outcome.record.action == ALLOW
+    assert outcome.record.entities == ()
+    assert outcome.record.bare_numbers == 2

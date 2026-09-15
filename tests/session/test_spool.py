@@ -297,3 +297,21 @@ def test_an_untouched_spool_is_not_capped(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("SHIM_GUARD_SESSION_DIR", str(tmp_path / "spools"))
 
     assert spool.capped("never-seen") is False
+
+
+def test_bare_numbers_round_trip_through_the_spool() -> None:
+    from shim_cli.session.record import Record
+
+    entry = Record(
+        client="claude",
+        event="PostToolUse",
+        tool_name="Read",
+        direction="inbound",
+        mode="enforce",
+        action="allow",
+        bare_numbers=3,
+    ).as_dict()
+
+    assert entry["bare_numbers"] == 3
+    spool.append(SESSION, entry)
+    assert spool.entries(SESSION)[0]["bare_numbers"] == 3

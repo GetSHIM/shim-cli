@@ -289,3 +289,52 @@ def test_a_malformed_custom_map_is_ignored_rather_than_rendered() -> None:
     text = summary.render([_record(custom="not a map")])
 
     assert "custom" not in text
+
+
+def _bare(count: object = 3, **changes: object) -> dict:
+    return _record(
+        target="/work/orders.json",
+        action="allow",
+        entities={},
+        bare_numbers=count,
+        **changes,
+    )
+
+
+def test_bare_numbers_get_a_warned_line_that_says_they_were_left_alone() -> None:
+    assert summary.render([_bare()]).splitlines()[1] == (
+        "  warned    3 PHONE (bare numbers, left as they were)  (Read orders.json)"
+    )
+
+
+def test_bare_numbers_sit_under_an_existing_warned_block() -> None:
+    text = summary.render([_record(action="report", entities={"EMAIL": 1}), _bare()])
+
+    assert text.splitlines()[1:3] == [
+        "  warned    1 EMAIL  (Read .env)",
+        "            3 PHONE (bare numbers, left as they were)  (Read orders.json)",
+    ]
+
+
+@pytest.mark.parametrize("count", [0, True, -2, 2.0, "3", None])
+def test_unusable_bare_number_counts_are_ignored(count: object) -> None:
+    assert summary.render([_bare(count)]) == ""
+    assert summary.as_json([_bare(count)])["bare_numbers"] == 0
+
+
+def test_a_record_without_bare_numbers_adds_no_line() -> None:
+    assert "bare numbers" not in summary.render([_record()])
+
+
+def test_bare_numbers_in_model_output_are_not_counted() -> None:
+    records = [_bare(direction="model-output")]
+
+    assert summary.render(records) == ""
+    assert summary.as_json(records)["bare_numbers"] == 0
+
+
+def test_bare_numbers_are_totalled_in_the_json_report() -> None:
+    document = summary.as_json([_bare(), _bare(2), _record()])
+
+    assert document["bare_numbers"] == 5
+    assert summary.as_json([_record()])["bare_numbers"] == 0

@@ -34,6 +34,17 @@ _TRAILING_PROSE = ".,;:!?)]}>"
 _PHONE_REGIONS = ("US", "GB", "DE", "FR", "IL", "IN", "CA", "BR", "TR")
 _PHONE_SCORE = 0.4
 _PHONE_LENIENCY = 1
+BARE_NUMBER = "BARE_NUMBER"
+_BARE_DIGITS = re.compile(r"\d+")
+_DECIMAL_LITERAL = re.compile(r"\d+\.\d+")
+_DECIMAL_POINT = re.compile(r"\d\.|\.\d")
+_TURKISH_SHAPES = re.compile(r"(?:90)?0?5\d{9}|0[2-4]\d{9}")
+_PHONE_CUE = re.compile(
+    r"(?<![a-z])(?:telefon|tel|phone|gsm|cep|mobile|mobil|fax|whatsapp|call|numara"
+    r"|num|no)(?:\W{1,3}(?:number|numaras[ıi]))?\W{0,4}\Z",
+    re.IGNORECASE,
+)
+_PHONE_CUE_WINDOW = 24
 
 
 class Match(NamedTuple):
@@ -356,14 +367,32 @@ def _scan_iban(text: str) -> list[Match]:
 def _scan_phone(text: str) -> list[Match]:
     import phonenumbers
 
-    results = [
-        Match("PHONE_NUMBER", match.start, match.end, _PHONE_SCORE)
-        for region in _PHONE_REGIONS
-        for match in phonenumbers.PhoneNumberMatcher(
-            text, region, leniency=_PHONE_LENIENCY
-        )
-    ]
-    return deduplicate(results)
+    candidates = deduplicate(
+        [
+            Match("PHONE_NUMBER", match.start, match.end, _PHONE_SCORE)
+            for region in _PHONE_REGIONS
+            for match in phonenumbers.PhoneNumberMatcher(
+                text, region, leniency=_PHONE_LENIENCY
+            )
+        ]
+    )
+    results: list[Match] = []
+    for candidate in candidates:
+        start, end = candidate.start, candidate.end
+        raw = text[start:end]
+        if (
+            _DECIMAL_LITERAL.fullmatch(raw)
+            or _DECIMAL_POINT.fullmatch(text, max(0, start - 2), start)
+            or _DECIMAL_POINT.fullmatch(text, end, end + 2)
+        ):
+            continue
+        if _BARE_DIGITS.fullmatch(raw) and not (
+            _TURKISH_SHAPES.fullmatch(raw)
+            or _PHONE_CUE.search(text, max(0, start - _PHONE_CUE_WINDOW), start)
+        ):
+            candidate = candidate._replace(entity_type=BARE_NUMBER)
+        results.append(candidate)
+    return results
 
 
 _SECRET_KEY = (

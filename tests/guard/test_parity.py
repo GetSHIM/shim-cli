@@ -28,7 +28,18 @@ def _generator() -> ModuleType:
 _DOCUMENT = json.loads(CORPUS.read_text(encoding="utf-8"))
 _CASES = _DOCUMENT["cases"]
 
+BARE_ID = (
+    "The frozen output was the phone recogniser firing on a bare id; the "
+    "corpus's own siblings of the same shape are frozen unmasked. A bare digit "
+    "run is now a phone number only when Turkish-shaped or cued (PRD-21)."
+)
+
 DELIBERATE_DIVERGENCES = {
+    "ssn-bare-78051120": (BARE_ID, []),
+    "vkn-nocontext-123456789": (BARE_ID, []),
+    "vkn-farcontext-123456789": (BARE_ID, []),
+    "vkn-nocontext-222222222": (BARE_ID, []),
+    "vkn-farcontext-222222222": (BARE_ID, []),
     "net-3": (
         "0.0.0.0 is the unspecified address: it names no host and no person. "
         "Masking it stops the model telling 'bind to every interface' apart "

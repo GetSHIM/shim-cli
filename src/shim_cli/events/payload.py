@@ -129,6 +129,7 @@ class Inspection:
     status: Literal["complete", "partial", "not-inspected"] = "complete"
     skipped: int = 0
     reasons: tuple[str, ...] = ()
+    bare_numbers: int = 0
 
 
 def inspect(
@@ -157,6 +158,7 @@ def inspect(
     applied: set = set()
     markers: set = set()
     inspected = 0
+    bare_numbers = 0
     for index, (path, text) in enumerate(found.leaves):
         try:
             decision = evaluate(text)
@@ -172,6 +174,7 @@ def inspect(
             found.reasons.add("analysis-failed")
             continue
         inspected += 1
+        bare_numbers += decision.bare_numbers
         if decision.partial:
             # A piece of an oversized leaf failed; the rest is masked below.
             found.skipped += 1
@@ -201,6 +204,7 @@ def inspect(
         status,
         found.skipped,
         tuple(sorted(found.reasons)),
+        bare_numbers,
     )
 
 

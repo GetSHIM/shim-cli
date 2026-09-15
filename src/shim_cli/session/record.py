@@ -35,6 +35,7 @@ class Record:
     markers: tuple = ()
     custom: tuple = ()
     note: str = ""
+    bare_numbers: int = 0
 
     def as_dict(self) -> dict:
         return {
@@ -52,6 +53,7 @@ class Record:
             "transforms": list(self.transforms),
             "markers": list(self.markers),
             "custom": dict(self.custom),
+            "bare_numbers": self.bare_numbers,
             "note": self.note,
         }
 
