@@ -250,7 +250,8 @@ resend:
 ## See what it did
 
 shim says nothing when it works, so it keeps a short record of its own
-decisions. Claude's verified `Stop` hook shows the total at the end of a turn
+decisions. The model is told when values were masked, so it does not describe
+your file as full of placeholders. Claude's verified `Stop` hook shows the total at the end of a turn
 where something changed:
 
 ```text

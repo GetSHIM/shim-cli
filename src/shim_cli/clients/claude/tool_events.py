@@ -3,13 +3,17 @@ from __future__ import annotations
 import json
 
 from shim_cli.clients.user_prompt_hook import parse_object
-from shim_cli.events.pipeline import Adapter, Event
+from shim_cli.events.pipeline import INCOMPLETE_MESSAGE, Adapter, Event
 from shim_cli.policy import ALLOW, DENY, MASK, REPORT
 
 MAX_INPUT_BYTES = 1_000_000
 MAX_OUTPUT_BYTES = 1_000_000
 _DENY_REASON = "shim: sensitive data detected; this call was not allowed."
 _ERROR_MESSAGE = "shim: this tool event could not be inspected and was not modified."
+_MASKED_CONTEXT = (
+    "Placeholders such as <EMAIL_1> stand for real values in the source; "
+    "the source does not contain placeholders."
+)
 _TARGET_KEYS = ("file_path", "notebook_path", "path", "url")
 _FILE_VIEW_KEYS = ("file_path", "notebook_path", "path")
 
@@ -65,7 +69,7 @@ def pre_tool_use(action: str, payload: object, message: str) -> bytes:
         output = _specific(
             "PreToolUse", permissionDecision="allow", updatedInput=payload
         )
-        if message:
+        if message.endswith(INCOMPLETE_MESSAGE):
             output["systemMessage"] = message
         return _dump(output)
     if action == DENY:
@@ -86,8 +90,12 @@ def post_tool_use(action: str, payload: object, message: str) -> bytes:
         return _dump({"systemMessage": message})
     if action == MASK:
         output = _specific("PostToolUse", updatedToolOutput=payload)
-        if message:
+        if message.endswith(INCOMPLETE_MESSAGE):
             output["systemMessage"] = message
+        elif message:
+            output["hookSpecificOutput"]["additionalContext"] = (
+                f"{message} {_MASKED_CONTEXT}"
+            )
         return _dump(output)
     if action == DENY:
         raise ValueError("a tool result cannot be denied")

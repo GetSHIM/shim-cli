@@ -116,6 +116,8 @@ def test_an_mcp_argument_object_is_masked_in_place() -> None:
     assert outcome.record.direction == OUTBOUND
     assert updated == {"customer_email": "<EMAIL_1>", "note": "ping"}
     assert document["hookSpecificOutput"]["permissionDecision"] == "allow"
+    assert "systemMessage" not in document
+    assert "additionalContext" not in document["hookSpecificOutput"]
 
 
 def test_a_clean_payload_produces_no_output_at_any_mode() -> None:
@@ -600,6 +602,7 @@ def test_uninspectable_sibling_preserves_redaction_and_reports_partial(bad):
     assert rewritten["credential"] == "<SECRET_1>"
     assert rewritten["bad"] == bad
     assert "inspection incomplete" in output["systemMessage"]
+    assert "additionalContext" not in output["hookSpecificOutput"]
     assert outcome.record.action == MASK
     assert outcome.record.note.startswith("partial:")
     assert outcome.record.entities == (("SECRET", 1),)
@@ -719,3 +722,51 @@ def test_bare_numbers_alone_are_recorded_without_any_output() -> None:
     assert outcome.record.action == ALLOW
     assert outcome.record.entities == ()
     assert outcome.record.bare_numbers == 2
+
+
+def test_a_masked_read_tells_the_model_what_was_masked() -> None:
+    outcome = _process(
+        _read_result(
+            "/work/service/.env",
+            "SUPPORT_EMAIL=alice@example.com\nNOTIFY=ops@example.com\n"
+            "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE\n",
+        ),
+        ENFORCE,
+    )
+    document = json.loads(outcome.output)
+
+    assert "systemMessage" not in document
+    assert document["hookSpecificOutput"]["additionalContext"] == (
+        "shim: masked EMAIL (2), SECRET (1) in Read. Placeholders such as "
+        "<EMAIL_1> stand for real values in the source; the source does not "
+        "contain placeholders."
+    )
+
+
+def test_a_compacted_only_result_tells_the_model_nothing() -> None:
+    outcome = _process(
+        _payload("PostToolUse", "mcp__db__query", "tool_response", {"text": BULKY}),
+        ENFORCE,
+        diet=DIET,
+    )
+
+    assert set(json.loads(outcome.output)["hookSpecificOutput"]) == {
+        "hookEventName",
+        "updatedToolOutput",
+    }
+
+
+def test_a_bash_result_under_report_is_unchanged() -> None:
+    outcome = _process(
+        _payload(
+            "PostToolUse",
+            "Bash",
+            "tool_response",
+            {"stdout": "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE"},
+        ),
+        WARN,
+    )
+
+    assert outcome.output == (
+        b'{"systemMessage":"shim: found SECRET (1) in Bash. Not modified."}'
+    )

@@ -223,6 +223,17 @@ summary by tool and file, so a skipped read is visible rather than absent.
 
 ## What is changed on the way in
 
+When Claude Code's `PostToolUse` result is masked, the model is told so in the
+same hook output, beside the masked result and never on your screen:
+
+```text
+shim: masked EMAIL (1), SECRET (1) in Read. Placeholders such as <EMAIL_1> stand for real values in the source; the source does not contain placeholders.
+```
+
+It carries entity names, their counts and the tool name, nothing else. Codex
+and Copilot do not mask tool results, and a masked tool argument gets no such
+sentence.
+
 At Claude's verified result event, shim can also compact tool results so they
 take less of the model's context. Every transform is deterministic and
 idempotent, because the provider's prompt cache only hits if the history is
