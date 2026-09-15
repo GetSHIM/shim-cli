@@ -14,6 +14,10 @@ relevant redacted logs. Please avoid sending real secrets or personal data. We
 will acknowledge the report, assess it, and coordinate disclosure through the
 advisory.
 
+To verify a downloaded release against its attestation bundles, run the
+`gh attestation verify` command in
+[the compatibility record](docs/compatibility.md#030-release-evidence).
+
 ## Scope notes
 
 The hook is a local best-effort guard, not an enforcement boundary. A report

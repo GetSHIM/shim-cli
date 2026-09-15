@@ -132,11 +132,14 @@ jobs:
           cp /tmp/shim-cli-evidence-source/tests/corpus/guard-tools-v1.json dist/guard-tools-v1.json
       - uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
         with:
-          path: dist/packages
+          path: /tmp/shim-cli-benchmark
           format: cyclonedx-json
           output-file: dist/shim-cli.sbom.cdx.json
           upload-artifact: false
           upload-release-assets: false
+      - name: Require the SBOM to list the package and every locked runtime dependency
+        run: |
+          python -c 'import json, os, re; from pathlib import Path; version = os.environ["GITHUB_REF_NAME"].removeprefix("v"); found = {(re.sub(r"[-_.]+", "-", component["name"]).lower(), component.get("version")) for component in json.loads(Path("dist/shim-cli.sbom.cdx.json").read_text())["components"] if component["type"] == "library"}; locked = {(re.sub(r"[-_.]+", "-", name).lower(), pin) for name, pin in re.findall(r"^([A-Za-z0-9][A-Za-z0-9._-]*)==(\S+) \\$", Path("dist/requirements.lock").read_text(), re.MULTILINE)}; assert ("shim", version) in found; assert locked and locked <= found, sorted(locked - found)'
       - name: Recheck the package artifact allowlist
         run: |
           python -c 'import os; from pathlib import Path; version = os.environ["GITHUB_REF_NAME"].removeprefix("v"); expected = {f"shim-{version}-py3-none-any.whl", f"shim-{version}.tar.gz"}; assert {path.name for path in Path("dist/packages").iterdir()} == expected'
@@ -150,12 +153,6 @@ jobs:
             cd ..
             sha256sum COMPATIBILITY.md shim.pyz guard-v2.json guard-v2-metrics.json guard-tools-v1.json benchmark-hook.json requirements.lock shim-cli.sbom.cdx.json
           ) > dist/SHA256SUMS
-      - name: Verify checksums from a flat download directory
-        run: |
-          mkdir dist/download
-          cp "dist/packages/shim-${GITHUB_REF_NAME#v}-py3-none-any.whl" "dist/packages/shim-${GITHUB_REF_NAME#v}.tar.gz" dist/COMPATIBILITY.md dist/shim.pyz dist/guard-v2.json dist/guard-v2-metrics.json dist/guard-tools-v1.json dist/benchmark-hook.json dist/requirements.lock dist/shim-cli.sbom.cdx.json dist/SHA256SUMS dist/download/
-          cd dist/download
-          sha256sum -c SHA256SUMS
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: release-dist
@@ -187,18 +184,48 @@ jobs:
       - name: Verify the package artifact allowlist
         run: python -c 'import os; from pathlib import Path; version = os.environ["GITHUB_REF_NAME"].removeprefix("v"); expected = {f"shim-{version}-py3-none-any.whl", f"shim-{version}.tar.gz"}; assert {path.name for path in Path("dist/packages").iterdir()} == expected'
       - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        id: provenance
         with:
-          subject-path: dist/packages/*
+          subject-path: |
+            dist/packages/*
+            dist/shim.pyz
       - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        id: sbom
         with:
-          subject-path: dist/packages/*
+          subject-path: |
+            dist/packages/*
+            dist/shim.pyz
           sbom-path: dist/shim-cli.sbom.cdx.json
+      - name: Attach and hash the attestation bundles
+        env:
+          PROVENANCE_BUNDLE: ${{ steps.provenance.outputs.bundle-path }}
+          SBOM_BUNDLE: ${{ steps.sbom.outputs.bundle-path }}
+        run: |
+          cp "$PROVENANCE_BUNDLE" "dist/shim-${GITHUB_REF_NAME#v}.intoto.jsonl"
+          cp "$SBOM_BUNDLE" "dist/shim-${GITHUB_REF_NAME#v}-py3-none-any.whl.sigstore.json"
+          cp "$PROVENANCE_BUNDLE" dist/shim.pyz.sigstore.json
+          (
+            cd dist
+            sha256sum "shim-${GITHUB_REF_NAME#v}.intoto.jsonl" "shim-${GITHUB_REF_NAME#v}-py3-none-any.whl.sigstore.json" shim.pyz.sigstore.json
+          ) >> dist/SHA256SUMS
+      - name: Verify checksums from a flat download directory
+        run: |
+          mkdir /tmp/shim-cli-download
+          cp "dist/packages/shim-${GITHUB_REF_NAME#v}-py3-none-any.whl" "dist/packages/shim-${GITHUB_REF_NAME#v}.tar.gz" dist/COMPATIBILITY.md dist/shim.pyz dist/guard-v2.json dist/guard-v2-metrics.json dist/guard-tools-v1.json dist/benchmark-hook.json dist/requirements.lock dist/shim-cli.sbom.cdx.json "dist/shim-${GITHUB_REF_NAME#v}.intoto.jsonl" "dist/shim-${GITHUB_REF_NAME#v}-py3-none-any.whl.sigstore.json" dist/shim.pyz.sigstore.json dist/SHA256SUMS /tmp/shim-cli-download/
+          cd /tmp/shim-cli-download
+          sha256sum -c SHA256SUMS
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: attested-dist
+          path: dist/
+          if-no-files-found: error
 
   release:
     needs: [build, attest]
     runs-on: ubuntu-latest
     environment: release
     permissions:
+      attestations: read
       contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -211,13 +238,20 @@ jobs:
           test -f "docs/releases/${GITHUB_REF_NAME#v}.md"
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          name: release-dist
+          name: attested-dist
           path: dist
       - name: Verify the package artifact allowlist
         run: python -c 'import os; from pathlib import Path; version = os.environ["GITHUB_REF_NAME"].removeprefix("v"); expected = {f"shim-{version}-py3-none-any.whl", f"shim-{version}.tar.gz"}; assert {path.name for path in Path("dist/packages").iterdir()} == expected'
+      - name: Verify the attestations before publishing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh attestation verify "dist/packages/shim-${GITHUB_REF_NAME#v}-py3-none-any.whl" --repo "$GITHUB_REPOSITORY"
+          gh attestation verify "dist/packages/shim-${GITHUB_REF_NAME#v}.tar.gz" --repo "$GITHUB_REPOSITORY"
+          gh attestation verify dist/shim.pyz --repo "$GITHUB_REPOSITORY"
       - env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" "dist/packages/shim-${GITHUB_REF_NAME#v}-py3-none-any.whl" "dist/packages/shim-${GITHUB_REF_NAME#v}.tar.gz" dist/COMPATIBILITY.md dist/shim.pyz dist/guard-v2.json dist/guard-v2-metrics.json dist/guard-tools-v1.json dist/benchmark-hook.json dist/requirements.lock dist/SHA256SUMS dist/shim-cli.sbom.cdx.json --notes-file "docs/releases/${GITHUB_REF_NAME#v}.md" --repo "$GITHUB_REPOSITORY"
+        run: gh release create "$GITHUB_REF_NAME" "dist/packages/shim-${GITHUB_REF_NAME#v}-py3-none-any.whl" "dist/packages/shim-${GITHUB_REF_NAME#v}.tar.gz" dist/COMPATIBILITY.md dist/shim.pyz dist/guard-v2.json dist/guard-v2-metrics.json dist/guard-tools-v1.json dist/benchmark-hook.json dist/requirements.lock dist/SHA256SUMS dist/shim-cli.sbom.cdx.json "dist/shim-${GITHUB_REF_NAME#v}.intoto.jsonl" "dist/shim-${GITHUB_REF_NAME#v}-py3-none-any.whl.sigstore.json" dist/shim.pyz.sigstore.json --notes-file "docs/releases/${GITHUB_REF_NAME#v}.md" --repo "$GITHUB_REPOSITORY"
 
   publish:
     needs: [build, attest, release]
