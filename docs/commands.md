@@ -98,10 +98,17 @@ and which events are covered.
 shim doctor claude
 ```
 
-A healthy install ends with a coverage table and two warnings — that your
-client is newer than the version shim was tested against, and that hook
-activation is client UI state shim cannot read. **Both are normal and doctor
-exits `0`.** A `FAIL` exits `2`.
+A healthy install ends with a coverage table and a warning that hook activation
+is client UI state shim cannot read, plus a second one when your client is newer
+than the version shim was tested against. **Both are normal and doctor exits
+`0`.** A `FAIL` exits `2`.
+
+The coverage line counts the events whose hook is in the client's settings
+file, and the table's `Installed` column reads the same file:
+`PASS Coverage: 5 of 5 events installed.` once shim is installed, and
+`WARN Coverage: 0 of 5 events installed; run shim install claude.` before. A
+hook still in the 0.2.0 shape counts as installed. The exit codes do not
+change: the coverage `WARN` exits `0`.
 
 Every `FAIL` names the command that fixes it. A malformed settings file, for
 example, gives you the path, the parser's message with its line number, and

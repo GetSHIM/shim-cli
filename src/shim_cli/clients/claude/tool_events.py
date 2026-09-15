@@ -125,7 +125,6 @@ def coverage() -> tuple:
             "can_mask": True,
             "can_report": True,
             "verified": True,
-            "installed": True,
         }
         for event in INSTALLED_EVENTS
     )

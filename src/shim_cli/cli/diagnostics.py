@@ -103,7 +103,11 @@ def _version_check(client: str) -> Check:
 def _codex_hooks_feature() -> Check:
     path = shutil.which("codex")
     if path is None:
-        return Check("hooks_feature", "FAIL", "Codex executable was not found on PATH.")
+        return Check(
+            "hooks_feature",
+            "FAIL",
+            "Codex hook support was not checked: the executable was not found.",
+        )
     try:
         result = subprocess.run(
             [path, "features", "list"],
@@ -138,13 +142,20 @@ def _legacy_state(client: str) -> Check:
         state = inspect_file(legacy, copilot_settings.MAX_CONFIG_BYTES)
         if state.kind is StateKind.FILE and state.content is not None:
             if copilot_settings.is_ours(state.content):
-                found.append(f"hook file uses the old name at {legacy}")
-    legacy_fragment = _has_legacy_fragment(client)
-    if legacy_fragment:
-        found.append("hook installed in the 0.2.0 shape")
+                found.append(
+                    f"Hook file uses the old name at {legacy}; "
+                    "run shim install copilot to rename it"
+                )
+    if _has_legacy_fragment(client):
+        found.append(
+            f"Hook installed in the 0.2.0 shape; run shim install {client} to "
+            "rewrite it, because 1.0 will not run this shape"
+        )
     settings_file = legacy_config_path()
     if settings_file is not None and settings_file.is_file():
-        found.append(f"settings are still at {settings_file}")
+        found.append(
+            f"Settings are still at {settings_file} and move on the next shim config"
+        )
     try:
         directory = ledger.legacy_root_path()
     except ledger.LedgerError:
@@ -152,30 +163,38 @@ def _legacy_state(client: str) -> Check:
     if directory is not None and any(
         directory.glob(f"{ledger.FILE_PREFIX}*{ledger.FILE_SUFFIX}")
     ):
-        found.append(f"ledger files are still in {directory}")
+        found.append(
+            f"Ledger files are still in {directory} and move on the next shim report"
+        )
     if not found:
         return Check("legacy_names", "PASS", "No 0.2.0 names are left on disk.")
-    move = " to move it" if legacy_fragment else ""
-    return Check(
-        "legacy_names",
-        "WARN",
-        "; ".join(found) + f"; run shim install {client}{move}",
-    )
+    detail = ". ".join(found)
+    return Check("legacy_names", "WARN", f"{detail[0].lower()}{detail[1:]}.")
 
 
 def _has_legacy_fragment(client: str) -> bool:
-    """Claude and Codex carry the fragment in their own settings document."""
+    """Claude and Codex carry the fragment in their own settings document;
+    Copilot carries it as a whole file under the old name."""
     from shim_cli.clients.claude import settings as claude_settings
     from shim_cli.clients.codex import settings as codex_settings
+    from shim_cli.clients.copilot import settings as copilot_settings
     from shim_cli.clients.hook_settings import remove_groups
     from shim_cli.settings_files import StateKind, inspect_file
 
+    if client == "copilot":
+        state = inspect_file(
+            copilot_settings.legacy_target_path(), copilot_settings.MAX_CONFIG_BYTES
+        )
+        return (
+            state.kind is StateKind.FILE
+            and state.content is not None
+            and copilot_settings.is_ours(state.content)
+            and bool(json.loads(state.content)["hooks"])
+        )
     if client == "claude":
         module = claude_settings
-    elif client == "codex":
-        module = codex_settings
     else:
-        return False
+        module = codex_settings
     state = inspect_file(module.target_path(), module.MAX_CONFIG_BYTES)
     if state.kind is not StateKind.FILE or state.content is None:
         return False
@@ -205,7 +224,9 @@ def _hook_state(client: str, legacy_fragment: bool = False) -> Check | None:
         )
     messages = {
         "installed": f"shim's exact {name} hook group is present.",
-        "not_installed": f"shim's {name} hook group is not installed.",
+        "not_installed": (
+            f"shim's {name} hook group is not installed; run shim install {client}."
+        ),
         "conflict": f"{name} hook configuration needs manual review.",
         "unsafe": f"{name} hook configuration cannot be trusted safely.",
     }
@@ -453,7 +474,7 @@ def _session_record_check() -> Check:
     )
 
 
-def _coverage_rows(client: str) -> list:
+def _coverage_rows(client: str, installed: bool) -> list:
     rows = [
         {
             "event": "UserPromptSubmit",
@@ -461,11 +482,11 @@ def _coverage_rows(client: str) -> list:
             "can_mask": client == "copilot",
             "can_report": client != "copilot",
             "verified": True,
-            "installed": True,
+            "installed": installed,
         }
     ]
     if client == "claude":
-        rows.extend(dict(row) for row in claude_coverage())
+        rows.extend({**row, "installed": installed} for row in claude_coverage())
         rows.append(
             {
                 "event": "Stop",
@@ -473,7 +494,7 @@ def _coverage_rows(client: str) -> list:
                 "can_mask": False,
                 "can_report": True,
                 "verified": True,
-                "installed": True,
+                "installed": installed,
             }
         )
         rows.append(
@@ -483,17 +504,18 @@ def _coverage_rows(client: str) -> list:
                 "can_mask": False,
                 "can_report": False,
                 "verified": True,
-                "installed": True,
+                "installed": installed,
             }
         )
     return rows
 
 
-def _coverage_check(client: str) -> Check:
-    rows = _coverage_rows(client)
+def _coverage_check(client: str, rows: list) -> Check:
     installed = sum(bool(row["installed"]) for row in rows)
-    detail = f"Coverage: {installed} of {len(rows)} events installed."
-    return Check("coverage", "PASS", detail)
+    detail = f"Coverage: {installed} of {len(rows)} events installed"
+    if installed == len(rows):
+        return Check("coverage", "PASS", f"{detail}.")
+    return Check("coverage", "WARN", f"{detail}; run shim install {client}.")
 
 
 def _activation_check(client: str) -> Check:
@@ -504,7 +526,7 @@ def _activation_check(client: str) -> Check:
     )
 
 
-def _print_coverage(client: str) -> None:
+def _print_coverage(client: str, rows: list) -> None:
     table = Table(
         box=box.SIMPLE, pad_edge=False, title=f"{client_name(client)} coverage"
     )
@@ -512,7 +534,7 @@ def _print_coverage(client: str) -> None:
     table.add_column("Sees", overflow="fold")
     table.add_column("Can mask", no_wrap=True)
     table.add_column("Installed", no_wrap=True)
-    for row in _coverage_rows(client):
+    for row in rows:
         table.add_row(
             str(row["event"]),
             str(row["sees"]),
@@ -526,10 +548,16 @@ def doctor(*, client: str, as_json: bool) -> None:
     checks = [_version_check(client)]
     if client == "codex":
         checks.append(_codex_hooks_feature())
+    legacy_fragment = _has_legacy_fragment(client)
+    hook_state = _hook_state(client, legacy_fragment)
+    rows = _coverage_rows(
+        client,
+        legacy_fragment or (hook_state is not None and hook_state.status == "PASS"),
+    )
     checks.extend(
         check
         for check in (
-            _hook_state(client, _has_legacy_fragment(client)),
+            hook_state,
             _legacy_state(client),
             _entity_settings(),
             _custom_patterns(),
@@ -537,7 +565,7 @@ def doctor(*, client: str, as_json: bool) -> None:
             _runner_check(client),
             _resolution_check(client),
             _duplicate_check(client),
-            _coverage_check(client),
+            _coverage_check(client, rows),
             _activation_check(client),
         )
         if check is not None
@@ -555,15 +583,15 @@ def doctor(*, client: str, as_json: bool) -> None:
             status,
             client=client,
             checks=[{"name": check.name, "status": check.status} for check in checks],
-            coverage=_coverage_rows(client),
+            coverage=rows,
         )
     else:
         for check in checks:
             emit(check.status, check.detail, error=check.status == "FAIL")
-        _print_coverage(client)
-    # A warning is not a failure. A healthy install prints two of them — the
-    # client is newer than the one tested, and hook activation is state only the
-    # client can show — so exiting non-zero here made `shim doctor claude && …`
+        _print_coverage(client, rows)
+    # A warning is not a failure. A healthy install prints one or two — hook
+    # activation is state only the client can show, and a client newer than the
+    # one tested — so exiting non-zero here made `shim doctor claude && …`
     # useless and taught people to ignore the warnings, which are the only
     # signal that a client changed shape. FAIL keeps exit 2, as every other
     # command in the CLI uses for a refusal.

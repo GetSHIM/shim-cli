@@ -453,6 +453,120 @@ def test_confirmation_and_doctor(monkeypatch, tmp_path: Path) -> None:
     assert payload["status"] == "warning"
 
 
+_CLIENT_FIXTURES = {
+    "claude": (_claude_home, _claude, 5),
+    "codex": (_codex_home, _codex, 1),
+    "copilot": (_copilot_home, _copilot, 1),
+}
+
+
+def _coverage(client: str) -> tuple[str, list[str], list[bool]]:
+    text = " ".join(unstyle(runner.invoke(app, ["doctor", client]).output).split())
+    rows = json.loads(runner.invoke(app, ["doctor", client, "--json"]).output)
+    table = text[text.index("coverage Event") :].split()
+    return (
+        text,
+        [word for word in table if word in ("yes", "no")][1::2],
+        [row["installed"] for row in rows["coverage"]],
+    )
+
+
+@pytest.mark.parametrize("client", sorted(_CLIENT_FIXTURES))
+def test_doctor_coverage_reads_the_hook_file(
+    client: str, monkeypatch, tmp_path: Path
+) -> None:
+    make_home, make_client, events = _CLIENT_FIXTURES[client]
+    make_home(monkeypatch, tmp_path)
+    make_client(monkeypatch, tmp_path)
+
+    before, before_table, before_json = _coverage(client)
+    assert runner.invoke(app, ["install", client, "--yes"]).exit_code == 0
+    after, after_table, after_json = _coverage(client)
+
+    assert (
+        f"WARN Coverage: 0 of {events} events installed; run shim install {client}."
+        in before
+    )
+    assert before_table == ["no"] * events
+    assert before_json == [False] * events
+    assert f"PASS Coverage: {events} of {events} events installed." in after
+    assert after_table == ["yes"] * events
+    assert after_json == [True] * events
+
+
+@pytest.mark.parametrize("client", sorted(_CLIENT_FIXTURES))
+def test_doctor_counts_a_020_hook_as_installed(
+    client: str, monkeypatch, tmp_path: Path
+) -> None:
+    from shim_cli.cli.integrations import client_plan
+    from shim_cli.clients.claude import settings as claude_settings
+    from shim_cli.clients.codex import settings as codex_settings
+    from shim_cli.clients.copilot import settings as copilot_settings
+    from shim_cli.clients.hook_settings import add_groups
+
+    make_home, make_client, events = _CLIENT_FIXTURES[client]
+    make_home(monkeypatch, tmp_path)
+    make_client(monkeypatch, tmp_path)
+    if client == "copilot":
+        legacy = copilot_settings.legacy_target_path()
+        legacy.parent.mkdir(parents=True)
+        legacy.write_text(
+            json.dumps(
+                copilot_settings.hook_document(
+                    module=copilot_settings.LEGACY_HOOK_MODULE
+                ),
+                indent=2,
+            )
+            + "\n"
+        )
+        warning = "WARN hook file uses the old name at"
+    else:
+        module = {"claude": claude_settings, "codex": codex_settings}[client]
+        client_plan(client, "install").target.write_bytes(
+            add_groups(b"{}", module.legacy_hook_groups())
+        )
+        warning = (
+            f"WARN hook installed in the 0.2.0 shape; run shim install {client} to "
+            "rewrite it, because 1.0 will not run this shape."
+        )
+
+    text, table, installed = _coverage(client)
+
+    assert f"PASS Coverage: {events} of {events} events installed." in text
+    assert table == ["yes"] * events
+    assert installed == [True] * events
+    assert warning in text
+    assert "hook group is not installed" not in text
+
+
+def test_doctor_not_installed_names_the_command(monkeypatch, tmp_path: Path) -> None:
+    _claude_home(monkeypatch, tmp_path)
+    _claude(monkeypatch, tmp_path)
+
+    text = " ".join(unstyle(runner.invoke(app, ["doctor", "claude"]).output).split())
+
+    assert (
+        "WARN shim's Claude Code hook group is not installed; run shim install claude."
+        in text
+    )
+
+
+def test_doctor_without_codex_says_each_fact_once(monkeypatch, tmp_path: Path) -> None:
+    _codex_home(monkeypatch, tmp_path)
+    monkeypatch.setenv("PATH", "")
+
+    text = " ".join(unstyle(runner.invoke(app, ["doctor", "codex"]).output).split())
+    payload = json.loads(runner.invoke(app, ["doctor", "codex", "--json"]).output)
+    checks = {item["name"]: item["status"] for item in payload["checks"]}
+
+    assert text.count("Codex executable was not found on PATH.") == 1
+    assert (
+        text.count("Codex hook support was not checked: the executable was not found.")
+        == 1
+    )
+    assert checks["codex"] == checks["hooks_feature"] == "FAIL"
+
+
 def test_install_preserves_shared_hooks_and_preview_hides_them(
     monkeypatch, tmp_path: Path
 ) -> None:
@@ -904,7 +1018,7 @@ def test_the_coverage_table_says_what_stop_sees_and_that_it_changes_nothing(
 ) -> None:
     from shim_cli.cli.diagnostics import _coverage_rows
 
-    rows = {row["event"]: row for row in _coverage_rows("claude")}
+    rows = {row["event"]: row for row in _coverage_rows("claude", installed=True)}
 
     assert "last_assistant_message" in rows["Stop"]["sees"]
     assert rows["Stop"]["can_mask"] is False
@@ -1112,7 +1226,8 @@ def test_doctor_on_a_020_fragment_does_not_also_say_it_is_not_installed(
     text = " ".join(unstyle(result.output).split())
 
     assert (
-        "hook installed in the 0.2.0 shape; run shim install claude to move it" in text
+        "hook installed in the 0.2.0 shape; run shim install claude to rewrite it, "
+        "because 1.0 will not run this shape." in text
     )
     assert "hook group is not installed" not in text
 

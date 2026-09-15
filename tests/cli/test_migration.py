@@ -298,8 +298,8 @@ def test_doctor_names_every_old_shape_and_changes_nothing(
 
     checks = {item["name"]: item for item in json.loads(document.output)["checks"]}
     assert checks["legacy_names"]["status"] == "WARN"
-    assert _says(text, "settings are still at")
-    assert _says(text, "ledger files are still in")
+    assert _says(text, "Settings are still at")
+    assert _says(text, "Ledger files are still in")
     if client == "copilot":
         # Copilot's old shape is the file name, not a fragment inside it.
         assert _says(text, "hook file uses the old name")
