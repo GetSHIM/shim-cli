@@ -75,9 +75,13 @@ declares `hooks/claude.json`, but Claude Code 2.1.263 also loads
 `.codex-plugin/plugin.json` has no field that names a hooks path. Claude Code
 does not expand Codex's `${PLUGIN_ROOT}`, so every prompt ran `/hooks/run-shim`
 and logged exit 127 beside the real hook's output. The Codex command therefore
-opens with `[ -n "$CLAUDE_PLUGIN_ROOT" ] && exit 0`: Claude Code sets that
-variable and the command stands down silently, while Codex does not set it and
-substitutes `${PLUGIN_ROOT}` as before. If a future Codex manifest accepts a
+opens with `[ -z "${PLUGIN_ROOT}" ] && exit 0`: Claude Code leaves `PLUGIN_ROOT`
+unset and the command stands down silently, while Codex sets it. 0.3.1 and
+0.3.2 keyed the guard on `CLAUDE_PLUGIN_ROOT` instead, which Codex 0.151.0
+sets too, so the Codex plugin hook exited before inspecting anything and
+reported the prompt as `Completed`; the package route was unaffected. The
+guard now fails the safe way: a Claude Code that set `PLUGIN_ROOT` would
+inspect a prompt twice, not zero times. If a future Codex manifest accepts a
 hooks path, the file becomes `hooks/codex.json` and the guard is dropped.
 
 **A Codex hook does not run until it is trusted.** From 0.151.0 Codex holds a

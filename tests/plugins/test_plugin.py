@@ -121,25 +121,34 @@ def _codex_command() -> str:
     return document["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"]
 
 
-def test_the_codex_command_stands_down_under_claude_code() -> None:
+def test_the_codex_command_keys_on_the_variable_only_codex_sets() -> None:
     """Claude Code loads hooks/hooks.json by convention, on top of the
-    hooks/claude.json its plugin.json declares, and does not expand
-    ${PLUGIN_ROOT}. Without this guard every Claude prompt ran `/hooks/run-shim`
-    and logged exit 127 next to the real hook's output.
+    hooks/claude.json its plugin.json declares, and sets no PLUGIN_ROOT. Codex
+    0.151.0 sets PLUGIN_ROOT and CLAUDE_PLUGIN_ROOT both, so a guard on the
+    Claude variable turned the Codex hook into a silent no-op.
     """
-    assert '[ -n "$CLAUDE_PLUGIN_ROOT" ] && exit 0' in _codex_command()
+    assert '[ -z "${PLUGIN_ROOT}" ] && exit 0' in _codex_command()
+    assert "CLAUDE_PLUGIN_ROOT" not in _codex_command()
 
 
-def test_the_codex_command_exits_silently_when_claude_code_runs_it() -> None:
+def _run_codex_command(command: str, environment: dict, tmp_path) -> object:
     import subprocess
 
-    result = subprocess.run(
-        ("/bin/sh", "-c", _codex_command()),
+    return subprocess.run(
+        ("/bin/sh", "-c", command),
         input=b'{"hook_event_name":"UserPromptSubmit","prompt":"AKIAIOSFODNN7EXAMPLE"}',
         capture_output=True,
-        env={"CLAUDE_PLUGIN_ROOT": "/x", "PATH": "/usr/bin:/bin"},
+        env=environment | {"TMPDIR": str(tmp_path)},
         check=False,
-        timeout=60,
+        timeout=120,
+    )
+
+
+def test_the_codex_command_exits_silently_when_claude_code_runs_it(tmp_path) -> None:
+    result = _run_codex_command(
+        _codex_command(),
+        {"CLAUDE_PLUGIN_ROOT": str(PLUGIN_ROOT), "PATH": "/usr/bin:/bin"},
+        tmp_path,
     )
 
     assert result.returncode == 0
@@ -147,24 +156,21 @@ def test_the_codex_command_exits_silently_when_claude_code_runs_it() -> None:
     assert result.stderr == b""
 
 
-def test_the_codex_command_still_runs_the_launcher_under_codex(tmp_path) -> None:
-    """Codex substitutes ${PLUGIN_ROOT} itself and sets no CLAUDE_PLUGIN_ROOT."""
+@pytest.mark.parametrize("substituted", (True, False), ids=("text", "environment"))
+def test_the_codex_command_inspects_the_prompt_under_codex(
+    substituted: bool, tmp_path
+) -> None:
     import os
-    import subprocess
 
-    command = _codex_command().replace("${PLUGIN_ROOT}", str(PLUGIN_ROOT))
-    environment = {
-        key: value for key, value in os.environ.items() if key != "CLAUDE_PLUGIN_ROOT"
-    } | {"TMPDIR": str(tmp_path)}
+    command = _codex_command()
+    if substituted:
+        command = command.replace("${PLUGIN_ROOT}", str(PLUGIN_ROOT))
+    environment = dict(os.environ) | {
+        "PLUGIN_ROOT": str(PLUGIN_ROOT),
+        "CLAUDE_PLUGIN_ROOT": str(PLUGIN_ROOT),
+    }
 
-    result = subprocess.run(
-        ("/bin/sh", "-c", command),
-        input=b'{"hook_event_name":"UserPromptSubmit","prompt":"AKIAIOSFODNN7EXAMPLE"}',
-        capture_output=True,
-        env=environment,
-        check=False,
-        timeout=120,
-    )
+    result = _run_codex_command(command, environment, tmp_path)
 
     assert result.returncode == 0
     assert b"SECRET" in result.stdout
