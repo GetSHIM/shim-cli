@@ -49,9 +49,13 @@ client can add the package for CLI commands without duplicating registration:
 the plugin launcher switches to the package hook.
 
 ```console
-uv tool install shim
-shim help
+uv tool install --python 3.12 --compile-bytecode shim
+# or
+pipx install --python python3.12 shim
 ```
+
+`--python` matters on a machine whose only Python is the system 3.9:
+without it `uv` quietly installs the last release that ran there, 0.2.0.
 
 `bin/shim.pyz` is built by `scripts/build_zipapp.py` and committed on `main` and
 on every tag. A fork or partial copy without it falls back to `PATH` or to

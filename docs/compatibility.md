@@ -10,6 +10,12 @@
 | Tool hooks | Claude Code `PreToolUse` and `PostToolUse` only |
 | `shim watch` | Claude Code only. Codex is refused: it reads its endpoint from its own configuration, so the proxy is bypassed and the session measured as empty ([probe](probe-2026-09-codex-watch.md)). Copilot out of scope because a custom endpoint removes GitHub authentication |
 
+## Install
+
+The package runs on CPython 3.10 through 3.13. On a machine whose only Python
+is 3.9, the plugin route needs no Python beyond 3.9 and the package route needs
+`--python`: `uv tool install --python 3.12 --compile-bytecode shim`.
+
 ## Deprecated names
 
 The package was renamed from `shim_guard` to `shim_cli` in 0.3.0. Three names
