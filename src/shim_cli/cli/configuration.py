@@ -18,6 +18,7 @@ from shim_cli.config import (
 from shim_cli.events.diet import DEFAULT_TRANSFORMS
 from shim_cli.guard import DEFAULT_ENTITIES, ENTITY_TYPES, normalize_entities
 from shim_cli.guard.entities import (
+    CUSTOM,
     compile_custom,
     entry_source,
     normalize_reveal,
@@ -241,6 +242,8 @@ def configure(
                 assert policy is not None
                 selected = set(policy.entities)
                 selected.update(enable)
+                if custom or custom_literal:
+                    selected.add(CUSTOM)
                 selected.difference_update(disable)
                 enabled = normalize_entities(selected)
     except ValueError as error:

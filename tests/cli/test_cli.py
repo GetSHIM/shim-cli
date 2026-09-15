@@ -1046,6 +1046,36 @@ def test_custom_patterns_are_written_read_and_removed(monkeypatch, tmp_path) -> 
     assert "custom" not in target.read_text(encoding="utf-8")
 
 
+def test_adding_a_pattern_enables_custom_on_a_0_2_0_entity_list(
+    monkeypatch, tmp_path
+) -> None:
+    from shim_cli.guard import BUILT_IN_TYPES
+
+    target = _guard_config(monkeypatch, tmp_path)
+    target.parent.mkdir(parents=True)
+    listed = ", ".join(f'"{name}"' for name in BUILT_IN_TYPES)
+    target.write_text(f"enabled_entities = [{listed}]\n", encoding="utf-8")
+    target.chmod(0o600)
+
+    runner.invoke(app, ["config", "--custom", r"CODENAME=\bATLAS-[0-9]{4}\b", "--yes"])
+    scanned = runner.invoke(app, ["scan", "--json"], input="ship ATLAS-0042")
+    runner.invoke(
+        app,
+        [
+            "config",
+            "--disable",
+            "CUSTOM",
+            "--custom-literal",
+            "HOST=db-core-01",
+            "--yes",
+        ],
+    )
+    disabled = runner.invoke(app, ["scan", "--json"], input="ship ATLAS-0042")
+
+    assert json.loads(scanned.output)["counts"] == {"CUSTOM": 1}
+    assert json.loads(disabled.output)["counts"] == {}
+
+
 def test_a_literal_is_written_and_matched_whole(monkeypatch, tmp_path) -> None:
     _guard_config(monkeypatch, tmp_path)
 
