@@ -49,3 +49,63 @@ def test_a_workflow_starts_from_least_privilege(workflow: Path) -> None:
     assert text.count("persist-credentials: false") == checkouts, (
         f"{workflow.name}: a checkout keeps its credentials"
     )
+
+
+RELEASE = WORKFLOWS / "release.yml"
+
+
+def _step(marker: str) -> str:
+    text = RELEASE.read_text(encoding="utf-8")
+    start = text.rindex("\n      - ", 0, text.index(marker))
+    end = text.find("\n      - ", start + 1)
+    return text[start:end]
+
+
+def test_the_sbom_scans_the_installed_wheel_and_is_checked() -> None:
+    text = RELEASE.read_text(encoding="utf-8")
+    sbom = _step("uses: anchore/sbom-action@")
+    check = _step("name: Require the SBOM to list")
+
+    assert "path: /tmp/shim-cli-benchmark" in sbom
+    assert "dist/packages" not in sbom
+    assert text.index('--no-deps "dist/packages/shim-') < text.index(sbom)
+    assert text.index(sbom) + len(sbom) == text.index(check)
+    assert '["components"]' in check and "dist/requirements.lock" in check
+
+
+def test_the_attestation_bundles_are_hashed_and_attached() -> None:
+    bundles = (
+        '"dist/shim-${GITHUB_REF_NAME#v}.intoto.jsonl"',
+        '"dist/shim-${GITHUB_REF_NAME#v}-py3-none-any.whl.sigstore.json"',
+        "dist/shim.pyz.sigstore.json",
+    )
+    hashed = _step("name: Attach and hash the attestation bundles")
+    flat = _step("name: Verify checksums from a flat download directory")
+    create = _step("gh release create")
+
+    assert all(bundle in flat and bundle in create for bundle in bundles)
+    assert ">> dist/SHA256SUMS" in hashed
+    assert all(
+        name in hashed
+        for name in (".intoto.jsonl", ".whl.sigstore.json", " shim.pyz.sigstore.json")
+    )
+    attest = [_step("id: provenance"), _step("id: sbom")]
+    assert all("dist/packages/*" in step and "dist/shim.pyz" in step for step in attest)
+
+
+def test_the_release_verifies_attestations_before_it_publishes() -> None:
+    text = RELEASE.read_text(encoding="utf-8")
+    verify = _step("gh attestation verify")
+
+    assert text.index(verify) < text.index("gh release create")
+    assert (
+        "attestations: read"
+        in text[text.index("\n  release:") : text.index("\n  publish:")]
+    )
+    assert verify.count("gh attestation verify ") == 3
+    for subject in (
+        '"dist/packages/shim-${GITHUB_REF_NAME#v}-py3-none-any.whl"',
+        '"dist/packages/shim-${GITHUB_REF_NAME#v}.tar.gz"',
+        "dist/shim.pyz",
+    ):
+        assert f'gh attestation verify {subject} --repo "$GITHUB_REPOSITORY"' in verify

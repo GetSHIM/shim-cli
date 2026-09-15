@@ -469,6 +469,7 @@ Every figure here was measured on the released build, not estimated.
 | Hook cost | **67 ms** median end to end, interpreter start included; **41 ms** for a session summary |
 | With 32 custom patterns | **+0.8 ms** median against the same prompt with none |
 | Detector corpus | **570 cases**, graded on exact redacted output rather than category presence |
+| Release evidence | SBOM, provenance and Sigstore bundles on the release page from 0.3.2, with the `gh attestation verify` command in [the compatibility record](https://github.com/GetSHIM/shim-cli/blob/main/docs/compatibility.md#030-release-evidence) |
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/GetSHIM/shim-cli/main/docs/assets/shots/shim-doctor.png" width="880"
