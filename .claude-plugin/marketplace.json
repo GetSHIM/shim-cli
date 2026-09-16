@@ -20,21 +20,6 @@
         "security",
         "hooks"
       ]
-    },
-    {
-      "name": "shim-guard",
-      "source": "./plugins/shim-cli",
-      "description": "Former name of shim-cli. Existing installs keep updating; new installs should use shim-cli.",
-      "author": {
-        "name": "shim Engineering"
-      },
-      "license": "Apache-2.0",
-      "category": "security",
-      "tags": [
-        "privacy",
-        "security",
-        "hooks"
-      ]
     }
   ]
 }

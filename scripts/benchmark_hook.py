@@ -122,15 +122,12 @@ def benchmark(python: Path, samples_per_fixture: int) -> dict[str, object]:
     block_samples: list[float] = []
     stop_samples: list[float] = []
     custom_samples: list[float] = []
-    with tempfile.TemporaryDirectory(prefix="shim-guard-benchmark-") as directory:
+    with tempfile.TemporaryDirectory(prefix="shim-benchmark-") as directory:
         temporary = Path(directory).resolve()
         config = temporary / "config.toml"
         config.write_text('[mode]\nuser-prompt = "enforce"\n', encoding="utf-8")
         config.chmod(0o600)
         environment = os.environ.copy()
-        # SHIM_CONFIG outranks the 0.2.0 name; leaving it set would measure
-        # whatever settings the developer happens to have.
-        environment.pop("SHIM_GUARD_CONFIG", None)
         environment["SHIM_CONFIG"] = str(config)
         environment["TMPDIR"] = str(temporary)
         # The configured ceiling of user patterns, on the same safe prompt.

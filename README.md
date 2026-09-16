@@ -40,8 +40,7 @@ Two commands, two different questions:
 | `shim install claude` | Mask secrets and personal data in eligible tool results, every session, automatically. |
 
 > [!WARNING]
-> shim-cli is alpha software and a best-effort guard, not a data-loss
-> prevention boundary. Read the [privacy limitations](https://github.com/GetSHIM/shim-cli/blob/main/docs/privacy.md) before
+> shim-cli is a best-effort guard, not a data-loss prevention boundary. Read the [privacy limitations](https://github.com/GetSHIM/shim-cli/blob/main/docs/privacy.md) before
 > using it with sensitive data.
 
 ## Measure a session
@@ -203,18 +202,29 @@ tag; it needs Python 3.9 or newer and nothing else installed, on both clients.
 
 ### Upgrading from 0.2.0
 
-Nothing breaks and nothing is required of you. The hook command your client
-already runs keeps working, byte for byte, through a compatibility package.
+1.0 no longer runs the hook 0.2.0 wrote. A client settings file that still
+carries `-m shim_guard.hook` reports `No module named shim_guard` on every
+prompt, and nothing is inspected until you run, once per client:
 
-When convenient, run `shim install <client>` once. That rewrites the hook line
-to the new module name and, on Copilot, replaces the old hook file. Your
-settings and ledger move to `shim/` on the next `shim` command that touches
-them, and each move is reported once. The Claude Code plugin keeps loading and
-updating: `shim-guard@shim-guard` still resolves through a marketplace alias,
-which is removed in 1.0 along with the `shim-guard-hook` script, the
-`shim_guard` package and the `SHIM_GUARD_CONFIG` variable.
+```console
+shim install <client>
+```
 
-Codex plugin users are the one exception and need four commands; see
+That rewrites the hook line and, on Copilot, replaces the old hook file.
+`shim doctor <client>` reports a hook left in the 0.2.0 shape as `FAIL` with the
+same command. Your settings and ledger move to `shim/` on the next `shim`
+command that touches them, and each move is reported once.
+
+A Claude Code plugin installed as `shim-guard@shim-guard` stopped updating at
+0.3.2. Move it:
+
+```text
+/plugin uninstall shim-guard@shim-guard
+/plugin marketplace add GetSHIM/shim-cli
+/plugin install shim-cli@shim-cli
+```
+
+Codex plugin users need four commands; see
 [docs/compatibility.md](docs/compatibility.md).
 
 ## Use
@@ -450,6 +460,10 @@ reported.
 - The host client receives the raw prompt before its hook runs, and other hooks
   may receive it concurrently.
 - Detection is best-effort and may miss sensitive values.
+- **The output of a failed tool call is not masked.** Claude Code passes it
+  to a separate hook event that shim does not install, so a command such as
+  `cat .env && cat missing-file` exits non-zero and the model reads `.env`
+  as it is, with nothing in the session summary.
 - A disabled, untrusted, crashed, or timed-out hook may fail open according to
   client behavior.
 - Clients, providers, and other tools may retain data independently of shim.
@@ -465,11 +479,11 @@ Every figure here was measured on the released build, not estimated.
 
 | | |
 | --- | --- |
-| Tests | **1,800+**, one command: `python scripts/check.py` — lock, lint, format, types, suite, wheel, sdist |
-| Hook cost | **67 ms** median end to end, interpreter start included; **41 ms** for a session summary |
-| With 32 custom patterns | **+0.8 ms** median against the same prompt with none |
-| Detector corpus | **570 cases**, graded on exact redacted output rather than category presence |
-| Release evidence | SBOM, provenance and Sigstore bundles on the release page from 0.3.2, with the `gh attestation verify` command in [the compatibility record](https://github.com/GetSHIM/shim-cli/blob/main/docs/compatibility.md#030-release-evidence) |
+| Tests | **1,900+**, one command: `python scripts/check.py` — lock, lint, format, types, suite, wheel, sdist |
+| Hook cost | **70 ms** median end to end, interpreter start included; **42 ms** for a session summary |
+| With 32 custom patterns | **+0.6 ms** median against the same prompt with none |
+| Detector corpus | **589 cases**, graded on exact redacted output rather than category presence |
+| Release evidence | SBOM, provenance and Sigstore bundles on the release page from 0.3.2, with the `gh attestation verify` command in [the compatibility record](https://github.com/GetSHIM/shim-cli/blob/main/docs/compatibility.md#100-release-evidence) |
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/GetSHIM/shim-cli/main/docs/assets/shots/shim-doctor.png" width="880"
@@ -477,7 +491,7 @@ Every figure here was measured on the released build, not estimated.
 </p>
 
 Hook output is asserted byte for byte, not by shape: a safe event must produce
-exactly zero bytes on stdout and stderr. 312 contract tests hold that, plus the
+exactly zero bytes on stdout and stderr. 346 contract tests hold that, plus the
 import boundaries, the rule that no committed file carries the machine it was
 written on, and a byte-identical rebuild of the shipped plugin archive.
 
@@ -528,6 +542,9 @@ reinstalling later finds your entity choices and custom patterns still there.
 - [Architecture](https://github.com/GetSHIM/shim-cli/blob/main/docs/architecture.md)
 - [Compatibility](https://github.com/GetSHIM/shim-cli/blob/main/docs/compatibility.md)
 - [Privacy](https://github.com/GetSHIM/shim-cli/blob/main/docs/privacy.md)
+- [1.0.0 release notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/1.0.0.md)
+- [0.3.3 release notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/0.3.3.md)
+- [0.3.2 release notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/0.3.2.md)
 - [0.3.1 release notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/0.3.1.md)
 - [0.3.0 release notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/0.3.0.md)
 - [0.2.0 release notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/0.2.0.md)

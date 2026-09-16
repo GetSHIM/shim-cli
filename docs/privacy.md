@@ -207,6 +207,12 @@ Commands and local writes are never rewritten. If no inspection is possible,
 the event passes through unchanged and unmasked with a visible warning; prompt
 errors still fail closed.
 
+**A tool call that fails is not inspected at all.** Claude Code delivers its
+output, including everything the command printed before it failed, to
+`PostToolUseFailure`, which shim does not install. `cat .env && cat
+missing-file` exits 1, and the model reads `.env` unmasked; no warning is
+shown and the session summary does not count it.
+
 **A large field is scanned in pieces, and the seams are the residual risk.**
 The detector works on at most 100,000 characters at a time. A longer field is
 cut at the last newline before each boundary and each piece scanned separately,

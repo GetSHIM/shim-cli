@@ -14,11 +14,6 @@ ROOT = Path(__file__).parents[2]
 SESSION = "0199aa11-2233-4455-6677-889900aabbcc"
 
 
-@pytest.fixture(autouse=True)
-def _isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("SHIM_GUARD_SESSION_DIR", str(tmp_path / "spools"))
-
-
 def _run(payload: dict, client: str = "claude") -> bytes:
     result = subprocess.run(
         (sys.executable, "-I", "-B", "-m", "shim_cli.hook", client),
@@ -124,9 +119,9 @@ def test_session_end_deletes_the_record() -> None:
 def test_recording_failure_never_blocks_a_tool_event(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    unusable = tmp_path / "unusable"
+    unusable = tmp_path / f"shim-session-{os.getuid()}"
     unusable.mkdir(mode=0o755)
-    monkeypatch.setenv("SHIM_GUARD_SESSION_DIR", str(unusable))
+    monkeypatch.setenv("TMPDIR", str(tmp_path))
 
     output = _run(_read_event("/work/service/.env"))
 

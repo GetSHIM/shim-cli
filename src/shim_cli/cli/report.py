@@ -126,9 +126,17 @@ def show_ledger(*, as_json: bool) -> None:
         if as_json:
             emit_json("ledger-show", "ok", days=0, events=0, entries=[])
         else:
+            from shim_cli.config import load_policy
+
+            try:
+                on = load_policy().ledger
+            except (OSError, ValueError):
+                on = False
             emit(
                 "PASS",
-                "The ledger is empty. Turn it on with `shim config --ledger`.",
+                "The ledger is on and has recorded nothing yet."
+                if on
+                else "The ledger is empty. Turn it on with `shim config --ledger`.",
             )
         return
 

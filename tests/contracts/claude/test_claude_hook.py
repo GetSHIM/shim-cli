@@ -91,7 +91,7 @@ def test_claude_code_runner_blocks_with_a_private_redaction(tmp_path: Path) -> N
     result = _run(
         _payload("Contact alice@example.com"),
         tmp_path,
-        env_extra={"SHIM_GUARD_CONFIG": str(settings)},
+        env_extra={"SHIM_CONFIG": str(settings)},
     )
     document = json.loads(result.stdout)
     path = Path(document["reason"].split(READ_INSTRUCTION, 1)[1])
@@ -131,9 +131,6 @@ def test_an_oversized_tool_event_passes_through_and_still_reaches_the_summary(
     trace: the session summary under-counted, and the one thing the user needed
     to know — which read went uninspected — was the thing that went missing.
     """
-    session = tmp_path / "session"
-    session.mkdir(mode=0o700)
-    extra = {"SHIM_GUARD_SESSION_DIR": str(session)}
     raw = json.dumps(
         {
             "session_id": "oversized",
@@ -145,7 +142,7 @@ def test_an_oversized_tool_event_passes_through_and_still_reaches_the_summary(
         separators=(",", ":"),
     ).encode()
 
-    result = _run(raw, tmp_path, extra)
+    result = _run(raw, tmp_path)
 
     assert result.returncode == 0
     assert result.stderr == b""
@@ -153,7 +150,7 @@ def test_an_oversized_tool_event_passes_through_and_still_reaches_the_summary(
 
     records = [
         json.loads(line)
-        for path in session.rglob("*.jsonl")
+        for path in tmp_path.rglob("*.jsonl")
         for line in path.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
@@ -180,8 +177,6 @@ def _read(tool: str, tool_input: dict, response: dict) -> bytes:
 def test_a_masked_read_tells_the_model_and_records_what_it_always_did(
     tmp_path: Path,
 ) -> None:
-    session = tmp_path / "session"
-    session.mkdir(mode=0o700)
     raw = _read(
         "Read",
         {"file_path": "/work/service/.env"},
@@ -194,7 +189,7 @@ def test_a_masked_read_tells_the_model_and_records_what_it_always_did(
         },
     )
 
-    result = _run(raw, tmp_path, {"SHIM_GUARD_SESSION_DIR": str(session)})
+    result = _run(raw, tmp_path)
 
     assert (result.returncode, result.stderr) == (0, b"")
     assert result.stdout == (
@@ -207,7 +202,7 @@ def test_a_masked_read_tells_the_model_and_records_what_it_always_did(
     )
     [line] = [
         line
-        for path in session.rglob("*.jsonl")
+        for path in tmp_path.rglob("*.jsonl")
         for line in path.read_text(encoding="utf-8").splitlines()
     ]
     record = json.loads(line)

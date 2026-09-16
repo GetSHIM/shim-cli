@@ -102,14 +102,8 @@ def test_the_plugin_readme_documents_the_launcher_order() -> None:
     assert text.startswith("# shim-cli plugin\n")
     assert "`hooks/run-shim <client> [plugin-root]`" in text
     assert "Python 3.9 or newer" in text
-    for step in (
-        "`shim-hook` on `PATH`",
-        "`shim-guard-hook` on `PATH`",
-        "`<plugin-root>/bin/shim.pyz`",
-    ):
-        assert step in text, step
     assert text.index("`shim-hook` on `PATH`") < text.index(
-        "`shim-guard-hook` on `PATH`"
+        "`<plugin-root>/bin/shim.pyz`"
     )
     assert "Codex sets no such variable" in text
 

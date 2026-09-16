@@ -47,8 +47,7 @@ jobs:
           uv pip install --python /tmp/shim-cli-wheel --require-hashes -r dist/requirements.lock -r /tmp/shim-dev.lock
           uv pip install --python /tmp/shim-cli-wheel --no-deps "dist/tested/shim-${GITHUB_REF_NAME#v}-py3-none-any.whl"
           test -x /tmp/shim-cli-wheel/bin/shim-hook
-          test -x /tmp/shim-cli-wheel/bin/shim-guard-hook
-          test -z "$(printf '%s' '{"hook_event_name":"UserPromptSubmit","prompt":"Synthetic safe prompt"}' | /tmp/shim-cli-wheel/bin/shim-guard-hook codex 2>&1)"
+          test -z "$(printf '%s' '{"hook_event_name":"UserPromptSubmit","prompt":"Synthetic safe prompt"}' | /tmp/shim-cli-wheel/bin/shim-hook codex 2>&1)"
           /tmp/shim-cli-wheel/bin/shim demo codex --json
           /tmp/shim-cli-wheel/bin/python -I -B -m pytest tests/contracts/codex/test_hook.py
           /tmp/shim-cli-wheel/bin/python -I -B -m pytest tests/contracts/claude/test_claude_hook.py
@@ -59,8 +58,7 @@ jobs:
           uv pip install --python /tmp/shim-cli-sdist --require-hashes -r dist/requirements.lock -r /tmp/shim-dev.lock
           uv pip install --python /tmp/shim-cli-sdist --no-deps --no-build-isolation "dist/tested/shim-${GITHUB_REF_NAME#v}.tar.gz"
           test -x /tmp/shim-cli-sdist/bin/shim-hook
-          test -x /tmp/shim-cli-sdist/bin/shim-guard-hook
-          test -z "$(printf '%s' '{"hook_event_name":"UserPromptSubmit","prompt":"Synthetic safe prompt"}' | /tmp/shim-cli-sdist/bin/shim-guard-hook codex 2>&1)"
+          test -z "$(printf '%s' '{"hook_event_name":"UserPromptSubmit","prompt":"Synthetic safe prompt"}' | /tmp/shim-cli-sdist/bin/shim-hook codex 2>&1)"
           /tmp/shim-cli-sdist/bin/shim demo codex --json
           /tmp/shim-cli-sdist/bin/python -I -B -m pytest tests/contracts/codex/test_hook.py
           /tmp/shim-cli-sdist/bin/python -I -B -m pytest tests/contracts/claude/test_claude_hook.py

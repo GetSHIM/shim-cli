@@ -102,7 +102,7 @@ def test_launcher_uses_the_bundled_archive_when_the_package_is_absent(
         "CLAUDE_PLUGIN_ROOT": str(root),
         "HOME": str(tmp_path),
         "TMPDIR": str(tmp_path),
-        "SHIM_GUARD_CONFIG": str(tmp_path / "config.toml"),
+        "SHIM_CONFIG": str(tmp_path / "config.toml"),
     }
 
     result = _run(client, environment)
@@ -122,7 +122,7 @@ def test_launcher_uses_the_bundled_archive_when_the_package_is_absent(
 
 @pytest.mark.parametrize("client", CLIENTS)
 def test_launcher_prefers_the_package_on_path(client: str, tmp_path: Path) -> None:
-    marker = tmp_path / "shim-guard-hook"
+    marker = tmp_path / "shim-hook"
     marker.write_text("#!/bin/sh\nprintf '%s' \"PATH-HOOK:$1\"\n", encoding="utf-8")
     marker.chmod(0o755)
     root = tmp_path / "plugin"
@@ -152,7 +152,7 @@ def test_launcher_stays_silent_on_a_safe_prompt(
             "CLAUDE_PLUGIN_ROOT": str(root),
             "HOME": str(tmp_path),
             "TMPDIR": str(tmp_path),
-            "SHIM_GUARD_CONFIG": str(tmp_path / "config.toml"),
+            "SHIM_CONFIG": str(tmp_path / "config.toml"),
         },
         prompt="Explain merge sort.",
     )
@@ -254,14 +254,12 @@ def test_the_archive_answers_identically_on_39_and_the_current_interpreter(
             input=raw,
             capture_output=True,
             check=False,
-            # Each interpreter needs its own spool: conftest sets one session
-            # directory for the whole test, so without this the second run
+            # Each interpreter needs its own spool, or the second run
             # summarises the first run's records too.
             env=os.environ
             | {
                 "TMPDIR": str(home),
                 "SHIM_CONFIG": str(config),
-                "SHIM_GUARD_SESSION_DIR": str(home / "session"),
                 "XDG_STATE_HOME": str(home / "state"),
             },
             timeout=120,
@@ -300,14 +298,13 @@ def _archive_members(path: Path) -> dict[str, bytes]:
         return {name: packaged.read(name) for name in names}
 
 
-def test_archive_version_reads_the_new_layout_and_the_old_one(tmp_path: Path) -> None:
+def test_archive_version_reads_the_archive(tmp_path: Path) -> None:
     from shim_cli.cli.resolution import archive_version
 
-    for package, expected in (("shim_cli", "9.9.9"), ("shim_guard", "0.2.0")):
-        bundle = tmp_path / f"{package}.pyz"
-        with zipfile.ZipFile(bundle, "w") as archive:
-            archive.writestr(f"{package}/__init__.py", f'__version__ = "{expected}"\n')
-        assert archive_version(bundle) == expected
+    bundle = tmp_path / "shim_cli.pyz"
+    with zipfile.ZipFile(bundle, "w") as archive:
+        archive.writestr("shim_cli/__init__.py", '__version__ = "9.9.9"\n')
+    assert archive_version(bundle) == "9.9.9"
 
     empty = tmp_path / "empty.pyz"
     with zipfile.ZipFile(empty, "w") as archive:

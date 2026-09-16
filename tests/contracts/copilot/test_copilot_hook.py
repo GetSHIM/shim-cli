@@ -25,7 +25,7 @@ def _redaction_files(root):
 
 def _run(raw: bytes, tmp_path: Path) -> subprocess.CompletedProcess[bytes]:
     environment = os.environ.copy()
-    environment["SHIM_GUARD_CONFIG"] = str(tmp_path / "config.toml")
+    environment["SHIM_CONFIG"] = str(tmp_path / "config.toml")
     environment["TMPDIR"] = str(tmp_path)
     return subprocess.run(
         COMMAND,

@@ -27,8 +27,6 @@ def _home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     monkeypatch.setenv("XDG_CONFIG_HOME", str(home / ".config"))
     monkeypatch.setenv("XDG_STATE_HOME", str(home / ".state"))
     monkeypatch.delenv("SHIM_CONFIG", raising=False)
-    monkeypatch.delenv("SHIM_GUARD_CONFIG", raising=False)
-    monkeypatch.delenv("SHIM_GUARD_STATE_DIR", raising=False)
     return home
 
 
@@ -297,16 +295,14 @@ def test_doctor_names_every_old_shape_and_changes_nothing(
     text = runner.invoke(app, ["doctor", client])
 
     checks = {item["name"]: item for item in json.loads(document.output)["checks"]}
-    assert checks["legacy_names"]["status"] == "WARN"
+    assert checks["legacy_names"]["status"] == "FAIL"
+    assert text.exit_code == 2
     assert _says(text, "Settings are still at")
     assert _says(text, "Ledger files are still in")
-    if client == "copilot":
-        # Copilot's old shape is the file name, not a fragment inside it.
-        assert _says(text, "hook file uses the old name")
-    else:
-        # The 0.2.0 fragment is installed, in the old shape. Doctor used to say
-        # "not installed" two lines above this, which was false.
-        assert _says(text, "hook installed in the 0.2.0 shape")
-        assert not _says(text, "hook group is not installed")
-    assert _says(text, f"run shim install {client}")
+    assert _says(
+        text,
+        f"hook installed in the 0.2.0 shape, which 1.0 does not run; "
+        f"run shim install {client}",
+    )
+    assert not _says(text, "hook group is not installed")
     assert _shim_state(home) == before

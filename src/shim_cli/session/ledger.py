@@ -32,19 +32,11 @@ def _root_for(directory: str) -> Path:
 
 
 def root_path() -> Path:
-    configured = os.environ.get("SHIM_GUARD_STATE_DIR")
-    if not configured:
-        return _root_for("shim")
-    root = Path(configured).expanduser()
-    if not root.is_absolute() or ".." in root.parts:
-        raise LedgerError("ledger directory is invalid")
-    return root
+    return _root_for("shim")
 
 
 def legacy_root_path() -> Path | None:
-    """The 0.2.0 directory, or None when a variable pins the location."""
-    if os.environ.get("SHIM_GUARD_STATE_DIR"):
-        return None
+    """The 0.2.0 directory."""
     try:
         return _root_for("shim-guard")
     except LedgerError:

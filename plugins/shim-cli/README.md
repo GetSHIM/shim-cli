@@ -22,16 +22,14 @@ the first that works:
 1. `shim-hook` on `PATH` — the package install. Preferred when present: it is
    the newest build and starts faster, because a zipapp has no bytecode cache
    and reparses its modules on every event.
-2. `shim-guard-hook` on `PATH` — the same script under the name 0.2.0 used,
-   kept until 1.0.
-3. `<plugin-root>/bin/shim.pyz` — the bundled archive. The
+2. `<plugin-root>/bin/shim.pyz` — the bundled archive. The
    root is the second argument when one is given, else `CLAUDE_PLUGIN_ROOT`.
    Claude sets the variable; Codex sets no such variable, so its `hooks.json`
    passes `${PLUGIN_ROOT}` as the argument.
-4. Nothing runnable — the prompt is **allowed** and one line is written to
+3. Nothing runnable — the prompt is **allowed** and one line is written to
    stderr explaining why it was not inspected.
 
-Case 4 never blocks. A guard that cannot run is a guard that is off, not a
+Case 3 never blocks. A guard that cannot run is a guard that is off, not a
 reason to refuse someone's prompt. The same holds for a tool event: an empty
 stdout leaves the tool call and its result exactly as the client produced them.
 

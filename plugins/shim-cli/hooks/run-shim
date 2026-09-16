@@ -10,10 +10,6 @@ if command -v shim-hook >/dev/null 2>&1; then
     exec shim-hook "$client"
 fi
 
-if command -v shim-guard-hook >/dev/null 2>&1; then
-    exec shim-guard-hook "$client"
-fi
-
 archive="$root/bin/shim.pyz"
 if [ -n "$root" ] && [ -f "$archive" ]; then
     for interpreter in python3.13 python3.12 python3.11 python3.10 python3.9 python3 python; do
