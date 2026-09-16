@@ -478,8 +478,8 @@ Every figure here was measured on the released build, not estimated.
 | Tests | **1,900+**, one command: `python scripts/check.py` — lock, lint, format, types, suite, wheel, sdist |
 | Hook cost | **70 ms** median end to end, interpreter start included; **42 ms** for a session summary |
 | With 32 custom patterns | **+0.6 ms** median against the same prompt with none |
-| Detector corpus | **570 cases**, graded on exact redacted output rather than category presence |
-| Release evidence | SBOM, provenance and Sigstore bundles on the release page from 0.3.2, with the `gh attestation verify` command in [the compatibility record](https://github.com/GetSHIM/shim-cli/blob/main/docs/compatibility.md#030-release-evidence) |
+| Detector corpus | **589 cases**, graded on exact redacted output rather than category presence |
+| Release evidence | SBOM, provenance and Sigstore bundles on the release page from 0.3.2, with the `gh attestation verify` command in [the compatibility record](https://github.com/GetSHIM/shim-cli/blob/main/docs/compatibility.md#100-release-evidence) |
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/GetSHIM/shim-cli/main/docs/assets/shots/shim-doctor.png" width="880"
@@ -487,7 +487,7 @@ Every figure here was measured on the released build, not estimated.
 </p>
 
 Hook output is asserted byte for byte, not by shape: a safe event must produce
-exactly zero bytes on stdout and stderr. 341 contract tests hold that, plus the
+exactly zero bytes on stdout and stderr. 346 contract tests hold that, plus the
 import boundaries, the rule that no committed file carries the machine it was
 written on, and a byte-identical rebuild of the shipped plugin archive.
 
@@ -539,6 +539,7 @@ reinstalling later finds your entity choices and custom patterns still there.
 - [Compatibility](https://github.com/GetSHIM/shim-cli/blob/main/docs/compatibility.md)
 - [Privacy](https://github.com/GetSHIM/shim-cli/blob/main/docs/privacy.md)
 - [1.0.0 release notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/1.0.0.md)
+- [0.3.3 release notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/0.3.3.md)
 - [0.3.2 release notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/0.3.2.md)
 - [0.3.1 release notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/0.3.1.md)
 - [0.3.0 release notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/0.3.0.md)
