@@ -460,6 +460,10 @@ reported.
 - The host client receives the raw prompt before its hook runs, and other hooks
   may receive it concurrently.
 - Detection is best-effort and may miss sensitive values.
+- **The output of a failed tool call is not masked.** Claude Code passes it
+  to a separate hook event that shim does not install, so a command such as
+  `cat .env && cat missing-file` exits non-zero and the model reads `.env`
+  as it is, with nothing in the session summary.
 - A disabled, untrusted, crashed, or timed-out hook may fail open according to
   client behavior.
 - Clients, providers, and other tools may retain data independently of shim.
