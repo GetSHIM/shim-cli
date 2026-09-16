@@ -8,7 +8,7 @@ from pathlib import Path
 
 from shim_cli.clients.hook_settings import MAX_SETTINGS_BYTES, interpreter_path
 
-TESTED_COPILOT_VERSION = "1.0.80"
+TESTED_COPILOT_VERSION = "1.0.83"
 MINIMUM_COPILOT_VERSION = "1.0.80"
 HOOK_TIMEOUT_SECONDS = 30
 MAX_CONFIG_BYTES = MAX_SETTINGS_BYTES

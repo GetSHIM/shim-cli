@@ -47,7 +47,8 @@ def test_copilot_1080_hook_file_is_exact(tmp_path: Path) -> None:
         "copilot",
     ]
     assert HOOK_TIMEOUT_SECONDS == 30
-    assert TESTED_COPILOT_VERSION == MINIMUM_COPILOT_VERSION == "1.0.80"
+    assert TESTED_COPILOT_VERSION == "1.0.83"
+    assert MINIMUM_COPILOT_VERSION == "1.0.80"
 
 
 def test_copilot_target_respects_home_and_copilot_home(
