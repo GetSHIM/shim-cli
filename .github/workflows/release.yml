@@ -20,7 +20,7 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: '3.13'
-      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
       - name: Require matching version and completed release evidence
         run: |
           python -c 'import os, pathlib, tomllib; version = tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"]; assert os.environ["GITHUB_REF_NAME"] == f"v{version}"'
@@ -88,7 +88,7 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: '3.13'
-      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
       - name: Require matching version and completed release evidence
         run: |
           python -c 'import os, pathlib, tomllib; root = pathlib.Path("/tmp/shim-cli-build-source"); version = tomllib.loads((root / "pyproject.toml").read_text())["project"]["version"]; assert os.environ["GITHUB_REF_NAME"] == f"v{version}"'
@@ -128,7 +128,7 @@ jobs:
           cp /tmp/shim-cli-evidence-source/tests/corpus/guard-v2.json dist/guard-v2.json
           cp /tmp/shim-cli-evidence-source/tests/corpus/guard-v2-metrics.json dist/guard-v2-metrics.json
           cp /tmp/shim-cli-evidence-source/tests/corpus/guard-tools-v1.json dist/guard-tools-v1.json
-      - uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
+      - uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
         with:
           path: /tmp/shim-cli-benchmark
           format: cyclonedx-json
