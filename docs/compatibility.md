@@ -6,8 +6,8 @@
 | --- | --- |
 | Python | CPython 3.10 through 3.13 for the package; the plugin archive runs on 3.9 through 3.13 |
 | Operating systems | macOS and Linux target |
-| Prompt hooks | Codex CLI, Claude Code, and GitHub Copilot CLI |
-| Tool hooks | Claude Code `PreToolUse` and `PostToolUse` only |
+| Prompt hooks | Codex CLI, Claude Code, GitHub Copilot CLI, and VS Code |
+| Tool hooks | Claude Code `PreToolUse` and `PostToolUse`, masked; VS Code `PreToolUse` reports and denies, `PostToolUse` reports only |
 | `shim watch` | Claude Code only. Codex is refused: it reads its endpoint from its own configuration, so the proxy is bypassed and the session measured as empty ([probe](probe-2026-09-codex-watch.md)). Copilot out of scope because a custom endpoint removes GitHub authentication |
 
 ## Install
@@ -72,6 +72,53 @@ arguments and native structured tool responses. Copilot uses
 `userPromptTransformed` to replace the model-facing prompt; the original can
 remain visible in its timeline.
 
+**VS Code refuses before a tool and reports after it.** Measured on 20
+September 2026 against VS Code 1.137.0 with Copilot Chat 0.65.0, through a
+capture-only hook. Captures: `tests/fixtures/probe/vscode/`.
+
+| Event | Tried | Result |
+| --- | --- | --- |
+| `UserPromptSubmit` | `continue: false` | **Stops it.** "A hook prevented chat from continuing", with the hook's reason, and no answer. |
+| `PreToolUse` | `permissionDecision: "deny"` | **Denies it.** The command never ran and no `PostToolUse` followed. |
+| `PostToolUse` | `decision: "block"` | **Does nothing to the result.** The model quoted the secret out of the blocked terminal output. |
+| `PostToolUse` | `continue: false` | **Does not stop the turn.** The model answered from the result anyway. |
+
+So `events/pipeline.py` carries a third field on `Adapter`, `power`, and every
+adapter states which of `rewrite`, `refuse` or `report-only` its client grants
+at that event. `_decide` caps the action at it: a mask becomes a refusal where
+only refusal exists, and a refusal becomes a report where the model already
+holds the data. The session record then says `found` rather than `blocked`,
+because reporting a block that the model read through would be worse than
+saying nothing.
+
+Two further limits from the same run. A `read_file` result arrives as
+`tool_response: ""`, so a file read can only be inspected by its path at
+`PreToolUse`; the transcript records `success: true` and no content either. A
+`run_in_terminal` result does arrive in full. Tool names are VS Code's own
+(`read_file`, `run_in_terminal`) and inputs are camelCase (`filePath`), so a
+Claude-shaped adapter would not match them.
+
+The shipped default for tool traffic is `enforce`, chosen when masking was
+free. In VS Code that would mean denying calls nobody asked to have denied, so
+a mode that was never written down reports instead; `[mode] outbound =
+"enforce"` turns denial on.
+
+**The Agent Plugins manifest is what the submission checks read.** `plugin.json`
+at the plugin root declares the `agent-plugins.org` v1 schema, whose fields are
+closed: `displayName` and a `hooks` path, which the Claude manifest carries,
+fail the gate. github/awesome-copilot resolves the manifest relative to the
+listing's `source.path`, which is why the file sits in `plugins/shim-cli/`
+rather than at the repository root, and it accepts only a tag or a full commit
+SHA as `source.ref`.
+
+**The same file reaches three clients.** VS Code, GitHub Copilot CLI and the
+Copilot app all read `com.github.copilot/hooks/hooks.json`. Copilot CLI has its
+own hook route through `shim install copilot`, and its `postToolUse` can replace
+a result with `modifiedResult` where VS Code cannot, so the plugin command
+stands down there rather than inspecting every prompt twice. Copilot CLI 1.0.85
+sets `COPILOT_CLI=1` on every hook process, which is the guard; `VSCODE_PID` is
+not usable for this, because it is also set in any terminal inside VS Code.
+
 **The plugin ships two hook files, and Claude Code reads both.** `plugin.json`
 declares `hooks/claude.json`, but Claude Code 2.1.263 also loads
 `hooks/hooks.json` by convention — the file Codex finds the same way, because
@@ -96,6 +143,19 @@ on `Codex hook activation is client UI state; verify SHIM with /hooks`. shim
 cannot read that record and does not write it; a diagnosis that claimed to
 would be guessing. `codex exec --dangerously-bypass-hook-trust` runs enabled
 hooks without it, which is useful to confirm an install and wrong as a habit.
+
+## 1.0.1 release evidence
+
+Recorded 20 September 2026 on macOS 26.4 arm64, CPython 3.13.5, uv 0.12.5.
+
+| Evidence | Recorded result |
+| --- | --- |
+| Local gate | `python scripts/check.py` green: 2,032 tests, lint, format, types, build. |
+| VS Code | tested: 1.137.0, Copilot Chat 0.65.0. Hook protocol captured from a running client through a capture-only hook; fixtures in `tests/fixtures/probe/vscode/`. `continue: false` on `UserPromptSubmit` stopped the turn (`A hook prevented chat from continuing`, with the hook's reason, and no answer). `permissionDecision: "deny"` on `PreToolUse` refused `cat blocked.txt`; no `PostToolUse` followed. `decision: "block"` on a `PostToolUse` terminal result did **not** withhold it: the model answered with the secret from the blocked output. `continue: false` at the same event did not stop the turn either. `read_file` results arrive as `tool_response: ""`; `run_in_terminal` results arrive in full. Then the shipped plugin itself, through `hooks/run-shim vscode` and the committed archive: a prompt carrying a synthetic address answered `{"systemMessage":"shim: found EMAIL (1) in your prompt. Not modified."}` in 483 ms; `cat secrets.env` through the terminal tool answered `shim: found DB_URI (1), EMAIL (1), SECRET (1) in run_in_terminal. Not modified.` with `additionalContext` telling the model not to repeat the values, and the model described the file without quoting one; `Stop` rendered `shim — this session / warned 2 EMAIL (run_in_terminal, your prompt) / 1 DB_URI / 1 SECRET / overhead 168 ms median, 218 ms p95`. The archive path costs more than the package: 483 ms on the first event, 168 ms median after. |
+| GitHub Copilot CLI | tested: 1.0.83, run on 1.0.85. The plugin loaded with `--plugin-dir` and the `com.github.copilot` hook stood down: a prompt carrying a synthetic AWS key produced no shim line and no error. `COPILOT_CLI=1` is set on every hook process, which is what the guard keys on; `VSCODE_PID` is not usable, because a terminal inside VS Code sets it too. |
+| Claude Code | tested: 2.1.263, detection re-checked on 2.1.273. The new root `plugin.json` does not disturb Claude Code's own manifest: `claude plugin install shim-cli@shim-cli` into an isolated `CLAUDE_CONFIG_DIR` reported the plugin enabled at its version. Live on this build through the committed archive, with the hook registered in a scratch workspace's own `.claude/settings.json` rather than in any real user file: a `Read` of a synthetic `.env` reached the model as `AWS_ACCESS_KEY_ID=<SECRET_1>` and `SUPPORT_EMAIL=<EMAIL_1>`, and the model answered that a masking layer had replaced the values and it would not route around it. The same fixture masks identically through the package and the archive. |
+| Codex CLI | tested: 0.151.0. `codex plugin add shim-cli@shim-cli` into a separate `CODEX_HOME` listed the plugin installed and enabled from `plugins/shim-cli`; the root manifest did not change its detection. No live prompt was run for this build. |
+| A Claude install under VS Code | `~/.claude/settings.json` is read by VS Code by default. With `user-prompt = "enforce"`, the hook now answers a VS Code payload with `continue: false` and a Claude payload with `decision: "block"` plus `suppressOriginalPrompt`, from the same installed hook line. Covered by `tests/clients/vscode/test_claude_install_under_vscode.py`. |
 
 ## 1.0.0 release evidence
 

@@ -76,14 +76,7 @@ def _json_block(reason: str, suppress_original_prompt: bool) -> bytes:
     return output
 
 
-def block_output(
-    decision: GuardDecision,
-    suggestion_path: str | None,
-    *,
-    suppress_original_prompt: bool = False,
-) -> bytes:
-    if not decision.blocked:
-        return b""
+def block_reason(decision: GuardDecision, suggestion_path: str | None) -> str:
     if not isinstance(suggestion_path, str) or not suggestion_path:
         raise ValueError("suggestion path is invalid")
     path = Path(suggestion_path)
@@ -94,12 +87,24 @@ def block_output(
     ):
         raise ValueError("suggestion path is invalid")
     counts = ", ".join(f"{category} ({count})" for category, count in decision.counts)
-    reason = (
+    return (
         f"shim blocked this prompt: {counts}.\n"
         "Copy and paste this as your next prompt:\n"
         f"Read this file and use its contents as my prompt: {suggestion_path}"
     )
-    return _json_block(reason, suppress_original_prompt)
+
+
+def block_output(
+    decision: GuardDecision,
+    suggestion_path: str | None,
+    *,
+    suppress_original_prompt: bool = False,
+) -> bytes:
+    if not decision.blocked:
+        return b""
+    return _json_block(
+        block_reason(decision, suggestion_path), suppress_original_prompt
+    )
 
 
 def warn_output(decision: GuardDecision) -> bytes:

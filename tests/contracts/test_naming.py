@@ -10,6 +10,8 @@ from shim_cli.clients.claude.settings import TESTED_CLAUDE_VERSION
 from shim_cli.clients.codex.settings import TESTED_CODEX_VERSION
 from shim_cli.clients.copilot.settings import TESTED_COPILOT_VERSION
 
+TESTED_VSCODE_VERSION = "1.137.0"
+
 try:
     import tomllib
 except ModuleNotFoundError:  # the 3.10 floor CI also runs
@@ -133,4 +135,7 @@ def test_the_tested_client_versions_match_the_newest_release_evidence() -> None:
         "Claude Code": TESTED_CLAUDE_VERSION,
         "Codex CLI": TESTED_CODEX_VERSION,
         "GitHub Copilot CLI": TESTED_COPILOT_VERSION,
+        # VS Code has no installer and no doctor, so no runtime constant states
+        # a tested version; the evidence record is the only place it lives.
+        "VS Code": TESTED_VSCODE_VERSION,
     }

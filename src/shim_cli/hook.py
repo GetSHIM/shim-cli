@@ -31,6 +31,11 @@ _COPILOT_ERROR_OUTPUT = (
     b"so it was withheld. Do not act on the original prompt; tell the user to "
     b'run `shim doctor copilot` for the reason."}'
 )
+_VSCODE_ERROR_OUTPUT = (
+    b'{"continue":false,"stopReason":"shim could not inspect this prompt, '
+    b"so it was withheld. Open the shim plugin in VS Code to see whether it is "
+    b'loaded, and check your shim settings."}'
+)
 
 
 def _error_output(client: str) -> bytes:
@@ -38,14 +43,19 @@ def _error_output(client: str) -> bytes:
         return _CLAUDE_ERROR_OUTPUT
     if client == "copilot":
         return _COPILOT_ERROR_OUTPUT
+    if client == "vscode":
+        return _VSCODE_ERROR_OUTPUT
     return _ERROR_OUTPUT
 
 
 def _tool_error_output(client: str, event: str) -> bytes:
-    if client != "claude":
+    if client not in ("claude", "vscode"):
         return b""
     try:
-        from shim_cli.clients.claude import tool_events
+        if client == "vscode":
+            from shim_cli.clients.vscode import tool_events
+        else:
+            from shim_cli.clients.claude import tool_events
 
         if event not in tool_events.TOOL_EVENTS:
             return b""
@@ -452,7 +462,17 @@ def _tool_output(
         return evaluate(text, entities, policy.custom, policy.reveal)
 
     def mode_for(direction: str, tool: str) -> str:
-        return policy.mode_for(direction, tool, event)
+        mode = policy.mode_for(direction, tool, event)
+        if (
+            mode == "enforce"
+            and entry.power != "rewrite"
+            and not policy.chose_mode(direction, tool, event)
+        ):
+            # Where masking is unavailable, enforcing refuses the call instead.
+            # Nobody asked for that by installing; they get the report until
+            # they ask for enforce themselves.
+            return "warn"
+        return mode
 
     def entities_for(tool: str, _event: str = "") -> tuple:
         return policy.entities_for(tool, event)
@@ -462,7 +482,35 @@ def _tool_output(
     return outcome.output
 
 
+CLIENTS = ("claude", "codex", "copilot", "vscode")
+
+
+def _is_vscode_payload(document: dict) -> bool:
+    """True for an event VS Code sent to a hook installed as Claude Code's.
+
+    VS Code reads `~/.claude/settings.json` by default, so `shim install
+    claude` also runs inside VS Code — speaking a protocol VS Code does not
+    share. Its prompt block would be ignored there and the prompt sent anyway,
+    which is the one failure shim must never have: a user who asked for
+    enforcement and silently did not get it.
+
+    The two clients are told apart by what they always send. Every captured
+    Claude Code event carries `permission_mode` and none carries `timestamp`;
+    every captured VS Code event is the reverse.
+    """
+    return "timestamp" in document and "permission_mode" not in document
+
+
 def _output(raw: bytes, client: str = "codex") -> bytes:
+    if client not in CLIENTS:
+        # An older build meeting a newer plugin: with no adapter for that
+        # client this hook cannot shape a refusal the client would understand,
+        # and a guard that cannot run is off, not a reason to refuse the work.
+        sys.stderr.write(
+            f"shim: this build has no hook for {client or 'that client'}; "
+            "nothing was inspected. Upgrade shim.\n"
+        )
+        return b""
     if len(raw) > MAX_INPUT_BYTES:
         # Too large to inspect is still something that happened. Without this
         # the event left no trace at all and the summary silently under-counted.
@@ -498,8 +546,20 @@ def _output(raw: bytes, client: str = "codex") -> bytes:
                     parse_input,
                     warn_output,
                 )
-            else:
-                return _error_output(client)
+            elif client == "vscode":
+                from shim_cli.clients.vscode.hook import (
+                    block_output,
+                    error_output,
+                    parse_input,
+                    warn_output,
+                )
+                from shim_cli.clients.vscode.tool_events import (
+                    TOOL_EVENTS as VSCODE_TOOL_EVENTS,
+                )
+
+                tool_event_adapters = VSCODE_TOOL_EVENTS
+            else:  # pragma: no cover - _output refuses unknown clients first
+                return b""
 
             try:
                 try:
@@ -509,6 +569,19 @@ def _output(raw: bytes, client: str = "codex") -> bytes:
                     event, session_id, stop_active = _envelope(document)
                 except ValueError:
                     return _refusal_output(raw, client)
+                if client == "claude" and _is_vscode_payload(document):
+                    from shim_cli.clients.vscode.hook import (
+                        block_output,
+                        error_output,
+                        parse_input,
+                        warn_output,
+                    )
+                    from shim_cli.clients.vscode.tool_events import (
+                        TOOL_EVENTS as VSCODE_TOOL_EVENTS,
+                    )
+
+                    tool_event_adapters = VSCODE_TOOL_EVENTS
+                    client = "vscode"
                 if event == _STOP_EVENT:
                     _count_model_output(document, client, session_id)
                     return _summary_output(session_id, stop_active)

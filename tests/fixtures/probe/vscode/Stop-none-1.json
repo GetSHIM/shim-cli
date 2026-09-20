@@ -1,0 +1,8 @@
+{
+  "timestamp": "2026-09-20T08:41:14.321Z",
+  "hook_event_name": "Stop",
+  "session_id": "00000000-0000-4000-8000-000000000101",
+  "transcript_path": "/probe/workspace/.vscode/transcripts/probe.jsonl",
+  "cwd": "/probe/workspace",
+  "stop_hook_active": false
+}

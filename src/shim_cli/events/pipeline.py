@@ -33,15 +33,28 @@ class Event:
     views_file: bool
 
 
+# What a client's hook can actually do at one event, measured against the
+# running client rather than taken from its documentation.
+REWRITE = "rewrite"  # the payload the model reads can be replaced
+REFUSE = "refuse"  # it cannot be changed, but the call can be stopped
+REPORT_ONLY = "report-only"  # the model already has it; only the user can be told
+POWERS = (REWRITE, REFUSE, REPORT_ONLY)
+
+
 @dataclass(frozen=True)
 class Adapter:
-    __slots__ = ("client", "event", "root", "decode", "encode")
+    __slots__ = ("client", "event", "root", "decode", "encode", "power")
 
     client: str
     event: str
     root: str
     decode: Callable[[bytes | dict[str, object]], Event]
     encode: Callable[[str, object, str], bytes]
+    # No default: a new adapter must say which of the three it is, because
+    # claiming more than the client grants is how a user ends up trusting a
+    # block that never happened. (A default would also clash with __slots__,
+    # which the 3.9 archive still needs.)
+    power: str
 
 
 @dataclass(frozen=True)
@@ -108,6 +121,21 @@ def _message(tool: str, counts: tuple, action: str) -> str:
     return f"shim: found {what}{where}. Not modified."
 
 
+def _decide(entry: Adapter, direction: str, mode: str) -> str:
+    """The strongest action this event can honestly deliver.
+
+    Enforcement is capped by what the client grants, never by what was asked
+    for: reporting a mask that did not happen, or a block the model read
+    straight through, is worse than reporting the finding plainly.
+    """
+    action = decide(direction, mode)
+    if entry.power == REPORT_ONLY and action in (MASK, DENY):
+        return REPORT
+    if action == MASK and entry.power == REFUSE:
+        return DENY
+    return action
+
+
 def process(
     entry: Adapter,
     raw: bytes | dict[str, object],
@@ -171,13 +199,15 @@ def process(
         return Outcome(b"", record(ALLOW, note="no payload at this key"))
 
     inbound = direction == INBOUND
-    shrinkable = inbound and mode != OBSERVE and not event.views_file
+    shrinkable = (
+        inbound and mode != OBSERVE and not event.views_file and entry.power == REWRITE
+    )
     transforms = diet if shrinkable else ()
     result = inspect(body, evaluate, transforms, scan_markers=inbound)
     if result.skipped:
         note = f"{result.status}: {result.skipped} fields or subtrees not inspected ({', '.join(result.reasons)})"
         counts = _counts(result.findings)
-        action = decide(direction, mode) if counts else ALLOW
+        action = _decide(entry, direction, mode) if counts else ALLOW
         can_rewrite = action == MASK or (not counts and shrinkable and result.changed)
         message = INCOMPLETE_MESSAGE
         if counts:
@@ -227,7 +257,7 @@ def process(
         )
 
     counts = _counts(findings)
-    action = decide(direction, mode)
+    action = _decide(entry, direction, mode)
     if action == ALLOW:
         return Outcome(
             b"",

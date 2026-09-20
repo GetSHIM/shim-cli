@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 
 from shim_cli.clients.user_prompt_hook import parse_object
-from shim_cli.events.pipeline import INCOMPLETE_MESSAGE, Adapter, Event
+from shim_cli.events.pipeline import INCOMPLETE_MESSAGE, REWRITE, Adapter, Event
 from shim_cli.policy import ALLOW, DENY, MASK, REPORT
 
 MAX_INPUT_BYTES = 1_000_000
@@ -113,6 +113,7 @@ TOOL_EVENTS = {
         "tool_input",
         _decoder("PreToolUse", "tool_input"),
         pre_tool_use,
+        power=REWRITE,
     ),
     "PostToolUse": Adapter(
         "claude",
@@ -120,6 +121,7 @@ TOOL_EVENTS = {
         "tool_response",
         _decoder("PostToolUse", "tool_response"),
         post_tool_use,
+        power=REWRITE,
     ),
 }
 INSTALLED_EVENTS = tuple(sorted(TOOL_EVENTS))

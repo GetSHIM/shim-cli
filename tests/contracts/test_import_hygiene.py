@@ -69,6 +69,7 @@ ALLOWED_INTERNAL_EXCEPTIONS = frozenset(
         ("clients/claude/hook.py", "shim_cli.guard.GuardDecision"),
         ("clients/codex/hook.py", "shim_cli.guard.GuardDecision"),
         ("clients/copilot/hook.py", "shim_cli.guard.GuardDecision"),
+        ("clients/vscode/hook.py", "shim_cli.guard.GuardDecision"),
     }
 )
 

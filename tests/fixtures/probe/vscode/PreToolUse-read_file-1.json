@@ -1,0 +1,14 @@
+{
+  "timestamp": "2026-09-20T08:41:12.480Z",
+  "hook_event_name": "PreToolUse",
+  "session_id": "00000000-0000-4000-8000-000000000101",
+  "transcript_path": "/probe/workspace/.vscode/transcripts/probe.jsonl",
+  "cwd": "/probe/workspace",
+  "tool_name": "read_file",
+  "tool_input": {
+    "filePath": "/probe/workspace/plain.txt",
+    "startLine": 1,
+    "endLine": 50
+  },
+  "tool_use_id": "call_00000000000000000000__vscode-1700000000000"
+}

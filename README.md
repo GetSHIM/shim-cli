@@ -126,6 +126,7 @@ removes GitHub authentication altogether, so there is nothing to watch.
 | [Claude Code](https://github.com/anthropics/claude-code) | Reports what it found and lets it through; blocks under `enforce` | Eligible structured arguments and inbound results are masked; commands and local writes are report-or-deny only |
 | [Codex CLI](https://github.com/openai/codex) | Reports what it found and lets it through; blocks under `enforce` | Not installed — no verified native tool-event adapter |
 | [GitHub Copilot CLI](https://github.com/github/copilot-cli) | Replaces the model-facing prompt with the redacted text | Not installed — no verified native tool-event adapter |
+| [VS Code](https://code.visualstudio.com/docs/agent-customization/agent-plugins) | Reports what it found and lets it through; stops the prompt before it is sent under `enforce` | A call is reported, and denied under `enforce`, before it runs. A **result** can only be reported: by then the model has it, and nothing takes it back. Never masked |
 
 Tool coverage is verified against a running client, not derived from
 documentation. `shim doctor <client>` prints exactly which events are installed
@@ -180,6 +181,43 @@ a trust record per hook and skips any hook without one — no warning, and your
 prompts reach the model uninspected. Open `/hooks` in Codex, review the shim
 entry, and enable it. `shim doctor codex` ends by reminding you, because that
 record lives in Codex and shim cannot read it.
+
+### VS Code
+
+VS Code is reached through the plugin only; there is no `shim install vscode`.
+Point VS Code at the plugin folder, or install it from a plugin marketplace
+that carries this repository:
+
+```json
+"chat.pluginLocations": { "/path/to/shim-cli/plugins/shim-cli": true }
+```
+
+**In VS Code shim reports, and refuses only where refusing works.** This was
+measured against VS Code 1.137.0 rather than read out of its documentation:
+
+| Moment | What shim can do |
+| --- | --- |
+| Your prompt | Report. Under `enforce` the prompt is stopped before it is sent. |
+| Before a tool runs | Report. Under `enforce` the call is denied and never runs. |
+| After a tool has run | **Report only.** A `block` there was read straight through by the model, and so was `continue: false`. |
+
+Nothing is ever masked: no VS Code hook output replaces a prompt, a tool input
+or a tool result. And a `read_file` result reaches the hook as an empty
+`tool_response`, so a file read is protected by its path before the read, not
+by its contents afterwards. A terminal result does arrive in full and is
+inspected.
+
+Because a refusal is the only enforcement available, tool events report by
+default there, and refusing waits until you ask for it:
+
+```toml
+[mode]
+inbound = "enforce"
+```
+
+The same plugin file is read by GitHub Copilot CLI and the Copilot app, where
+`shim install copilot` is the supported route. The hook stands down in those
+clients so nothing is inspected twice.
 
 ### Marketplace plugins
 
