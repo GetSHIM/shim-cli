@@ -2,7 +2,18 @@
 
 This plugin registers shim's local hooks. Claude Code gets the prompt,
 verified `PreToolUse` and `PostToolUse`, `Stop`, and `SessionEnd` events. Codex
-gets the prompt event only.
+gets the prompt event only. VS Code gets the prompt, `PreToolUse`,
+`PostToolUse` and `Stop`. There shim never masks, stops a prompt or denies a
+call under `enforce`, and only reports on a result: measured against VS Code
+1.137.0, a block after a tool is read straight through by the model.
+
+Three manifests sit side by side, one per format: `.claude-plugin/plugin.json`,
+`.codex-plugin/plugin.json`, and `plugin.json`, the Agent Plugins v1 manifest
+VS Code, GitHub Copilot CLI and the Copilot app read. Their hook files are
+`hooks/claude.json`, `hooks/hooks.json` and `com.github.copilot/hooks/hooks.json`.
+The Copilot clients run that last file too, so its command stands down when
+`COPILOT_CLI` is set: `shim install copilot` is their route, and inspecting a
+prompt twice helps nobody.
 
 The plugin carries a self-contained hook in `bin/shim.pyz` on `main` and on
 every tag, so it needs no package-manager step and no prerequisite beyond

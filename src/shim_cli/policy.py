@@ -78,6 +78,16 @@ class Policy:
             return self.modes["default"]
         return DEFAULT_MODES.get(direction, WARN)
 
+    def chose_mode(self, direction: str, tool: str = "", event: str = "") -> bool:
+        """True when a settings file named this mode, rather than a default.
+
+        The shipped default for tool traffic is enforce because masking costs
+        the user nothing. Where masking is impossible, enforce means refusing
+        the call, so that default is not one a user silently agreed to.
+        """
+        keys = (tool, event, direction, "default")
+        return any(key and key in self.modes for key in keys)
+
     def entities_for(self, tool: str = "", event: str = "") -> tuple:
         for key in (tool, event):
             if key and key in self.tool_entities:

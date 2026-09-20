@@ -1,7 +1,7 @@
 {
   "name": "shim-cli",
   "displayName": "shim-cli",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Masks secrets and personal data in the tool results Claude Code reads, before the model sees them; reports what was in your prompts; and, with `shim watch`, shows what a session sent and what it cost. Runs locally with no account, network destination or telemetry.",
   "author": {
     "name": "shim Engineering"

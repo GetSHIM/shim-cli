@@ -1,6 +1,6 @@
 {
   "name": "shim-cli",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Reports secrets and personal data found in your Codex prompts before they are sent, locally, with no account, network destination or telemetry. Blocking is opt in.",
   "author": {
     "name": "shim Engineering"

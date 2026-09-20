@@ -1,0 +1,17 @@
+{
+  "timestamp": "2026-09-20T08:44:18.224Z",
+  "hook_event_name": "PostToolUse",
+  "session_id": "00000000-0000-4000-8000-000000000101",
+  "transcript_path": "/probe/workspace/.vscode/transcripts/probe.jsonl",
+  "cwd": "/probe/workspace",
+  "tool_name": "run_in_terminal",
+  "tool_input": {
+    "command": "cd /probe/workspace && cat blocked.txt",
+    "explanation": "Display the contents of the blocked file so I can read the secret value it contains.",
+    "goal": "Read file output",
+    "mode": "sync",
+    "timeout": 20000
+  },
+  "tool_response": "Note: The tool simplified the command to ` cat blocked.txt` (terminal ID=00000000-0000-4000-8000-000000000102). This is the output of running that command instead:\nORDER-ID: 88\nsupport: ayse.yilmaz@example.com key AKIAIOSFODNN7EXAMPLE\n$ ",
+  "tool_use_id": "call_00000000000000000001__vscode-1700000000000"
+}

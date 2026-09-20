@@ -1,0 +1,16 @@
+{
+  "timestamp": "2026-09-20T08:44:14.769Z",
+  "hook_event_name": "PreToolUse",
+  "session_id": "00000000-0000-4000-8000-000000000101",
+  "transcript_path": "/probe/workspace/.vscode/transcripts/probe.jsonl",
+  "cwd": "/probe/workspace",
+  "tool_name": "run_in_terminal",
+  "tool_input": {
+    "command": "cd /probe/workspace && cat blocked.txt",
+    "explanation": "Display the contents of the blocked file so I can read the secret value it contains.",
+    "goal": "Read file output",
+    "mode": "sync",
+    "timeout": 20000
+  },
+  "tool_use_id": "call_00000000000000000001__vscode-1700000000000"
+}

@@ -1,0 +1,9 @@
+{
+  "timestamp": "2026-09-20T08:41:10.424Z",
+  "hook_event_name": "SessionStart",
+  "session_id": "00000000-0000-4000-8000-000000000101",
+  "transcript_path": "/probe/workspace/.vscode/transcripts/probe.jsonl",
+  "cwd": "/probe/workspace",
+  "source": "new",
+  "model": "auto"
+}
