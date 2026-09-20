@@ -1,7 +1,7 @@
 # Command reference
 
 Every command shim has, what it prints, and what it exits with. The README is
-the tour; this is the map.
+the tour, this is the map, and the [cookbook](cookbook.md) is the recipes.
 
 Everything here runs locally. No command in this document sends anything
 anywhere, with one exception that is marked as such: `shim watch` forwards your

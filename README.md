@@ -577,6 +577,7 @@ reinstalling later finds your entity choices and custom patterns still there.
 ## Project documentation
 
 - [Command reference](https://github.com/GetSHIM/shim-cli/blob/main/docs/commands.md) — every command, flag and exit code
+- [Cookbook](https://github.com/GetSHIM/shim-cli/blob/main/docs/cookbook.md) — recipes for getting more out of it once it runs
 - [Architecture](https://github.com/GetSHIM/shim-cli/blob/main/docs/architecture.md)
 - [Compatibility](https://github.com/GetSHIM/shim-cli/blob/main/docs/compatibility.md)
 - [Privacy](https://github.com/GetSHIM/shim-cli/blob/main/docs/privacy.md)
