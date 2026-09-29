@@ -121,20 +121,17 @@ stands down there rather than inspecting every prompt twice. Copilot CLI 1.0.85
 sets `COPILOT_CLI=1` on every hook process, which is the guard; `VSCODE_PID` is
 not usable for this, because it is also set in any terminal inside VS Code.
 
-**The plugin ships two hook files, and Claude Code reads both.** `plugin.json`
-declares `hooks/claude.json`, but Claude Code 2.1.263 also loads
-`hooks/hooks.json` by convention — the file Codex finds the same way, because
-`.codex-plugin/plugin.json` has no field that names a hooks path. Claude Code
-does not expand Codex's `${PLUGIN_ROOT}`, so every prompt ran `/hooks/run-shim`
-and logged exit 127 beside the real hook's output. The Codex command therefore
-opens with `[ -z "${PLUGIN_ROOT}" ] && exit 0`: Claude Code leaves `PLUGIN_ROOT`
-unset and the command stands down silently, while Codex sets it. 0.3.1 and
-0.3.2 keyed the guard on `CLAUDE_PLUGIN_ROOT` instead, which Codex 0.151.0
-sets too, so the Codex plugin hook exited before inspecting anything and
-reported the prompt as `Completed`; the package route was unaffected. The
-guard now fails the safe way: a Claude Code that set `PLUGIN_ROOT` would
-inspect a prompt twice, not zero times. If a future Codex manifest accepts a
-hooks path, the file becomes `hooks/codex.json` and the guard is dropped.
+**Each client is pointed at one hook file, named by its own manifest.** Claude Code
+reads `hooks/claude.json` from `.claude-plugin/plugin.json`, and
+`.codex-plugin/plugin.json` names `hooks/codex.json` for Codex; there is no `hooks/hooks.json`
+at the plugin root, which Claude Code 2.1.263 also loaded by convention and ran
+beside its own file, so every Claude Code command passes the Claude directory's
+rule that a hook command starts at `${CLAUDE_PLUGIN_ROOT}` with no inline program.
+Before 1.0.2 the Codex command opened with `[ -z "${PLUGIN_ROOT}" ] && exit 0` so
+that Claude Code, which leaves `PLUGIN_ROOT` unset, stood it down; with the file
+out of Claude Code's reach the guard is gone. Whether Codex honours the manifest's
+`hooks` path could not be measured, because Codex 0.151.0 and 0.159.0 load no
+plugin hook at all; Codex users install the hook with `shim install codex`.
 
 **A Codex hook does not run until it is trusted.** From 0.151.0 Codex holds a
 persisted trust record per hook and silently skips any hook it does not have

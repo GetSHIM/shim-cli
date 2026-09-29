@@ -10,7 +10,9 @@ call under `enforce`, and only reports on a result: measured against VS Code
 Three manifests sit side by side, one per format: `.claude-plugin/plugin.json`,
 `.codex-plugin/plugin.json`, and `plugin.json`, the Agent Plugins v1 manifest
 VS Code, GitHub Copilot CLI and the Copilot app read. Their hook files are
-`hooks/claude.json`, `hooks/hooks.json` and `com.github.copilot/hooks/hooks.json`.
+`hooks/claude.json`, `hooks/codex.json` and `com.github.copilot/hooks/hooks.json`,
+each named by its manifest. Current Codex does not load a plugin's hook, so Codex
+users install it with `shim install codex` instead; see `docs/compatibility.md`.
 The Copilot clients run that last file too, so its command stands down when
 `COPILOT_CLI` is set: `shim install copilot` is their route, and inspecting a
 prompt twice helps nobody.
@@ -35,8 +37,9 @@ the first that works:
    and reparses its modules on every event.
 2. `<plugin-root>/bin/shim.pyz` — the bundled archive. The
    root is the second argument when one is given, else `CLAUDE_PLUGIN_ROOT`.
-   Claude sets the variable; Codex sets no such variable, so its `hooks.json`
-   passes `${PLUGIN_ROOT}` as the argument.
+   Claude Code sets `CLAUDE_PLUGIN_ROOT`. Codex sets both that and its own
+   `PLUGIN_ROOT` (measured on 0.151.0), and `codex.json` passes
+   `${PLUGIN_ROOT}` as the argument, as the Codex plugin guide documents.
 3. Nothing runnable — the prompt is **allowed** and one line is written to
    stderr explaining why it was not inspected.
 
@@ -68,4 +71,4 @@ without it `uv` quietly installs the last release that ran there, 0.2.0.
 
 `bin/shim.pyz` is built by `scripts/build_zipapp.py` and committed on `main` and
 on every tag. A fork or partial copy without it falls back to `PATH` or to
-case 4.
+case 3.

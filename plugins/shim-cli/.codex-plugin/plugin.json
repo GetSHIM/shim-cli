@@ -8,6 +8,7 @@
   "homepage": "https://github.com/GetSHIM/shim-cli",
   "repository": "https://github.com/GetSHIM/shim-cli",
   "license": "Apache-2.0",
+  "hooks": "./hooks/codex.json",
   "keywords": [
     "privacy",
     "security",
