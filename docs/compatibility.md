@@ -44,13 +44,15 @@ A Claude Code plugin installed as `shim-guard@shim-guard` stopped updating at
 **Codex needed one migration in 0.3.0.** There the marketplace name in the manifest *is*
 the identity, so renaming it to `shim-cli` orphans an install made under the old
 name — `config.toml` still says the plugin is enabled while `codex plugin list`
-reports nothing installed. A Codex user who installed the 0.2.0 plugin runs:
+reports nothing installed. Current Codex does not load a plugin hook at all (see
+"Codex does not load the plugin's hook" below), so a Codex user who installed the
+0.2.0 plugin replaces it with the package hook:
 
 ```
 codex plugin remove shim-guard
 codex plugin marketplace remove shim-guard
-codex plugin marketplace add https://github.com/GetSHIM/shim-cli
-codex plugin add shim-cli@shim-cli
+shim install codex
+shim doctor codex
 ```
 
 This affects the plugin only. A Codex user who installed the PyPI package is
@@ -143,6 +145,21 @@ on `Codex hook activation is client UI state; verify SHIM with /hooks`. shim
 cannot read that record and does not write it; a diagnosis that claimed to
 would be guessing. `codex exec --dangerously-bypass-hook-trust` runs enabled
 hooks without it, which is useful to confirm an install and wrong as a habit.
+
+**Codex does not load the plugin's hook.** Measured 29 September 2026 on Codex
+0.151.0 and 0.159.0, in a separate `CODEX_HOME`: `codex plugin marketplace add
+GetSHIM/shim-cli` and `codex plugin add shim-cli@shim-cli` installed 1.0.1 and
+`codex plugin list` reported it `installed, enabled`, but `/hooks` listed no
+installed hook for any event, and a prompt carrying `AKIAIOSFODNN7EXAMPLE` reached
+the model. A launcher instrumented to log every invocation logged none, with the
+1.0.1 layout and with the hook file named in `.codex-plugin/plugin.json`, under
+`codex exec --dangerously-bypass-hook-trust` as well. `codex features list` shows
+`plugin_hooks` as `removed`; Codex's plugin guide says plugin hooks follow plugin
+enablement. On the same Codex 0.159.0 the package hook written by `shim install
+codex` appeared in `/hooks`, was trusted there and ran on every prompt. The
+payload Codex handed it, captured and replayed with `user-prompt = "enforce"`,
+was answered with `shim blocked this prompt: SECRET (1).`
+The README therefore sends Codex users to `shim install codex`.
 
 ## 1.0.1 release evidence
 

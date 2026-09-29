@@ -221,22 +221,30 @@ clients so nothing is inspected twice.
 
 ### Marketplace plugins
 
-Codex and Claude Code users can install the repository's marketplace plugin:
+Claude Code users can install the repository's marketplace plugin:
 
 ```text
 /plugin marketplace add GetSHIM/shim-cli
 /plugin install shim-cli@shim-cli
 ```
 
+The marketplace plugin and `shim install` are alternative hook-registration
+methods. Do not use both; `shim doctor` fails when it finds two. The plugin
+carries the hook archive, `bin/shim.pyz`, on `main` and on every tag; it needs
+Python 3.9 or newer and nothing else installed.
+
+**Codex: use `shim install codex`, not the plugin.** Current Codex installs the
+plugin and lists it as enabled, but does not load its hook: `/hooks` shows
+nothing, and prompts reach the model uninspected without a warning. If you
+installed the plugin, replace it:
+
 ```console
-codex plugin marketplace add GetSHIM/shim-cli
-codex plugin add shim-cli@shim-cli
+codex plugin remove shim-cli@shim-cli
+shim install codex
+shim doctor codex
 ```
 
-The marketplace plugin and `shim install` are alternative hook-registration
-methods. Do not use both for the same client; `shim doctor` fails when it finds
-two. The plugin carries the hook archive, `bin/shim.pyz`, on `main` and on every
-tag; it needs Python 3.9 or newer and nothing else installed, on both clients.
+Then open `/hooks` in Codex and trust the shim entry.
 
 ### Upgrading from 0.2.0
 
@@ -262,8 +270,8 @@ A Claude Code plugin installed as `shim-guard@shim-guard` stopped updating at
 /plugin install shim-cli@shim-cli
 ```
 
-Codex plugin users need four commands; see
-[docs/compatibility.md](docs/compatibility.md).
+A Codex plugin under either name no longer runs; replace it with
+`shim install codex` as described under "Marketplace plugins".
 
 ## Use
 

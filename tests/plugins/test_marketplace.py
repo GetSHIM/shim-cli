@@ -123,6 +123,13 @@ def test_the_readme_install_commands_name_the_manifest_plugin() -> None:
     text = README.read_text(encoding="utf-8")
 
     assert f"/plugin install {current}@{marketplace}" in text
-    assert f"codex plugin add {current}@{marketplace}" in text
     assert "/plugin marketplace add GetSHIM/shim-cli" in text
-    assert "codex plugin marketplace add GetSHIM/shim-cli" in text
+    assert f"codex plugin remove {current}@{marketplace}" in text
+
+
+def test_the_readme_sends_codex_users_to_shim_install() -> None:
+    text = README.read_text(encoding="utf-8")
+
+    assert "codex plugin add" not in text
+    assert "codex plugin marketplace add" not in text
+    assert "shim install codex" in text
