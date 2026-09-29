@@ -19,10 +19,10 @@ from shim_cli.clients.hook_settings import (
 )
 from shim_cli.settings_files import StateKind, inspect_file
 
-# Verified live on 8 September 2026: observe passed the prompt through and
-# enforce blocked it before the model call. 0.151.0 also gates hooks behind a
-# trust record shim cannot read; see docs/compatibility.md.
-TESTED_CODEX_VERSION = "0.151.0"
+# Verified live on 29 September 2026: enforce blocked the prompt before the
+# model call. Hooks need a trust record shim cannot read, and run in a daemon
+# that keeps its first session's environment; see docs/compatibility.md.
+TESTED_CODEX_VERSION = "0.159.0"
 MINIMUM_CODEX_VERSION = "0.149.0"
 HOOK_TIMEOUT_SECONDS = 30
 MAX_CONFIG_BYTES = MAX_SETTINGS_BYTES
