@@ -34,6 +34,14 @@ def test_plugin_versions_match_package() -> None:
         assert manifest["version"] == expected
 
 
+def test_the_installed_plugin_folder_carries_the_licence() -> None:
+    licence = PLUGIN_ROOT / "LICENSE"
+
+    assert licence.is_file()
+    assert not licence.is_symlink()
+    assert licence.read_bytes() == (REPOSITORY_ROOT / "LICENSE").read_bytes()
+
+
 @pytest.mark.parametrize(
     ("client", "manifest", "settings"),
     [

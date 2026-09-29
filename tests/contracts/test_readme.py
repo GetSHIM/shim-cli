@@ -8,8 +8,14 @@ from pathlib import Path
 
 import pytest
 
+try:
+    import tomllib
+except ModuleNotFoundError:  # the 3.10 floor CI also runs
+    import tomli as tomllib
+
 ROOT = Path(__file__).resolve().parents[2]
 CLAIM = re.compile(r"\*\*([\d,]+)\+\*\*, one command")
+TAGLINE = re.compile(r"<strong>(.+?)</strong>")
 
 
 def test_the_readme_does_not_claim_more_tests_than_exist() -> None:
@@ -78,3 +84,11 @@ def test_the_install_block_names_the_interpreter(readme: str) -> None:
 def test_the_readme_says_the_section_split_covers_only_measured_requests() -> None:
     prose = " ".join((ROOT / "README.md").read_text(encoding="utf-8").split())
     assert "always sums to the exact total of the requests it measured" in prose
+
+
+def test_the_pypi_summary_is_the_readme_tagline() -> None:
+    tagline = TAGLINE.search((ROOT / "README.md").read_text(encoding="utf-8"))
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+
+    assert tagline
+    assert project["project"]["description"] == tagline.group(1)

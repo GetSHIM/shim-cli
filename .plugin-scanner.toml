@@ -1,0 +1,10 @@
+# Published example keys and obviously synthetic values that shim's own tests must detect.
+[scanner]
+ignore_paths = [
+  ".github/workflows/ci.yml",
+  "scripts/build_parity_corpus.py",
+  "scripts/probe/probe.py",
+  "tests/contracts/codex/test_hook.py",
+  "tests/corpus/guard-v2.json",
+  "tests/corpus/parity-v1.json",
+]

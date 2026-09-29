@@ -1,15 +1,20 @@
 [project]
 name = "shim"
 version = "1.0.1"
-description = "shim-cli: local sensitive-data detection, prompt reporting, opt-in prompt blocking, verified Claude tool-event masking, and API-traffic watching"
+description = "Local traffic visibility and privacy controls for coding agents."
 readme = "README.md"
 requires-python = ">=3.10,<3.14"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 authors = [{ name = "shim Engineering" }]
+keywords = [
+  "claude-code", "codex", "github-copilot", "vscode", "coding-agents", "hooks",
+  "pii", "pii-detection", "secrets", "redaction", "privacy", "llm",
+]
 classifiers = [
   "Development Status :: 5 - Production/Stable",
   "Environment :: Console",
+  "Intended Audience :: Developers",
   "Operating System :: MacOS",
   "Operating System :: POSIX :: Linux",
   "Programming Language :: Python :: 3.10",
@@ -17,6 +22,7 @@ classifiers = [
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
   "Topic :: Security",
+  "Topic :: Software Development",
 ]
 dependencies = [
   "phonenumbers==9.0.37",
@@ -27,10 +33,11 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/GetSHIM/shim-cli"
+Homepage = "https://getshim.tech/products/shim-cli"
 Repository = "https://github.com/GetSHIM/shim-cli"
-Issues = "https://github.com/GetSHIM/shim-cli/issues"
 Documentation = "https://github.com/GetSHIM/shim-cli#readme"
+Issues = "https://github.com/GetSHIM/shim-cli/issues"
+Changelog = "https://github.com/GetSHIM/shim-cli/tree/main/docs/releases"
 
 [project.scripts]
 shim = "shim_cli.cli.app:main"

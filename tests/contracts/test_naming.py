@@ -111,6 +111,15 @@ def test_no_prose_file_still_calls_the_product_by_its_old_name() -> None:
     assert not offenders, "\n".join(sorted(offenders))
 
 
+def test_the_registry_links_are_https_and_the_homepage_is_the_product_page() -> None:
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
+
+    assert all(url.startswith("https://") for url in project["urls"].values())
+    assert project["urls"]["Homepage"].startswith("https://getshim.tech/")
+    assert project["keywords"]
+    assert "presidio" not in project["keywords"]
+
+
 def test_the_release_notes_exist_for_the_declared_version() -> None:
     version = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["version"]
     notes = ROOT / "docs" / "releases" / f"{version}.md"
