@@ -18,6 +18,13 @@ PLUGIN_ROOT = Path(__file__).parents[2] / "plugins" / "shim-cli"
 REPOSITORY_ROOT = PLUGIN_ROOT.parents[1]
 
 
+def _declared_hooks(host: str) -> Path:
+    manifest = json.loads(
+        (PLUGIN_ROOT / f".{host}-plugin" / "plugin.json").read_text(encoding="utf-8")
+    )
+    return PLUGIN_ROOT / manifest["hooks"]
+
+
 def test_plugin_versions_match_package() -> None:
     package = tomllib.loads(
         (REPOSITORY_ROOT / "pyproject.toml").read_text(encoding="utf-8")
@@ -43,18 +50,13 @@ def test_the_installed_plugin_folder_carries_the_licence() -> None:
 
 
 @pytest.mark.parametrize(
-    ("client", "manifest", "settings"),
-    [
-        ("claude", "claude.json", claude_settings),
-        ("codex", "hooks.json", codex_settings),
-    ],
+    ("client", "settings"),
+    [("claude", claude_settings), ("codex", codex_settings)],
 )
 def test_the_plugin_and_the_installer_register_the_same_events(
-    client: str, manifest: str, settings: object
+    client: str, settings: object
 ) -> None:
-    document = json.loads(
-        (PLUGIN_ROOT / "hooks" / manifest).read_text(encoding="utf-8")
-    )
+    document = json.loads(_declared_hooks(client).read_text(encoding="utf-8"))
     expected = {event for event, _group in settings.hook_groups()}
 
     assert set(document["hooks"]) == expected
@@ -113,24 +115,37 @@ def test_the_plugin_readme_documents_the_launcher_order() -> None:
     assert text.index("`shim-hook` on `PATH`") < text.index(
         "`<plugin-root>/bin/shim.pyz`"
     )
-    assert "Codex sets no such variable" in text
+    assert "Codex sets both" in text
+
+
+def test_claude_loads_only_commands_the_directory_accepts() -> None:
+    loaded = [_declared_hooks("claude")]
+    if (PLUGIN_ROOT / "hooks" / "hooks.json").exists():
+        loaded.append(PLUGIN_ROOT / "hooks" / "hooks.json")
+    prefix = "${CLAUDE_PLUGIN_ROOT}/"
+
+    entries = [
+        hook
+        for path in loaded
+        for groups in json.loads(path.read_text(encoding="utf-8"))["hooks"].values()
+        for group in groups
+        for hook in group["hooks"]
+    ]
+
+    assert entries
+    for hook in entries:
+        command, args = hook["command"], hook.get("args", [])
+        assert command.startswith(prefix), command
+        for part in (command.removeprefix(prefix), *args):
+            assert not any(mark in part for mark in ("${", "$(", "`", "*")), part
+        assert "-c" not in args
+        assert "-c" not in command.split()
+    assert not (PLUGIN_ROOT / "hooks" / "hooks.json").exists()
 
 
 def _codex_command() -> str:
-    document = json.loads(
-        (PLUGIN_ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8")
-    )
+    document = json.loads(_declared_hooks("codex").read_text(encoding="utf-8"))
     return document["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"]
-
-
-def test_the_codex_command_keys_on_the_variable_only_codex_sets() -> None:
-    """Claude Code loads hooks/hooks.json by convention, on top of the
-    hooks/claude.json its plugin.json declares, and sets no PLUGIN_ROOT. Codex
-    0.151.0 sets PLUGIN_ROOT and CLAUDE_PLUGIN_ROOT both, so a guard on the
-    Claude variable turned the Codex hook into a silent no-op.
-    """
-    assert '[ -z "${PLUGIN_ROOT}" ] && exit 0' in _codex_command()
-    assert "CLAUDE_PLUGIN_ROOT" not in _codex_command()
 
 
 def _run_codex_command(command: str, environment: dict, tmp_path) -> object:
@@ -144,18 +159,6 @@ def _run_codex_command(command: str, environment: dict, tmp_path) -> object:
         check=False,
         timeout=120,
     )
-
-
-def test_the_codex_command_exits_silently_when_claude_code_runs_it(tmp_path) -> None:
-    result = _run_codex_command(
-        _codex_command(),
-        {"CLAUDE_PLUGIN_ROOT": str(PLUGIN_ROOT), "PATH": "/usr/bin:/bin"},
-        tmp_path,
-    )
-
-    assert result.returncode == 0
-    assert result.stdout == b""
-    assert result.stderr == b""
 
 
 @pytest.mark.parametrize("substituted", (True, False), ids=("text", "environment"))
