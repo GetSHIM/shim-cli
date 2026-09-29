@@ -53,7 +53,7 @@ def test_codex_0149_settings_are_exact_and_deterministic(tmp_path: Path) -> None
     assert b'"async"' not in document
     assert HOOK_TIMEOUT_SECONDS == 30
     assert MINIMUM_CODEX_VERSION == "0.149.0"
-    assert TESTED_CODEX_VERSION == "0.151.0"
+    assert TESTED_CODEX_VERSION == "0.159.0"
 
 
 def test_target_path_respects_injected_home(

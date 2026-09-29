@@ -143,6 +143,13 @@ cannot read that record and does not write it; a diagnosis that claimed to
 would be guessing. `codex exec --dangerously-bypass-hook-trust` runs enabled
 hooks without it, which is useful to confirm an install and wrong as a habit.
 
+**Codex runs hooks in a daemon that keeps its first environment.** Codex 0.159.0
+starts an `app-server-daemon` with the first session and runs every later
+session's hooks inside it. The hook sees the variables of the session that
+started the daemon, not of the current one: a `SHIM_CONFIG` or `CODEX_HOME` set
+for a later session does not reach it until the daemon restarts. A relative
+`CODEX_HOME` or `SHIM_CONFIG` is refused, and the prompt is withheld.
+
 **Codex does not load the plugin's hook.** Measured 29 September 2026 on Codex
 0.151.0 and 0.159.0, in a separate `CODEX_HOME`: `codex plugin marketplace add
 GetSHIM/shim-cli` and `codex plugin add shim-cli@shim-cli` installed 1.0.1 and
@@ -157,6 +164,21 @@ codex` appeared in `/hooks`, was trusted there and ran on every prompt. The
 payload Codex handed it, captured and replayed with `user-prompt = "enforce"`,
 was answered with `shim blocked this prompt: SECRET (1).`
 The README therefore sends Codex users to `shim install codex`.
+
+## 1.0.2 release evidence
+
+Recorded 29 September 2026 on macOS 26.4 arm64, CPython 3.13.5, uv 0.12.5, on the
+1.0.2 candidate with the rebuilt `bin/shim.pyz`.
+
+| Evidence | Recorded result |
+| --- | --- |
+| Local gate | `python scripts/check.py` green: 2,058 tests, lint, format, types, build. |
+| Claude Code | tested: 2.1.263, run on 2.1.273. The candidate plugin loaded with `--plugin-dir plugins/shim-cli`, no `shim-hook` on `PATH`, so the archive ran. The debug log read `Read manifest hooks for plugin shim-cli (enabled=true): ./hooks/claude.json` and no other hook file. A prompt carrying `AKIAIOSFODNN7EXAMPLE` gave one result, `{"systemMessage":"shim: found SECRET (1) in your prompt. Not modified."}`, no exit 127 and no second hook run. A `Read` of a synthetic `.env` logged `replaced tool output`, and the model answered that `<SECRET_1>` was not what the file held, because a hook had masked it. `claude plugin validate --strict` passed on both manifests. |
+| Codex CLI | tested: 0.159.0. The candidate package in a scratch environment, `shim install codex` into a separate `CODEX_HOME`, the hook trusted in `/hooks`, `user-prompt = "enforce"`: `Blocked by hook` / `shim blocked this prompt: SECRET (1).` with the redacted-prompt line. The plugin route loads no hook on this version; see "Codex does not load the plugin's hook". |
+| GitHub Copilot CLI | tested: 1.0.83. Not re-run: 1.0.2 changes neither the `com.github.copilot` hook file nor `shim install copilot`. |
+| VS Code | tested: 1.137.0. Not re-run: 1.0.2 does not change the file VS Code reads. |
+| Plugin scanner 2.0.1116 | Repository root 92/100, critical 0, high 0, medium 1 (`CLAUDE_MARKETPLACE_STRICT_INVALID`: a top-level `strict` fails `claude plugin validate --strict`), low 2. `plugins/shim-cli` 89/100, critical 0, high 0, medium 0, low 2. |
+| Plugin scanner 3.8.0 | Repository root 94/100, `plugins/shim-cli` 89/100; critical 0, high 0, medium 0, low 2 on both. |
 
 ## 1.0.1 release evidence
 
