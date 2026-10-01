@@ -131,9 +131,26 @@ def test_adversarial_punctuation_completes_within_the_detector_budget(
     assert [finding.entity_type for finding in findings] == ["EMAIL"]
 
 
-def test_malformed_percent_encoded_utf8_fails_safely() -> None:
-    with pytest.raises(ValueError, match="malformed percent encoding"):
-        analyze("alice%C3%28@example.com")
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    (
+        ("WHERE name LIKE '%admin%'", "WHERE name LIKE '%admin%'"),
+        ("echo %DATE%", "echo %DATE%"),
+        ("caf%E9", "caf%E9"),
+        ("ali%C3%28ce", "ali%C3(ce"),
+        ("%E9 ali%C3%A7e", "%E9 ali\u00e7e"),
+    ),
+)
+def test_a_percent_escape_that_is_not_utf8_is_read_as_written(
+    text: str, expected: str
+) -> None:
+    assert normalize(text).text == expected
+
+
+def test_an_address_between_stray_percent_escapes_is_still_masked() -> None:
+    decision = evaluate("caf%E9 ali%C3%A7e@example.com caf%E9")
+
+    assert decision.redacted_text == "caf%E9 <EMAIL_1> caf%E9"
 
 
 def test_overlap_tie_is_deterministic_and_covers_the_component() -> None:

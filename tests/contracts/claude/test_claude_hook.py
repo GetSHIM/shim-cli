@@ -17,6 +17,7 @@ GENERIC_BLOCK = (
     b'"suppressOriginalPrompt":true}'
 )
 READ_INSTRUCTION = "Read this file and use its contents as my prompt: "
+UNANALYSABLE = "\ufdfa" * 12_000
 
 
 def _redaction_files(root):
@@ -60,6 +61,16 @@ def _payload(prompt: str) -> bytes:
 
 def test_claude_code_runner_allows_safe_prompts_silently(tmp_path: Path) -> None:
     result = _run(_payload("Explain merge sort."), tmp_path)
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"", b"")
+
+
+def test_a_prompt_with_a_percent_sign_that_is_not_an_escape_is_inspected(
+    tmp_path: Path,
+) -> None:
+    prompt = "Why does WHERE name LIKE '%admin%' miss rows? echo %DATE% is fine."
+
+    result = _run(_payload(prompt), tmp_path)
+
     assert (result.returncode, result.stdout, result.stderr) == (0, b"", b"")
 
 
@@ -506,8 +517,7 @@ def test_a_file_the_client_does_not_attach_says_nothing(
 def test_an_attachment_the_detector_cannot_analyse_is_reported_not_withheld(
     mode: str, tmp_path: Path
 ) -> None:
-    query = "SELECT * FROM users WHERE name LIKE '%admin%';\n"
-    work = _workspace(tmp_path, {"q.sql": query})
+    work = _workspace(tmp_path, {"q.sql": UNANALYSABLE})
 
     result = _run(_attaching("@q.sql explain", work), tmp_path, _mode(tmp_path, mode))
 
@@ -521,7 +531,7 @@ def test_an_attachment_the_detector_cannot_analyse_is_reported_not_withheld(
 def test_an_attachment_scanned_only_in_part_is_reported_as_not_inspected(
     tmp_path: Path,
 ) -> None:
-    dump = "WHERE name LIKE '%admin%'\n" + ("x" * 99 + "\n") * 1_500
+    dump = UNANALYSABLE + "\n" + ("x" * 99 + "\n") * 1_500
     work = _workspace(tmp_path, {"dump.sql": dump})
 
     result = _run(_attaching("@dump.sql", work), tmp_path, _isolated(tmp_path))
@@ -533,7 +543,7 @@ def test_an_attachment_scanned_only_in_part_is_reported_as_not_inspected(
 def test_findings_in_the_scanned_part_of_an_attachment_are_still_reported(
     tmp_path: Path,
 ) -> None:
-    dump = "WHERE name LIKE '%admin%'\n" + ("x" * 99 + "\n") * 1_500 + FIXTURE_ENV
+    dump = UNANALYSABLE + "\n" + ("x" * 99 + "\n") * 1_500 + FIXTURE_ENV
     work = _workspace(tmp_path, {"dump.sql": dump})
 
     result = _run(_attaching("@dump.sql", work), tmp_path, _isolated(tmp_path))
