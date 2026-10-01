@@ -68,6 +68,12 @@ to a `0600` file in your temporary directory and tells you the path. Paste the
 line it gives you and carry on — your prompt reaches the model with
 `<SECRET_1>` where the key was.
 
+A file you attach with `@` goes with the prompt as it is: Claude Code inlines it
+after the prompt hook has run, so nothing can mask it. shim reads it first and
+tells you what it holds before it is sent, and under `enforce` it stops the
+prompt. To have the file masked instead, ask the agent to read it ("read .env
+and explain the variables"): a tool result is masked before the model sees it.
+
 The three modes are `observe` (count it, say nothing), `warn` (say it, change
 nothing) and `enforce` (mask or refuse). They apply per direction, per event or
 per tool, most specific first.

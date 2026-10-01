@@ -402,3 +402,25 @@ def test_a_session_without_failed_calls_carries_an_empty_unmasked_key() -> None:
 
 def test_an_observed_failed_call_is_not_counted() -> None:
     assert summary.render([_failed(action="allow")]) == ""
+
+
+def test_an_attached_file_is_named_by_its_target() -> None:
+    text = summary.render(
+        [
+            _record(
+                event="UserPromptSubmit",
+                tool_name="",
+                target="@config/settings.py",
+                action="report",
+                entities={"EMAIL": 2},
+            )
+        ]
+    )
+
+    assert "  warned    2 EMAIL  (@config/settings.py)" in text.splitlines()
+
+
+def test_the_model_line_does_not_claim_the_values_were_invented() -> None:
+    assert (
+        summary.NOT_LEAKS == "written by the model; it may repeat values it was given"
+    )

@@ -147,7 +147,7 @@ shim — this session
             1 DB_URI  (Read env.txt)
             1 SECRET  (Read env.txt)
   warned    1 IBAN  (your prompt)
-  model     1 EMAIL in its replies (model-generated content, not leaks)
+  model     1 EMAIL in its replies (written by the model; it may repeat values it was given)
   overhead  102 ms median, 120 ms p95
 ```
 
@@ -155,8 +155,9 @@ shim — this session
 printed: Claude Code does not let it be masked, so the model saw it, and shim
 told you and told the model not to repeat it. `warned` is what shim found in
 your prompt and left alone — prompts are reported, not rewritten. `model` counts
-what the model itself wrote back; it is recall, not a leak, and is labelled
-that way.
+what the model itself wrote back. It is kept apart from everything else and is
+not called a leak, but it is not called invented either: the model may repeat
+a value it was given, for example from a file you attached with `@`.
 
 Exits `1` when there is no session to show.
 
@@ -422,7 +423,7 @@ Bash = ["SECRET", "DB_URI"]
 The defaults are deliberate: your prompt is `warn`, because shim reports what
 you typed rather than rewriting it under you; tool results are `enforce`,
 because that is content you did not write and did not read; what the model
-wrote back is `observe`, because it is not a leak.
+wrote back is `observe`, because the client has already shown it.
 
 ## Environment variables
 

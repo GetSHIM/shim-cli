@@ -33,9 +33,12 @@ def evaluate(text: str):
 
 def _read_and_evaluate(command: str, as_json: bool):
     try:
-        return evaluate(read_stdin())
+        decision = evaluate(read_stdin())
     except Exception:  # Never expose stdin or detector errors.
         _privacy_error(command, as_json)
+    if decision.partial:
+        _privacy_error(command, as_json)
+    return decision
 
 
 def _privacy_error(command: str, as_json: bool) -> NoReturn:

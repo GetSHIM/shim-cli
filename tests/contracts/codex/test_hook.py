@@ -250,7 +250,7 @@ def parse_input(raw):
 
 def evaluate(prompt, enabled_entities, custom=(), reveal=None):
     noisy("evaluate")
-    return types.SimpleNamespace(blocked=False)
+    return types.SimpleNamespace(blocked=False, partial=False)
 
 def block_output(decision, suggestion_path=None):
     noisy("serialize")

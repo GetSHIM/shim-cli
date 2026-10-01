@@ -14,7 +14,7 @@ MAX_SOURCES = 3
 BYTES_PER_TOKEN = 4
 MODEL_OUTPUT = "model-output"
 BARE_NUMBERS = "PHONE (bare numbers, left as they were)"
-NOT_LEAKS = "model-generated content, not leaks"
+NOT_LEAKS = "written by the model; it may repeat values it was given"
 
 
 def _sources(records: list) -> list:
@@ -28,6 +28,8 @@ def _sources(records: list) -> list:
             if record.get("event") == FAILED_EVENT:
                 tool = f"failed {tool}"
             where = f"{tool} {_basename(target)}" if target else tool
+        elif target:
+            where = target
         else:
             event = record.get("event")
             where = _event_label(event if isinstance(event, str) else "")

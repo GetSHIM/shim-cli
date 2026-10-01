@@ -4,6 +4,7 @@ import importlib
 import json
 import os
 import random
+import signal
 import string
 import subprocess
 import sys
@@ -434,17 +435,20 @@ def test_pieces_are_cut_on_newlines_so_no_line_is_split() -> None:
 
 def test_a_line_longer_than_the_limit_still_makes_progress() -> None:
     """No newline to cut on: the piece ends at the hard boundary instead of
-    looping forever on a zero-length slice."""
-    from shim_cli.guard.evaluate import _pieces
+    looping forever on a zero-length slice, and the next one starts a little
+    earlier so a value on the cut is read whole."""
+    from shim_cli.guard.evaluate import _OVERLAP, _pieces
 
     text = "x" * (MAX_SOURCE_CHARACTERS * 2 + 5)
     cuts = list(_pieces(text))
 
-    assert [len(piece) for _offset, piece in cuts] == [
-        MAX_SOURCE_CHARACTERS,
-        MAX_SOURCE_CHARACTERS,
-        5,
+    assert [offset for offset, _piece in cuts] == [
+        0,
+        MAX_SOURCE_CHARACTERS - _OVERLAP,
+        2 * (MAX_SOURCE_CHARACTERS - _OVERLAP),
     ]
+    assert cuts[-1][0] + len(cuts[-1][1]) == len(text)
+    assert all(len(piece) <= MAX_SOURCE_CHARACTERS for _offset, piece in cuts)
 
 
 def test_a_piece_that_fails_leaves_the_others_masked() -> None:
@@ -473,6 +477,28 @@ def test_a_piece_that_fails_leaves_the_others_masked() -> None:
     assert decision.partial is True
     assert decision.findings, "one bad piece must not cost every other piece"
     assert "<EMAIL_1>" in decision.redacted_text
+
+
+def test_a_piece_that_runs_out_of_time_ends_the_scan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    analyze_module = importlib.import_module("shim_cli.guard.analyze")
+    evaluate_module = sys.modules["shim_cli.guard.evaluate"]
+    real = evaluate_module.analyze_counting
+    calls = []
+
+    def counted(text, entities=(), custom=()):
+        calls.append(len(text))
+        return real(text, entities, custom)
+
+    evaluate("Call +90 532 123 45 67 or write to alice@example.com")
+    monkeypatch.setattr(analyze_module, "ANALYSIS_DEADLINE_SECONDS", 0.01)
+    monkeypatch.setattr(evaluate_module, "analyze_counting", counted)
+
+    decision = evaluate(("x_token." * 12_000 + "\n") * 3)
+
+    assert decision.partial is True
+    assert len(calls) == 1
 
 
 def test_a_config_line_keeps_its_variable_name() -> None:
@@ -858,3 +884,117 @@ def test_user_info_made_of_references_or_elisions_is_not_a_credential(
     text: str,
 ) -> None:
     assert evaluate(text).redacted_text == text
+
+
+def test_the_hook_deadline_ends_the_scan_of_later_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from shim_cli.events.payload import inspect
+
+    hook = importlib.import_module("shim_cli.hook")
+    analyze_module = importlib.import_module("shim_cli.guard.analyze")
+    real = analyze_module.analyze_text
+    calls = []
+
+    def slow(text, entities, custom):
+        calls.append(len(text))
+        time.sleep(2)
+        return real(text, entities, custom)
+
+    monkeypatch.setattr(hook, "HOOK_DEADLINE_SECONDS", 0.3)
+    monkeypatch.setattr(analyze_module, "ANALYSIS_DEADLINE_SECONDS", 0.5)
+    monkeypatch.setattr(analyze_module, "analyze_text", slow)
+    leaf = "x " * 60_000
+
+    with hook._deadline():
+        result = inspect({"tool_response": {"a": leaf, "b": leaf, "c": leaf}}, evaluate)
+
+    assert "deadline" in result.reasons
+    assert len(calls) == 1
+
+
+KOREAN = "한국어 문장을 길게 붙여 넣습니다. 각 줄은 평범한 설명입니다.\n"
+
+
+@pytest.mark.parametrize("length", (97_000, 110_000), ids=("one piece", "two pieces"))
+def test_korean_text_that_expands_past_the_limit_is_scanned_whole(length: int) -> None:
+    text = "DB_PASSWORD=Synthetic-pass-0000\n" + (KOREAN * 3_000)[:length]
+
+    decision = evaluate(text)
+
+    assert decision.partial is False
+    assert decision.counts == (("SECRET", 1),)
+
+
+def test_the_hook_deadline_is_handed_back_after_an_analysis_in_time(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hook = importlib.import_module("shim_cli.hook")
+    monkeypatch.setattr(hook, "HOOK_DEADLINE_SECONDS", 30)
+
+    with hook._deadline():
+        evaluate("DB_PASSWORD=Synthetic-pass-0000")
+        left = signal.getitimer(signal.ITIMER_REAL)[0]
+
+    assert 25 < left <= 30
+
+
+@pytest.mark.parametrize(
+    ("value", "masked", "placeholder"),
+    (
+        ("synthetic.user@example.com", "synthetic.user@example.com", "<EMAIL_1>"),
+        ("DB_PASSWORD=Synthetic-pass-0000", "Synthetic-pass-0000", "<SECRET_1>"),
+        (
+            "ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8",
+            "ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8",
+            "<SECRET_1>",
+        ),
+    ),
+    ids=("email", "named secret", "token"),
+)
+def test_a_value_across_a_cut_in_one_long_line_is_found(
+    value: str, masked: str, placeholder: str
+) -> None:
+    head, tail = "x " * 49_995, " " + "y " * 60_000
+
+    decision = evaluate(head + value + tail)
+    redacted = decision.redacted_text
+
+    assert decision.partial is False
+    assert redacted.startswith(head)
+    assert redacted.endswith(tail)
+    assert redacted[len(head) : -len(tail)] == value.replace(masked, placeholder)
+
+
+def test_a_value_inside_the_overlap_is_counted_once() -> None:
+    text = "x " * 48_500 + "synthetic.user@example.com " + "y " * 60_000
+
+    decision = evaluate(text)
+
+    assert decision.counts == (("EMAIL", 1),)
+    assert decision.redacted_text.count("<EMAIL_1>") == 1
+
+
+def test_a_value_across_the_half_of_a_long_korean_line_is_found() -> None:
+    line = (KOREAN.replace("\n", " ") * 3_000)[:49_990]
+    text = line + " DB_PASSWORD=Synthetic-pass-0000 " + line + line[:10_000]
+
+    decision = evaluate(text)
+
+    assert decision.partial is False
+    assert decision.counts == (("SECRET", 1),)
+
+
+def test_a_connection_string_on_the_overlap_start_keeps_its_password_masked() -> None:
+    uri = (
+        "postgres://app:Synthetic-pass-7007@mydb.cluster-abc123xyz"
+        ".eu-central-1.rds.amazonaws.com:5432/app"
+    )
+    text = "x " * 47_940 + uri + " " + "y " * 60_000
+    assert text.index(uri) + 15 < 100_000 - 4_096 < text.index(uri) + 34
+
+    decision = evaluate(text)
+
+    assert "Synthetic" not in decision.redacted_text
+    assert "pass-7007" not in decision.redacted_text
+    assert dict(decision.counts) == {"DB_URI": 1}

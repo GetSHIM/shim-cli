@@ -21,8 +21,12 @@ class NormalizedText:
     source_spans: tuple[_SourceSpan, ...]
 
 
-def _too_large() -> ValueError:
-    return ValueError("Guard input exceeds the safe analysis limit.")
+class InputTooLarge(ValueError):
+    pass
+
+
+def _too_large() -> InputTooLarge:
+    return InputTooLarge("Guard input exceeds the safe analysis limit.")
 
 
 def _decode_percent(text: str) -> tuple[str, list[_SourceSpan]]:

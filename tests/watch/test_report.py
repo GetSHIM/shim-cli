@@ -493,3 +493,9 @@ def test_the_json_carries_the_response_scan_reason() -> None:
     ]
 
     assert reasons == ["", "", measure.SLOTS_BUSY, measure.SLOTS_BUSY, "partial"]
+
+
+def test_the_response_line_does_not_claim_the_values_were_invented() -> None:
+    assert report.NOT_LEAKS == (
+        "written by the model; it may repeat values it was given"
+    )

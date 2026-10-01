@@ -1580,3 +1580,16 @@ def test_doctor_counts_a_1_0_2_install_as_five_of_six(
     assert runner.invoke(app, ["doctor", "claude"]).exit_code == 0
     assert runner.invoke(app, ["install", "claude", "--yes"]).exit_code == 0
     assert "PASS Coverage: 6 of 6 events installed." in _coverage("claude")[0]
+
+
+def test_scan_and_redact_fail_when_part_of_the_input_cannot_be_read() -> None:
+    text = (
+        "x" * 90_000 + "\n" + "\ufdfa" * 12_000 + "\nDB_PASSWORD=Synthetic-pass-0000\n"
+    )
+
+    scan = runner.invoke(app, ["scan"], input=text)
+    redact = runner.invoke(app, ["redact"], input=text)
+
+    assert (scan.exit_code, redact.exit_code) == (1, 1)
+    assert "Unable to process stdin" in scan.output
+    assert "Synthetic-pass" not in redact.output

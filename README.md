@@ -74,11 +74,11 @@ reports and prices them; it cannot see what your plan charges.
 
 The `response` line is the other direction — what the model wrote back, with
 its `thinking` counted apart from its answer. It is a recall measurement, not a
-leak report: on your own key there is no other tenant to leak from, and a coding
-agent invents plausible values all day. `compare` puts the two sides next to
-each other: three account numbers went in through a tool result and the same
-three came back, which is the round trip made visible. A response that stopped
-at the provider's output limit adds a `cut off` line.
+leak report: on your own key there is no other tenant to leak from, and a value
+the model wrote may be one it was given or one it made up. `compare` puts the
+two sides next to each other: three account numbers went in through a tool
+result and the same three came back, which is the round trip made visible. A
+response that stopped at the provider's output limit adds a `cut off` line.
 
 Token counts come from the provider's own `usage` block and are exact. How
 they divide between sections has no ground truth on the wire, so it is
@@ -86,10 +86,11 @@ inferred from byte share, marked `~`, and always sums to the exact total of the
 requests it measured.
 Exact and inferred figures never share a column.
 
-It also covers what hooks structurally cannot see: files pulled in with `@` are
-inlined by the client while it builds the prompt, so no hook fires for them,
-and the system prompt, the tools array and the token counts are never handed to
-a hook at all.
+It also covers what hooks cannot change: files pulled in with `@` are inlined
+by the client while it builds the prompt, so the prompt hook can read them and
+warn before they are sent (or stop the prompt under `enforce`), but cannot mask
+them; and the system prompt, the tools array and the token counts are never
+handed to a hook at all.
 
 **It forwards and measures. It does not modify.** Not one byte of a request is
 changed, no request body is ever written to disk, and nothing is transmitted
@@ -345,7 +346,7 @@ from everything else, because the model wrote it:
 ```text
   masked    3 CUSTOM  (Read config/settings.py)
   custom    2 PROJECT_CODENAME, 1 INTERNAL_HOST
-  model     1 EMAIL in its replies (model-generated content, not leaks)
+  model     1 EMAIL in its replies (written by the model; it may repeat values it was given)
 ```
 
 `shim report` prints the same summary on demand, and `--json` makes it

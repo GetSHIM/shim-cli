@@ -17,6 +17,7 @@ _STOP_EVENT = "Stop"
 _SESSION_END_EVENT = "SessionEnd"
 _STARTED = time.perf_counter()
 HOOK_DEADLINE_SECONDS = 25
+ATTACHMENT_SECONDS = 15
 _ERROR_OUTPUT = (
     b'{"decision":"block","reason":"shim could not inspect this prompt, '
     b'so it was withheld. Run `shim doctor codex` for the reason."}'
@@ -272,13 +273,26 @@ def _elapsed_ms() -> int:
     return max(0, round((time.perf_counter() - _STARTED) * 1000))
 
 
-def _prompt_record(client, event, mode, action, decision, prompt):
+def _attachment_decision(text, policy):
+    from shim_cli.guard import evaluate
+
+    if text is None or _elapsed_ms() > ATTACHMENT_SECONDS * 1000:
+        return None
+    try:
+        found = evaluate(text, policy.entities, policy.custom, policy.reveal)
+    except Exception:
+        return None
+    return None if found.partial and not found.blocked else found
+
+
+def _prompt_record(client, event, mode, action, decision, prompt, target=""):
     from shim_cli.session.record import Record
 
     return Record(
         client=client,
         event=event or _PROMPT_EVENT,
         tool_name="",
+        target=target,
         direction="user-prompt",
         mode=mode,
         action=action,
@@ -608,35 +622,96 @@ def _output(raw: bytes, client: str = "codex") -> bytes:
                 decision = evaluate(
                     prompt, policy.entities, policy.custom, policy.reveal
                 )
+                if decision.partial:
+                    return error_output()
                 mode = policy.mode_for("user-prompt", event=event or _PROMPT_EVENT)
+                files: list = []
+                if client == "claude":
+                    from shim_cli.clients.claude.hook import attached
+                    from shim_cli.session.record import scrubbed_target
+
+                    files = [
+                        (
+                            scrubbed_target(name, evaluate),
+                            text,
+                            _attachment_decision(text, policy),
+                        )
+                        for name, text in attached(prompt, document.get("cwd"))
+                    ]
+                held = tuple(
+                    (name, found.counts)
+                    for name, _text, found in files
+                    if found is not None and found.blocked
+                )
+                unread = tuple(name for name, _text, found in files if found is None)
 
                 def keep(action: str) -> None:
+                    from shim_cli.session.record import NOT_INSPECTED, Record
+
                     try:
-                        record = _prompt_record(
-                            client, event, mode, action, decision, prompt
-                        )
+                        records = [
+                            _prompt_record(
+                                client, event, mode, action, decision, prompt
+                            ),
+                            *(
+                                _prompt_record(
+                                    client, event, mode, action, found, text, f"@{name}"
+                                )
+                                for name, text, found in files
+                                if found is not None and found.blocked
+                            ),
+                            *(
+                                Record(
+                                    client=client,
+                                    event=event or _PROMPT_EVENT,
+                                    tool_name="",
+                                    target=f"@{name}",
+                                    direction="user-prompt",
+                                    mode=mode,
+                                    action="report",
+                                    note=f"{NOT_INSPECTED}: attachment",
+                                )
+                                for name in unread
+                            ),
+                        ]
                     except Exception:
                         return
-                    remember(session_id, record, _elapsed_ms(), policy.ledger)
+                    for record in records:
+                        remember(session_id, record, _elapsed_ms(), policy.ledger)
 
-                if not decision.blocked:
-                    keep("allow")
-                    return b""
-                if mode == "observe":
+                if not (decision.blocked or held or unread) or mode == "observe":
                     keep("allow")
                     return b""
                 if client == "copilot":
                     keep("mask")
                     return warn_output(decision)
-                if mode != "enforce":
+                if mode != "enforce" or not (decision.blocked or held):
                     keep("report")
-                    return warn_output(decision)
-                suggestion_path = _write_redacted_prompt(decision.redacted_text)
+                    if not (held or unread):
+                        return warn_output(decision)
+                    from shim_cli.clients.claude.hook import (
+                        warn_output as attached_report,
+                    )
+
+                    return attached_report(decision, held, unread)
+                suggestion_path = (
+                    _write_redacted_prompt(decision.redacted_text)
+                    if decision.blocked
+                    else None
+                )
                 try:
-                    output = block_output(decision, suggestion_path)
+                    if held:
+                        from shim_cli.clients.claude.hook import (
+                            block_output as attached_block,
+                        )
+
+                        output = attached_block(decision, suggestion_path, held)
+                    else:
+                        output = block_output(decision, suggestion_path)
                 except Exception:
-                    with contextlib.suppress(OSError):
-                        Path(suggestion_path).unlink()
+                    if suggestion_path:
+                        with contextlib.suppress(OSError):
+                            Path(suggestion_path).unlink()
                     raise
                 keep("deny")
                 return output
