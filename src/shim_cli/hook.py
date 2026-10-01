@@ -10,6 +10,8 @@ import warnings
 from collections.abc import Iterator
 from pathlib import Path
 
+import shim_cli
+
 MAX_INPUT_BYTES = 1_000_000
 _PROMPT_EVENT = "UserPromptSubmit"
 _PROMPT_EVENTS = frozenset({_PROMPT_EVENT, "userPromptTransformed"})
@@ -18,6 +20,7 @@ _SESSION_END_EVENT = "SessionEnd"
 _STARTED = time.perf_counter()
 HOOK_DEADLINE_SECONDS = 25
 ATTACHMENT_SECONDS = 15
+WINDOWS_NOTICE = "shim: shim-cli does not support Windows yet; nothing was inspected.\n"
 _ERROR_OUTPUT = (
     b'{"decision":"block","reason":"shim could not inspect this prompt, '
     b'so it was withheld. Run `shim doctor codex` for the reason."}'
@@ -722,6 +725,9 @@ def _output(raw: bytes, client: str = "codex") -> bytes:
 
 
 def main() -> None:
+    if shim_cli.WINDOWS:
+        sys.stderr.write(WINDOWS_NOTICE)
+        return
     arguments = sys.argv[1:]
     client = "codex" if not arguments else arguments[0]
     if len(arguments) > 1:

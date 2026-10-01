@@ -394,3 +394,63 @@ def test_launcher_finds_an_interpreter_named_python3_14(
     assert json.loads(result.stdout)["systemMessage"] == (
         "shim: found EMAIL (1) in your prompt. Not modified."
     )
+
+
+WINDOWS_NOTICE = (
+    b"shim: shim-cli does not support Windows yet; nothing was inspected.\n"
+)
+
+
+def _uname(tmp_path: Path, kernel: str) -> str:
+    stubs = tmp_path / "stubs"
+    stubs.mkdir()
+    stub = stubs / "uname"
+    stub.write_text(f"#!/bin/sh\nprintf '%s\\n' '{kernel}'\n", encoding="utf-8")
+    stub.chmod(0o755)
+    return str(stubs)
+
+
+@pytest.mark.parametrize(
+    "kernel", ("MINGW64_NT-10.0-19045", "MSYS_NT-10.0", "CYGWIN_NT-10.0")
+)
+def test_launcher_stands_down_under_git_bash(kernel: str, tmp_path: Path) -> None:
+    result = _run("claude", {"PATH": _uname(tmp_path, kernel)})
+
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"", WINDOWS_NOTICE)
+
+
+def test_launcher_stands_down_when_os_says_windows(tmp_path: Path) -> None:
+    environment = {"PATH": _uname(tmp_path, "Linux"), "OS": "Windows_NT"}
+
+    result = _run("claude", environment)
+
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"", WINDOWS_NOTICE)
+
+
+def test_launcher_under_wsl_is_not_windows(tmp_path: Path) -> None:
+    result = _run("claude", {"PATH": _uname(tmp_path, "Linux")})
+
+    assert result.returncode == 0
+    assert WINDOWS_NOTICE not in result.stderr
+    assert b"no hook available" in result.stderr
+
+
+def test_the_archive_stands_down_on_windows(archive: Path, tmp_path: Path) -> None:
+    bootstrap = (
+        "import runpy, shutil, signal, sys, tempfile; sys.platform = 'win32'; "
+        "sys.modules['fcntl'] = None; "
+        "del signal.SIGALRM, signal.setitimer, signal.ITIMER_REAL; "
+        f"sys.argv = [{str(archive)!r}, 'claude']; "
+        f"runpy.run_path({str(archive)!r}, run_name='__main__')"
+    )
+
+    result = subprocess.run(
+        (sys.executable, "-I", "-c", bootstrap),
+        input=_payload("claude"),
+        capture_output=True,
+        check=False,
+        timeout=120,
+        env={"TMPDIR": str(tmp_path), "HOME": str(tmp_path)},
+    )
+
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"", WINDOWS_NOTICE)

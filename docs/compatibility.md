@@ -5,7 +5,7 @@
 | Area | Status |
 | --- | --- |
 | Python | CPython 3.10 or newer for the package, tested on 3.10, 3.13 and 3.14; the plugin archive runs on 3.9 or newer |
-| Operating systems | macOS and Linux target |
+| Operating systems | macOS and Linux. Windows is not supported: the hook stands down with one line on stderr and inspects nothing, so no prompt is withheld; the plugin launcher does the same under Git Bash; every CLI command except `help`, `--version` and `update` refuses with exit 2. This was simulated (platform patched, `fcntl` removed), not run on Windows. WSL runs as Linux, not yet verified |
 | Prompt hooks | Codex CLI, Claude Code, GitHub Copilot CLI, and VS Code |
 | Tool hooks | Claude Code `PreToolUse` and `PostToolUse`, masked, and `PostToolUseFailure`, reported only; VS Code `PreToolUse` reports and denies, `PostToolUse` reports only |
 | `shim watch` | Claude Code only. Codex is refused: it reads its endpoint from its own configuration, so the proxy is bypassed and the session measured as empty ([probe](probe-2026-09-codex-watch.md)). Copilot out of scope because a custom endpoint removes GitHub authentication |

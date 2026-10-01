@@ -3,6 +3,13 @@
 
 set -u
 
+case "${OS:-}:$(uname -s 2>/dev/null)" in
+    Windows_NT:* | *:MINGW* | *:MSYS* | *:CYGWIN*)
+        printf '%s\n' "shim: shim-cli does not support Windows yet; nothing was inspected." >&2
+        exit 0
+        ;;
+esac
+
 client=${1:-codex}
 root=${2:-${CLAUDE_PLUGIN_ROOT:-}}
 
