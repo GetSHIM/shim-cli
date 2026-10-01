@@ -13,7 +13,7 @@ client's traffic to the provider your client was already going to talk to.
 - [Setting up](#setting-up) — `install`, `status`, `doctor`, `revert`, `update`
 - [Seeing what happened](#seeing-what-happened) — `report`, `ledger`, `watch`, `audit`
 - [Changing what is detected](#changing-what-is-detected) — `config`
-- [Checking text directly](#checking-text-directly) — `scan`, `redact`, `demo`
+- [Checking text directly](#checking-text-directly) — `scan`, `redact`, `keys`, `demo`
 - [The settings file](#the-settings-file) — every key in `config.toml`
 - [Environment variables](#environment-variables)
 - [Where shim keeps things](#where-shim-keeps-things)
@@ -397,7 +397,7 @@ shim config --reset --yes       # back to defaults; the fix for a broken file
 
 ## Checking text directly
 
-These three do not touch any client. They are for trying shim out, and for
+These four do not touch any client. They are for trying shim out, and for
 using it in a pipeline.
 
 ### `shim scan`
@@ -436,6 +436,70 @@ key <SECRET_1>
 
 Exits `0`, or `1` with `Unable to process stdin.` when stdin cannot be read or
 scanned in full.
+
+### `shim keys <file>…`
+
+Lists the variables a `.env` or INI file defines: each name, whether it is set,
+and what shim would call its value. Never the value.
+
+```console
+$ shim keys .env
+.env
+  APP_ENV                 set
+  DATABASE_URL            set   DB_URI
+  AWS_ACCESS_KEY_ID       set   SECRET
+  AWS_SECRET_ACCESS_KEY   set   SECRET
+  SLACK_BOT_TOKEN         set   SECRET
+  LEDGER_API_TOKEN        set   SECRET
+  STRIPE_SECRET_KEY       set   SECRET
+  SUPPORT_EMAIL           set   EMAIL
+  MAX_TOKENS              set
+  TOKEN_TTL               set
+```
+
+`set` is a non-empty value, `empty` is `KEY=` or `KEY=""`, and `ref` is a value
+that is exactly one reference to another variable (`${OTHER_VAR}`), shown
+because that text is a name. The third column is the entity the detector
+assigns to the value, read with its key, so `DB_PASSWORD=Synthetic-pass-0000`
+is a `SECRET` and `REDIS_URL` without credentials is nothing. A value made only
+of digits under such a key stays blank, as the detector leaves it. `not
+inspected` means the detector could not read that value, for example because
+shim's own settings cannot be read.
+
+Values are read the way dotenv loaders read them, so that no part of one can
+show up as a name: `KEY=value`, `export KEY=value`, spaces around `=`; double,
+single and backtick quotes, each of which may run over several lines and counts
+once, with `\"` kept inside double quotes; a `#` that starts a line, or follows
+whitespace after an unquoted value, as a comment, while `KEY=#value` is a value;
+blank lines; and INI section headers such as `[default]`, printed as a
+sub-heading, so `~/.aws/credentials` reads correctly. In an INI file a line
+indented deeper than its key continues that key's value, as Python's
+`configparser` reads it, so the tab-indented keys of `~/.gitconfig` are listed
+one by one, and a section header goes through the detector before it is
+printed, so `[url "https://<SECRET_1>@github.com/"]` keeps a token out of the
+report. A private key, from its `-----BEGIN` line to its `-----END` line, is
+never read line by line: after `KEY=`, quoted in any way or not at all, it is
+that variable's value; on a line of its own it is one `unparsed line N`, so a
+`.pem` file reads as one unparsed line per key or certificate (blocks glued onto
+one line read as one); in a comment it is skipped with the key lines under it.
+A key runs over the lines that look like key material (base64, armor headers,
+blank lines) up to its `-----END` line, so a key with no `-----END` line stops at
+the first ordinary line, and a line that only mentions `-----BEGIN` hides
+nothing. A line that is only key material, such as a WireGuard or Fernet key, is
+an unparsed line. Lines end only at `\n`, `\r\n` or `\r`. Only `${NAME}` in an unquoted or double-quoted value is a
+`ref`; `$name` or a single-quoted `'${NAME}'` is a value. A line that is none of
+these, a quote that never closes, or a header with control characters is
+reported as `unparsed line N` and never echoed; reading goes on at the next
+line.
+
+`--json` writes `files`, one entry per path with `path` and `variables`: one row
+per variable or unparsed line, with `name` (`null` for an unparsed line),
+`state` (`set`, `empty`, `ref` or `unparsed`), `entity`, `line`, `section` and
+`reference` (the `ref` text, otherwise `null`).
+
+Exits `0` whatever the file holds, because the answer is the list. A path that
+is missing, not a regular file, larger than 1 MB or not UTF-8 exits `2` with
+one sentence and nothing about its contents. Nothing is written.
 
 ### `shim demo <client>`
 

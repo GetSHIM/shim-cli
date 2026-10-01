@@ -119,6 +119,19 @@ def redact(
     run_redact(as_json=json_output)
 
 
+@app.command()
+def keys(
+    paths: Annotated[
+        list[Path], typer.Argument(help="A .env or INI file; repeatable.")
+    ],
+    json_output: bool = typer.Option(False, "--json", help="Write a JSON result."),
+) -> None:
+    """List the variables in .env and INI files, never their values."""
+    from shim_cli.cli.keys import keys as run_keys
+
+    run_keys(paths, as_json=json_output)
+
+
 @app.command("config")
 def config_command(
     only: Annotated[
