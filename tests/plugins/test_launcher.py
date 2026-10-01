@@ -369,3 +369,28 @@ def test_archive_contains_every_module_the_hook_path_imports(archive: Path) -> N
 
     missing = set(imported) - packaged
     assert not missing, f"add these to build_zipapp.INCLUDED: {sorted(missing)}"
+
+
+def test_launcher_finds_an_interpreter_named_python3_14(
+    archive: Path, tmp_path: Path
+) -> None:
+    root = tmp_path / "plugin"
+    (root / "bin").mkdir(parents=True)
+    (root / "bin" / "shim.pyz").write_bytes(archive.read_bytes())
+    interpreters = tmp_path / "interpreters"
+    interpreters.mkdir()
+    (interpreters / "python3.14").symlink_to(sys.executable)
+    environment = {
+        "PATH": str(interpreters),
+        "CLAUDE_PLUGIN_ROOT": str(root),
+        "HOME": str(tmp_path),
+        "TMPDIR": str(tmp_path),
+        "SHIM_CONFIG": str(tmp_path / "config.toml"),
+    }
+
+    result = _run("claude", environment)
+
+    assert (result.returncode, result.stderr) == (0, b"")
+    assert json.loads(result.stdout)["systemMessage"] == (
+        "shim: found EMAIL (1) in your prompt. Not modified."
+    )

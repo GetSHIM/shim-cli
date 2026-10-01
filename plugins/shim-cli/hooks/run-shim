@@ -12,7 +12,7 @@ fi
 
 archive="$root/bin/shim.pyz"
 if [ -n "$root" ] && [ -f "$archive" ]; then
-    for interpreter in python3.13 python3.12 python3.11 python3.10 python3.9 python3 python; do
+    for interpreter in python3.14 python3.13 python3.12 python3.11 python3.10 python3.9 python3 python; do
         if command -v "$interpreter" >/dev/null 2>&1; then
             exec "$interpreter" "$archive" "$client"
         fi

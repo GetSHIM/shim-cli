@@ -4,7 +4,7 @@
 
 | Area | Status |
 | --- | --- |
-| Python | CPython 3.10 through 3.13 for the package; the plugin archive runs on 3.9 through 3.13 |
+| Python | CPython 3.10 or newer for the package, tested on 3.10, 3.13 and 3.14; the plugin archive runs on 3.9 or newer |
 | Operating systems | macOS and Linux target |
 | Prompt hooks | Codex CLI, Claude Code, GitHub Copilot CLI, and VS Code |
 | Tool hooks | Claude Code `PreToolUse` and `PostToolUse`, masked, and `PostToolUseFailure`, reported only; VS Code `PreToolUse` reports and denies, `PostToolUse` reports only |
@@ -12,7 +12,8 @@
 
 ## Install
 
-The package runs on CPython 3.10 through 3.13. On a machine whose only Python
+The package runs on CPython 3.10 or newer; CI covers 3.10, 3.13 and 3.14, and
+no newer release is refused by the package metadata. On a machine whose only Python
 is 3.9, the plugin route needs no Python beyond 3.9 and the package route needs
 `--python`: `uv tool install --python 3.12 --compile-bytecode shim`.
 
