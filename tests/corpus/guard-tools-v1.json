@@ -106,7 +106,7 @@
             "EMAIL"
           ],
           "input_chars": 208,
-          "expected_output": "DATABASE_URL=<DB_URI_1>\nAWS_ACCESS_KEY_ID=<SECRET_1>\nGITHUB_TOKEN=<SECRET_2>\npassword = <SECRET_3>\nOWNER_EMAIL=<EMAIL_1>\n"
+          "expected_output": "DATABASE_URL=postgresql://<DB_URI_1>@db.example.com/app\nAWS_ACCESS_KEY_ID=<SECRET_1>\nGITHUB_TOKEN=<SECRET_2>\npassword = <SECRET_3>\nOWNER_EMAIL=<EMAIL_1>\n"
         }
       ],
       "tool": "Read"
@@ -151,11 +151,10 @@
             "content"
           ],
           "categories": [
-            "DB_URI",
             "DB_URI"
           ],
           "input_chars": 176,
-          "expected_output": "services:\n  api:\n    image: example/api:1\n    environment:\n      DATABASE_URL: <DB_URI_1>\n      REDIS_URL: <DB_URI_2>\n"
+          "expected_output": "services:\n  api:\n    image: example/api:1\n    environment:\n      DATABASE_URL: postgresql://<DB_URI_1>@db.example.com/app\n      REDIS_URL: redis://cache.example.com:6379/0\n"
         }
       ],
       "tool": "Read"
@@ -182,7 +181,7 @@
             "EMAIL"
           ],
           "input_chars": 211,
-          "expected_output": "DATABASE_URL=<DB_URI_1>\nAWS_ACCESS_KEY_ID=<SECRET_1>\nGITHUB_TOKEN=<SECRET_2>\npassword = <SECRET_3>\nOWNER_EMAIL=<EMAIL_1>\nend"
+          "expected_output": "DATABASE_URL=postgresql://<DB_URI_1>@db.example.com/app\nAWS_ACCESS_KEY_ID=<SECRET_1>\nGITHUB_TOKEN=<SECRET_2>\npassword = <SECRET_3>\nOWNER_EMAIL=<EMAIL_1>\nend"
         }
       ],
       "tool": "Bash"
@@ -343,7 +342,7 @@
             "EMAIL"
           ],
           "input_chars": 220,
-          "expected_output": "1\tDATABASE_URL=<DB_URI_1>\n2\tAWS_ACCESS_KEY_ID=<SECRET_1>\n3\tGITHUB_TOKEN=<SECRET_2>\n4\tpassword = <SECRET_3>\n5\tOWNER_EMAIL=<EMAIL_1>\n6\t"
+          "expected_output": "1\tDATABASE_URL=postgresql://<DB_URI_1>@db.example.com/app\n2\tAWS_ACCESS_KEY_ID=<SECRET_1>\n3\tGITHUB_TOKEN=<SECRET_2>\n4\tpassword = <SECRET_3>\n5\tOWNER_EMAIL=<EMAIL_1>\n6\t"
         }
       ],
       "tool": "Read"
@@ -364,11 +363,10 @@
             "tool_response"
           ],
           "categories": [
-            "DB_URI",
             "DB_URI"
           ],
           "input_chars": 190,
-          "expected_output": "1\tservices:\n2\t  api:\n3\t    image: example/api:1\n4\t    environment:\n5\t      DATABASE_URL: <DB_URI_1>\n6\t      REDIS_URL: <DB_URI_2>\n7\t"
+          "expected_output": "1\tservices:\n2\t  api:\n3\t    image: example/api:1\n4\t    environment:\n5\t      DATABASE_URL: postgresql://<DB_URI_1>@db.example.com/app\n6\t      REDIS_URL: redis://cache.example.com:6379/0\n7\t"
         }
       ],
       "tool": "Read"
@@ -446,7 +444,7 @@
             "EMAIL"
           ],
           "input_chars": 211,
-          "expected_output": "DATABASE_URL=<DB_URI_1>\nAWS_ACCESS_KEY_ID=<SECRET_1>\nGITHUB_TOKEN=<SECRET_2>\npassword = <SECRET_3>\nOWNER_EMAIL=<EMAIL_1>\nend"
+          "expected_output": "DATABASE_URL=postgresql://<DB_URI_1>@db.example.com/app\nAWS_ACCESS_KEY_ID=<SECRET_1>\nGITHUB_TOKEN=<SECRET_2>\npassword = <SECRET_3>\nOWNER_EMAIL=<EMAIL_1>\nend"
         }
       ],
       "tool": "Bash"

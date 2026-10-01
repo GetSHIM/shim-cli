@@ -34,6 +34,16 @@ BARE_ID = (
     "run is now a phone number only when Turkish-shaped or cued (PRD-21)."
 )
 
+USERINFO_ONLY = (
+    "A connection string is masked over its user-info only, so the model keeps "
+    "the scheme, host, port and database it needs to debug and loses the "
+    "credentials (PRD-36)."
+)
+NO_CREDENTIAL = (
+    "A connection string that carries no credentials names a host, not a "
+    "secret, wherever it points (PRD-36 R3)."
+)
+
 DELIBERATE_DIVERGENCES = {
     "ssn-bare-78051120": (BARE_ID, []),
     "vkn-nocontext-123456789": (BARE_ID, []),
@@ -51,6 +61,7 @@ DELIBERATE_DIVERGENCES = {
         "Same reasoning as net-3.",
         [],
     ),
+    "uri-no-credentials": (NO_CREDENTIAL, []),
 }
 
 # A divergence that still masks, but over fewer characters. Kept apart from
@@ -63,6 +74,186 @@ NARROWED_SPANS = {
         "placeholder.",
         [["EMAIL", 28, 45, 1.0]],
         "See https://example.com/u?e=<EMAIL_1> now",
+    ),
+    "uri-postgres": (
+        USERINFO_ONLY,
+        [["DB_URI", 19, 33, 0.99]],
+        "Connect postgres://<DB_URI_1>@db.example.com:5432/app now",
+    ),
+    "uri-trailing-postgres": (
+        USERINFO_ONLY,
+        [["DB_URI", 19, 33, 0.99]],
+        "Connect postgres://<DB_URI_1>@db.example.com:5432/app.",
+    ),
+    "uri-quoted-postgres": (
+        USERINFO_ONLY,
+        [["DB_URI", 20, 34, 0.99]],
+        'Connect "postgres://<DB_URI_1>@db.example.com:5432/app" now',
+    ),
+    "uri-paren-postgres": (
+        USERINFO_ONLY,
+        [["DB_URI", 20, 34, 0.99]],
+        "Connect (postgres://<DB_URI_1>@db.example.com:5432/app)",
+    ),
+    "uri-postgresql": (
+        USERINFO_ONLY,
+        [["DB_URI", 21, 35, 0.99]],
+        "Connect postgresql://<DB_URI_1>@db.example.com:5432/app now",
+    ),
+    "uri-trailing-postgresql": (
+        USERINFO_ONLY,
+        [["DB_URI", 21, 35, 0.99]],
+        "Connect postgresql://<DB_URI_1>@db.example.com:5432/app.",
+    ),
+    "uri-quoted-postgresql": (
+        USERINFO_ONLY,
+        [["DB_URI", 22, 36, 0.99]],
+        'Connect "postgresql://<DB_URI_1>@db.example.com:5432/app" now',
+    ),
+    "uri-paren-postgresql": (
+        USERINFO_ONLY,
+        [["DB_URI", 22, 36, 0.99]],
+        "Connect (postgresql://<DB_URI_1>@db.example.com:5432/app)",
+    ),
+    "uri-mysql": (
+        USERINFO_ONLY,
+        [["DB_URI", 16, 30, 0.99]],
+        "Connect mysql://<DB_URI_1>@db.example.com:5432/app now",
+    ),
+    "uri-trailing-mysql": (
+        USERINFO_ONLY,
+        [["DB_URI", 16, 30, 0.99]],
+        "Connect mysql://<DB_URI_1>@db.example.com:5432/app.",
+    ),
+    "uri-quoted-mysql": (
+        USERINFO_ONLY,
+        [["DB_URI", 17, 31, 0.99]],
+        'Connect "mysql://<DB_URI_1>@db.example.com:5432/app" now',
+    ),
+    "uri-paren-mysql": (
+        USERINFO_ONLY,
+        [["DB_URI", 17, 31, 0.99]],
+        "Connect (mysql://<DB_URI_1>@db.example.com:5432/app)",
+    ),
+    "uri-mongodb": (
+        USERINFO_ONLY,
+        [["DB_URI", 18, 32, 0.99]],
+        "Connect mongodb://<DB_URI_1>@db.example.com:5432/app now",
+    ),
+    "uri-trailing-mongodb": (
+        USERINFO_ONLY,
+        [["DB_URI", 18, 32, 0.99]],
+        "Connect mongodb://<DB_URI_1>@db.example.com:5432/app.",
+    ),
+    "uri-quoted-mongodb": (
+        USERINFO_ONLY,
+        [["DB_URI", 19, 33, 0.99]],
+        'Connect "mongodb://<DB_URI_1>@db.example.com:5432/app" now',
+    ),
+    "uri-paren-mongodb": (
+        USERINFO_ONLY,
+        [["DB_URI", 19, 33, 0.99]],
+        "Connect (mongodb://<DB_URI_1>@db.example.com:5432/app)",
+    ),
+    "uri-mongodb+srv": (
+        USERINFO_ONLY,
+        [["DB_URI", 22, 36, 0.99]],
+        "Connect mongodb+srv://<DB_URI_1>@db.example.com:5432/app now",
+    ),
+    "uri-trailing-mongodb+srv": (
+        USERINFO_ONLY,
+        [["DB_URI", 22, 36, 0.99]],
+        "Connect mongodb+srv://<DB_URI_1>@db.example.com:5432/app.",
+    ),
+    "uri-quoted-mongodb+srv": (
+        USERINFO_ONLY,
+        [["DB_URI", 23, 37, 0.99]],
+        'Connect "mongodb+srv://<DB_URI_1>@db.example.com:5432/app" now',
+    ),
+    "uri-paren-mongodb+srv": (
+        USERINFO_ONLY,
+        [["DB_URI", 23, 37, 0.99]],
+        "Connect (mongodb+srv://<DB_URI_1>@db.example.com:5432/app)",
+    ),
+    "uri-redis": (
+        USERINFO_ONLY,
+        [["DB_URI", 16, 30, 0.99]],
+        "Connect redis://<DB_URI_1>@db.example.com:5432/app now",
+    ),
+    "uri-trailing-redis": (
+        USERINFO_ONLY,
+        [["DB_URI", 16, 30, 0.99]],
+        "Connect redis://<DB_URI_1>@db.example.com:5432/app.",
+    ),
+    "uri-quoted-redis": (
+        USERINFO_ONLY,
+        [["DB_URI", 17, 31, 0.99]],
+        'Connect "redis://<DB_URI_1>@db.example.com:5432/app" now',
+    ),
+    "uri-paren-redis": (
+        USERINFO_ONLY,
+        [["DB_URI", 17, 31, 0.99]],
+        "Connect (redis://<DB_URI_1>@db.example.com:5432/app)",
+    ),
+    "uri-rediss": (
+        USERINFO_ONLY,
+        [["DB_URI", 17, 31, 0.99]],
+        "Connect rediss://<DB_URI_1>@db.example.com:5432/app now",
+    ),
+    "uri-trailing-rediss": (
+        USERINFO_ONLY,
+        [["DB_URI", 17, 31, 0.99]],
+        "Connect rediss://<DB_URI_1>@db.example.com:5432/app.",
+    ),
+    "uri-quoted-rediss": (
+        USERINFO_ONLY,
+        [["DB_URI", 18, 32, 0.99]],
+        'Connect "rediss://<DB_URI_1>@db.example.com:5432/app" now',
+    ),
+    "uri-paren-rediss": (
+        USERINFO_ONLY,
+        [["DB_URI", 18, 32, 0.99]],
+        "Connect (rediss://<DB_URI_1>@db.example.com:5432/app)",
+    ),
+    "uri-mssql": (
+        USERINFO_ONLY,
+        [["DB_URI", 16, 30, 0.99]],
+        "Connect mssql://<DB_URI_1>@db.example.com:5432/app now",
+    ),
+    "uri-trailing-mssql": (
+        USERINFO_ONLY,
+        [["DB_URI", 16, 30, 0.99]],
+        "Connect mssql://<DB_URI_1>@db.example.com:5432/app.",
+    ),
+    "uri-quoted-mssql": (
+        USERINFO_ONLY,
+        [["DB_URI", 17, 31, 0.99]],
+        'Connect "mssql://<DB_URI_1>@db.example.com:5432/app" now',
+    ),
+    "uri-paren-mssql": (
+        USERINFO_ONLY,
+        [["DB_URI", 17, 31, 0.99]],
+        "Connect (mssql://<DB_URI_1>@db.example.com:5432/app)",
+    ),
+    "uri-embedded-secret": (
+        USERINFO_ONLY,
+        [["DB_URI", 13, 43, 0.99]],
+        "postgresql://<DB_URI_1>@db.example.com/app.",
+    ),
+    "uri-upper-scheme": (
+        USERINFO_ONLY,
+        [["DB_URI", 21, 29, 0.99]],
+        "Connect POSTGRESQL://<DB_URI_1>@db.example.com/app now",
+    ),
+    "overlap-uri-secret": (
+        USERINFO_ONLY,
+        [["DB_URI", 13, 43, 0.99]],
+        "postgresql://<DB_URI_1>@db.example.com/app.",
+    ),
+    "overlap-card-in-uri": (
+        USERINFO_ONLY,
+        [["DB_URI", 13, 31, 0.99]],
+        "postgresql://<DB_URI_1>@db.example.com/app",
     ),
 }
 
