@@ -27,6 +27,7 @@ DEFAULT_ENTITIES = ENTITY_TYPES
 # giving the value back, as card issuers and banks already print them.
 REVEALABLE = ("IBAN", "CREDIT_CARD", "PHONE")
 MAX_REVEAL_DIGITS = 4
+PLACEHOLDER = re.compile(rf"<[A-Z_]+_[0-9]+(?::[0-9]{{1,{MAX_REVEAL_DIGITS}}})?>")
 
 MAX_CUSTOM_PATTERNS = 32
 MAX_PATTERN_CHARS = 256

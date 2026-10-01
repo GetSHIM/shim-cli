@@ -626,6 +626,405 @@
           "EMAIL"
         ]
       ]
+    },
+    {
+      "id": "secret-prefixed-db-password",
+      "text": "DB_PASSWORD=synthetic-password-0000",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "DB_PASSWORD=<SECRET_1>"
+    },
+    {
+      "id": "secret-aws-secret-access-key",
+      "text": "AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "AWS_SECRET_ACCESS_KEY=<SECRET_1>"
+    },
+    {
+      "id": "secret-aws-ini-lowercase",
+      "text": "aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "aws_secret_access_key = <SECRET_1>"
+    },
+    {
+      "id": "secret-api-token",
+      "text": "API_TOKEN=0123456789abcdef-synthetic",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "API_TOKEN=<SECRET_1>"
+    },
+    {
+      "id": "secret-jwt-secret-hex",
+      "text": "JWT_SECRET=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "JWT_SECRET=<SECRET_1>"
+    },
+    {
+      "id": "secret-twilio-auth-token",
+      "text": "TWILIO_AUTH_TOKEN=0123456789abcdef0123456789abcdef",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "TWILIO_AUTH_TOKEN=<SECRET_1>"
+    },
+    {
+      "id": "secret-suffixed-live",
+      "text": "KIS_APP_SECRET_LIVE=0123456789abcdef",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "KIS_APP_SECRET_LIVE=<SECRET_1>"
+    },
+    {
+      "id": "secret-dotted-key",
+      "text": "client.secret=0123456789abcdef",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "client.secret=<SECRET_1>"
+    },
+    {
+      "id": "secret-header-x-api-key",
+      "text": "x-api-key: 0123456789abcdef",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "x-api-key: <SECRET_1>"
+    },
+    {
+      "id": "secret-camel-json",
+      "text": "{\"clientSecret\": \"0123456789abcdef\"}",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "{\"clientSecret\": \"<SECRET_1>\"}"
+    },
+    {
+      "id": "secret-camel-leading",
+      "text": "secretAccessKey: 0123456789abcdef",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "secretAccessKey: <SECRET_1>"
+    },
+    {
+      "id": "secret-camel-azure-shared-access-key",
+      "text": "SharedAccessKey=0123456789abcdef",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "SharedAccessKey=<SECRET_1>"
+    },
+    {
+      "id": "secret-weak-password-still-found",
+      "text": "DB_PASSWORD=admin123",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "DB_PASSWORD=<SECRET_1>"
+    },
+    {
+      "id": "secret-bare-numeric-password-kept",
+      "text": "password=12345678",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "password=<SECRET_1>"
+    },
+    {
+      "id": "secret-quoted-value-with-hash",
+      "text": "DB_PASSWORD=\"p#ss=w'rd-0000\"",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "DB_PASSWORD=\"<SECRET_1>\""
+    },
+    {
+      "id": "secret-token-inside-url-value",
+      "text": "OAUTH_TOKEN_URL=https://auth.example.com/oauth?token=0123456789abcdef",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "OAUTH_TOKEN_URL=https://auth.example.com/oauth?token=<SECRET_1>"
+    },
+    {
+      "id": "secret-base64-starting-with-slash",
+      "text": "AWS_SECRET_ACCESS_KEY=/K7MDENG/bPxRfiCYEXAMPLEKEY+0123456789ab",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "AWS_SECRET_ACCESS_KEY=<SECRET_1>"
+    },
+    {
+      "id": "secret-slack-bot-token",
+      "text": "SLACK_BOT_TOKEN=\u0078oxb-0000000000-EXAMPLEEXAMPLE",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "SLACK_BOT_TOKEN=<SECRET_1>"
+    },
+    {
+      "id": "secret-google-api-key",
+      "text": "GOOGLE_API_KEY=AIza00000000000000000000000000000000000",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "GOOGLE_API_KEY=<SECRET_1>"
+    },
+    {
+      "id": "secret-github-fine-grained-pat",
+      "text": "GITHUB_PAT=github_pat_0000000000000000000000_EXAMPLE",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "GITHUB_PAT=<SECRET_1>"
+    },
+    {
+      "id": "secret-gitlab-pat",
+      "text": "GITLAB=glpat-00000000000000000000",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "GITLAB=<SECRET_1>"
+    },
+    {
+      "id": "secret-npm-token",
+      "text": "NPM_TOKEN=npm_000000000000000000000000000000000000",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "NPM_TOKEN=<SECRET_1>"
+    },
+    {
+      "id": "secret-hugging-face-token",
+      "text": "HF_TOKEN=hf_0000000000000000000000000000000000",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "HF_TOKEN=<SECRET_1>"
+    },
+    {
+      "id": "secret-prefix-in-prose",
+      "text": "rotate \u0078oxb-0000000000-EXAMPLEEXAMPLE today",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "rotate <SECRET_1> today"
+    },
+    {
+      "id": "secret-azure-account-key",
+      "text": "DefaultEndpointsProtocol=https;AccountName=example;AccountKey=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==;EndpointSuffix=core.windows.net",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "DefaultEndpointsProtocol=https;AccountName=example;AccountKey=<SECRET_1>;EndpointSuffix=core.windows.net"
+    },
+    {
+      "id": "secret-authorization-basic",
+      "text": "Authorization: Basic ZXhhbXBsZTpleGFtcGxl",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "Authorization: Basic <SECRET_1>"
+    },
+    {
+      "id": "secret-authorization-bearer-quoted",
+      "text": "-H \"authorization: bearer 0123456789abcdef\"",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "-H \"authorization: bearer <SECRET_1>\""
+    },
+    {
+      "id": "secret-authorization-bearer-jwt-once",
+      "text": "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abcdefghij",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "Authorization: Bearer <SECRET_1>"
+    },
+    {
+      "id": "secret-negative-max-tokens",
+      "text": "MAX_TOKENS=4096",
+      "categories": [],
+      "expected_output": "MAX_TOKENS=4096"
+    },
+    {
+      "id": "secret-negative-token-ttl",
+      "text": "TOKEN_TTL=3600",
+      "categories": [],
+      "expected_output": "TOKEN_TTL=3600"
+    },
+    {
+      "id": "secret-negative-password-min-length",
+      "text": "PASSWORD_MIN_LENGTH=12",
+      "categories": [],
+      "expected_output": "PASSWORD_MIN_LENGTH=12"
+    },
+    {
+      "id": "secret-negative-sort-key",
+      "text": "SORT_KEY=name",
+      "categories": [],
+      "expected_output": "SORT_KEY=name"
+    },
+    {
+      "id": "secret-negative-auth-provider",
+      "text": "AUTH_PROVIDER=google",
+      "categories": [],
+      "expected_output": "AUTH_PROVIDER=google"
+    },
+    {
+      "id": "secret-negative-session-token-ttl-digits",
+      "text": "SESSION_TOKEN_TTL=604800",
+      "categories": [],
+      "expected_output": "SESSION_TOKEN_TTL=604800"
+    },
+    {
+      "id": "secret-negative-pass-flag-digits",
+      "text": "PASS=123456",
+      "categories": [],
+      "expected_output": "PASS=123456"
+    },
+    {
+      "id": "secret-negative-bypass",
+      "text": "BYPASS=0123456789abcdef",
+      "categories": [],
+      "expected_output": "BYPASS=0123456789abcdef"
+    },
+    {
+      "id": "secret-negative-tokenizer",
+      "text": "tokenizer=0123456789abcdef",
+      "categories": [],
+      "expected_output": "tokenizer=0123456789abcdef"
+    },
+    {
+      "id": "secret-negative-secretary",
+      "text": "secretary=0123456789abcdef",
+      "categories": [],
+      "expected_output": "secretary=0123456789abcdef"
+    },
+    {
+      "id": "secret-negative-camel-max-tokens",
+      "text": "maxTokens: 100000",
+      "categories": [],
+      "expected_output": "maxTokens: 100000"
+    },
+    {
+      "id": "secret-negative-db-password-digits",
+      "text": "DB_PASSWORD=12345678",
+      "categories": [],
+      "expected_output": "DB_PASSWORD=12345678"
+    },
+    {
+      "id": "secret-negative-db-password-boolean",
+      "text": "DB_PASSWORD=false",
+      "categories": [],
+      "expected_output": "DB_PASSWORD=false"
+    },
+    {
+      "id": "secret-negative-reference-braces",
+      "text": "DB_PASSWORD=${DB_PASS}",
+      "categories": [],
+      "expected_output": "DB_PASSWORD=${DB_PASS}"
+    },
+    {
+      "id": "secret-negative-reference-dollar",
+      "text": "DB_PASSWORD=$DB_PASS",
+      "categories": [],
+      "expected_output": "DB_PASSWORD=$DB_PASS"
+    },
+    {
+      "id": "secret-negative-reference-percent",
+      "text": "API_TOKEN=%SERVICE_TOKEN%",
+      "categories": [],
+      "expected_output": "API_TOKEN=%SERVICE_TOKEN%",
+      "expected_spans": []
+    },
+    {
+      "id": "secret-negative-reference-os-environ",
+      "text": "DB_PASSWORD = os.environ[\"DB_PASSWORD\"]",
+      "categories": [],
+      "expected_output": "DB_PASSWORD = os.environ[\"DB_PASSWORD\"]"
+    },
+    {
+      "id": "secret-negative-reference-process-env",
+      "text": "const apiKey = process.env.STRIPE_KEY",
+      "categories": [],
+      "expected_output": "const apiKey = process.env.STRIPE_KEY"
+    },
+    {
+      "id": "secret-negative-reference-getenv",
+      "text": "API_TOKEN = os.getenv(\"API_TOKEN\")",
+      "categories": [],
+      "expected_output": "API_TOKEN = os.getenv(\"API_TOKEN\")"
+    },
+    {
+      "id": "secret-negative-placeholder",
+      "text": "DB_PASSWORD=<SECRET_1>",
+      "categories": [],
+      "expected_output": "DB_PASSWORD=<SECRET_1>"
+    },
+    {
+      "id": "secret-negative-token-url",
+      "text": "TOKEN_URL=https://auth.example.com/token",
+      "categories": [],
+      "expected_output": "TOKEN_URL=https://auth.example.com/token"
+    },
+    {
+      "id": "secret-negative-password-reset-url",
+      "text": "PASSWORD_RESET_URL=https://app.example.com/reset",
+      "categories": [],
+      "expected_output": "PASSWORD_RESET_URL=https://app.example.com/reset"
+    },
+    {
+      "id": "secret-negative-password-file-path",
+      "text": "DB_PASSWORD_FILE=/run/secrets/db_password",
+      "categories": [],
+      "expected_output": "DB_PASSWORD_FILE=/run/secrets/db_password"
+    },
+    {
+      "id": "secret-negative-credentials-path",
+      "text": "GOOGLE_APPLICATION_CREDENTIALS=/srv/keys/service.json",
+      "categories": [],
+      "expected_output": "GOOGLE_APPLICATION_CREDENTIALS=/srv/keys/service.json"
+    },
+    {
+      "id": "secret-negative-type-name-typescript",
+      "text": "accessToken: string;",
+      "categories": [],
+      "expected_output": "accessToken: string;"
+    },
+    {
+      "id": "secret-negative-type-name-python",
+      "text": "api_key: Optional[str] = None",
+      "categories": [],
+      "expected_output": "api_key: Optional[str] = None"
+    },
+    {
+      "id": "secret-negative-type-name-bare",
+      "text": "password: string",
+      "categories": [],
+      "expected_output": "password: string"
+    },
+    {
+      "id": "secret-negative-bearer-reference",
+      "text": "Authorization: Bearer $TOKEN",
+      "categories": [],
+      "expected_output": "Authorization: Bearer $TOKEN"
+    },
+    {
+      "id": "secret-negative-account-key-short",
+      "text": "AccountKey=short",
+      "categories": [],
+      "expected_output": "AccountKey=short"
     }
   ],
   "generated_cases": [
