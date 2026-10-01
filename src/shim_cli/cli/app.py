@@ -1,6 +1,7 @@
 import subprocess
 from enum import Enum
 from importlib import metadata
+from pathlib import Path
 from typing import Annotated
 
 import typer
@@ -259,6 +260,28 @@ def report(
     from shim_cli.cli.report import report as run_report
 
     run_report(as_json=json_output)
+
+
+@app.command()
+def audit(
+    since: str | None = typer.Option(
+        None, "--since", metavar="YYYY-MM-DD", help="Skip records before this date."
+    ),
+    project: Annotated[
+        Path | None,
+        typer.Option("--project", help="Only sessions run in this folder or below it."),
+    ] = None,
+    json_output: bool = typer.Option(False, "--json", help="Write a JSON result."),
+    purge: bool = typer.Option(
+        False,
+        "--purge",
+        help="Delete the sessions that sent something, after a typed confirmation.",
+    ),
+) -> None:
+    """Count what Claude Code sessions have already sent to the model."""
+    from shim_cli.cli.audit import audit as run_audit
+
+    run_audit(since=since, project=project, as_json=json_output, purge=purge)
 
 
 @app.command(

@@ -11,7 +11,7 @@ client's traffic to the provider your client was already going to talk to.
 
 - [Conventions](#conventions) — flags and exit codes shared by every command
 - [Setting up](#setting-up) — `install`, `status`, `doctor`, `revert`, `update`
-- [Seeing what happened](#seeing-what-happened) — `report`, `ledger`, `watch`
+- [Seeing what happened](#seeing-what-happened) — `report`, `ledger`, `watch`, `audit`
 - [Changing what is detected](#changing-what-is-detected) — `config`
 - [Checking text directly](#checking-text-directly) — `scan`, `redact`, `demo`
 - [The settings file](#the-settings-file) — every key in `config.toml`
@@ -250,6 +250,76 @@ because a custom endpoint there removes GitHub authentication.
 
 Refuses to start if `ANTHROPIC_BASE_URL` is already set, and tells you the two
 ways forward.
+
+### `shim audit`
+
+What your Claude Code sessions have already put in front of the model, counted
+from Claude Code's own history (`~/.claude/projects`, or
+`$CLAUDE_CONFIG_DIR/projects`). Nothing is changed, written or sent.
+
+```console
+shim audit
+shim audit --since 2026-09-01 --project ~/work/kasa-mutabakat
+```
+
+```
+shim audit — Claude Code history, 3 sessions in 2 projects, 2026-09-28 to 2026-09-30
+
+reached the model
+  SECRET          10  in 2 sessions   @.env 5 · failed Bash 5
+  EMAIL            3  in 3 sessions   @.env 1 · failed Bash 1 · your prompt 1
+  DB_URI           2  in 2 sessions   @.env 1 · failed Bash 1
+
+by project
+  ~/work/kasa-mutabakat      SECRET 10, DB_URI 2, EMAIL 2 · last 2026-09-30
+  ~/work/site                EMAIL 1 · last 2026-09-29
+
+already masked by shim       3 values in 1 session
+model output                 2 EMAIL (written by the model; it may repeat values it was given)
+
+scanned 3 sessions, 5 KB, in 0.0 s. Nothing was changed, written or sent.
+```
+
+| Option | What it does |
+| --- | --- |
+| `--since YYYY-MM-DD` | Skips records before that day. |
+| `--project PATH` | Only sessions run in `PATH` or a folder below it. |
+| `--json` | The same counts per entity, way in, project and session. |
+| `--purge` | Deletes the sessions that sent something, after a typed confirmation. |
+
+It reads the prompts you typed or queued, tool results (a failed call is
+`failed <tool>`), files attached with `@`, edited-file snippets, and what the
+model wrote (`text` and `thinking`), each counted under the way it came in.
+Model output is its own line and never added to the rest. Placeholders shim
+already wrote into tool results are counted as `already masked by shim`.
+Sub-agent transcripts count under their session; the task prompt a parent agent
+wrote into one, compaction summaries and the client's own state records are
+skipped. A line over 8 MB or not JSON, and a text the detector cannot analyse,
+are counted as skipped and said so.
+
+Exits `0` when nothing reached the model, `1` when something did, `2` when the
+history is missing or unreadable.
+
+`--json` carries `sessions`, `projects`, `first`, `last`, `reached` (per
+entity: `total`, `sessions`, `doors`), `by_project` (`counts`, `last`),
+`by_session` (`project`, `last`, `reached`, `model_output`, `masked`), `masked`
+(`values`, `sessions`), `model_output`, and `scanned` (`sessions`, `bytes`,
+`seconds`, `skipped_lines`, `uninspected_texts`).
+
+**`--purge`** needs a terminal and cannot be combined with `--json`. It prints
+the report, lists the sessions with at least one value under "reached the
+model", and asks you to type `delete N`; anything else deletes nothing. It
+first removes the listed sessions' lines from `history.jsonl`; if that file
+cannot be rewritten, or changes meanwhile, nothing is deleted. Then, for each
+session, it deletes the folder of the same name beside the transcript
+(sub-agent transcripts and whatever else Claude Code keeps there) and last the
+transcript, so a session whose folder cannot be fully deleted keeps its
+transcript and a later run finds it again. A session whose files changed during
+the run is skipped and named, a link is removed as a link with its target left
+alone, and the exit code stays what it was: deleting the local copy does not
+change what reached the model provider. Claude Code keeps other files per
+session that `--purge` leaves, such as its backups of the files the agent edited
+in `file-history/`. Close Claude Code first.
 
 ## Changing what is detected
 

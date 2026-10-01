@@ -460,3 +460,32 @@ nothing else.
 
 Nothing is transmitted anywhere except to the provider the client was already
 talking to. There is still no telemetry and no account.
+
+## `shim audit`
+
+`shim audit` reads Claude Code's own history: the session transcripts under
+`~/.claude/projects` (or `$CLAUDE_CONFIG_DIR/projects`) and, with `--purge`
+only, `history.jsonl` beside that folder. It reads them when you run it and at
+no other time; the hook still never reads `transcript_path`.
+
+From each transcript it takes the prompts you typed or queued, tool results,
+files attached with `@`, edited-file snippets and what the model wrote, and
+scans them in memory as the hook scans a prompt. What it prints is entity
+names, counts, dates, and project folders with your home shown as `~`, tool
+names and attachment names, each scrubbed by the detector like a session
+record's target. It writes no record, no ledger entry, no cache and no
+log, follows no symbolic link out of the projects folder, and without
+`--purge` opens no file for writing.
+
+`--purge` deletes, for the sessions you confirm by typing `delete N`, each
+session's transcript, the folder of the same name beside it (Claude Code keeps
+sub-agent transcripts and tool output there) and the session's lines in
+`history.jsonl`, which holds what you typed in interactive sessions. That file
+is rewritten first, through a new file in the same folder with the same
+permissions; if it cannot be written, or Claude Code changed it meanwhile, it is
+left as it was, nothing is deleted and you are told. A transcript is deleted
+last, so a session whose folder could not be fully deleted is kept and found
+again by the next run. Nothing else is deleted: Claude Code keeps other files
+per session outside `projects/`, among them backups of the files the agent
+edited in `file-history/`, and those stay. Nothing records what was deleted, and
+what already reached the model provider is not affected.

@@ -8,6 +8,7 @@
 | Operating systems | macOS and Linux. Windows is not supported: the hook stands down with one line on stderr and inspects nothing, so no prompt is withheld; the plugin launcher does the same under Git Bash; every CLI command except `help`, `--version` and `update` refuses with exit 2. This was simulated (platform patched, `fcntl` removed), not run on Windows. WSL runs as Linux, not yet verified |
 | Prompt hooks | Codex CLI, Claude Code, GitHub Copilot CLI, and VS Code |
 | Tool hooks | Claude Code `PreToolUse` and `PostToolUse`, masked, and `PostToolUseFailure`, reported only; VS Code `PreToolUse` reports and denies, `PostToolUse` reports only |
+| `shim audit` | Claude Code history only: transcripts written by 2.1.270 to 2.1.286 were read; the record shapes are below |
 | `shim watch` | Claude Code only. Codex is refused: it reads its endpoint from its own configuration, so the proxy is bypassed and the session measured as empty ([probe](probe-2026-09-codex-watch.md)). Copilot out of scope because a custom endpoint removes GitHub authentication |
 
 ## Install
@@ -165,6 +166,29 @@ codex` appeared in `/hooks`, was trusted there and ran on every prompt. The
 payload Codex handed it, captured and replayed with `user-prompt = "enforce"`,
 was answered with `shim blocked this prompt: SECRET (1).`
 The README therefore sends Codex users to `shim install codex`.
+
+## Claude Code history, as `shim audit` reads it
+
+Read from transcripts Claude Code 2.1.270 to 2.1.286 wrote on 1 October 2026
+(key names only), and from the field-test transcripts of 2.1.284:
+
+| Record | Where the text is | Counted as |
+| --- | --- | --- |
+| `type: "user"`, `message.content` a string, or `text` blocks | the string or the blocks | `your prompt` |
+| `type: "user"`, `tool_result` blocks | `content`, a string or `text` blocks; `is_error: true` for a failed call | the tool's name, joined through `tool_use_id`, or `failed <tool>` |
+| `type: "assistant"`, `text` and `thinking` blocks | `text`, `thinking` | model output |
+| `type: "attachment"`, `attachment.type: "file"` | `attachment.content.file.content` (2.1.270 and later), or `attachment.content` as a string (2.1.284 field test) | `@<displayPath>` |
+| `attachment.type: "queued_command"` | `attachment.prompt`, `text` blocks | `your prompt` |
+| `attachment.type: "edited_text_file"` | `attachment.snippet` | `edited <file name>` |
+
+Skipped: `isCompactSummary` user records (a summary of what is already in the
+file), the prompt a parent agent wrote into a sub-agent transcript
+(`<session id>/subagents/agent-<id>.jsonl`, whose tool results count under the
+parent session), the structured `toolUseResult` copy of a tool result, and every
+other attachment type (hook context, prompt snapshots, environment, skill and
+tool listings). `history.jsonl`, beside `projects/`, holds one line per
+interactive prompt with the keys `display`, `pastedContents`, `project`,
+`sessionId` and `timestamp`; `sessionId` is the transcript's file name.
 
 ## 1.0.3 release evidence
 

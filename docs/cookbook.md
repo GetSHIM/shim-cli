@@ -6,6 +6,7 @@ have a specific problem and want the two lines that solve it.
 
 Everything here runs locally. Nothing in this document sends anything anywhere.
 
+- [Before you install: what did my agent already send?](#before-you-install-what-did-my-agent-already-send)
 - [Start here: make it visible](#start-here-make-it-visible)
 - [Stop a secret before it leaves](#stop-a-secret-before-it-leaves)
 - [Teach it your project's own secrets](#teach-it-your-projects-own-secrets)
@@ -19,6 +20,34 @@ Everything here runs locally. Nothing in this document sends anything anywhere.
 - [Know what your client can actually do](#know-what-your-client-can-actually-do)
 - [When something looks wrong](#when-something-looks-wrong)
 - [Leaving](#leaving)
+
+## Before you install: what did my agent already send?
+
+shim only sees what happens after you install it. Your Claude Code history
+holds what happened before:
+
+```console
+shim audit
+shim audit --since 2026-09-01 --project ~/work/kasa-mutabakat
+```
+
+Each line under "reached the model" names a kind of value, how many there
+were, in how many sessions, and how they got there: `your prompt`, a tool such
+as `Read`, `failed Bash` for a command that failed, or `@.env` for a file you
+attached. The last of these is the one people expect least, and it is why
+[Stop a secret before it leaves](#stop-a-secret-before-it-leaves) says to ask
+the agent to read a file rather than attach it.
+
+If you would rather those sessions were not kept on this computer:
+
+```console
+shim audit --purge
+```
+
+It asks you to type `delete N` before it deletes anything, and it cannot take
+back what the model provider already received. It deletes the transcripts and
+their lines in `history.jsonl`; Claude Code's backups of edited files in
+`file-history/` stay.
 
 ## Start here: make it visible
 
