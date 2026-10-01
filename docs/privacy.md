@@ -124,7 +124,20 @@ masked. Three things stay undetected: a secret pasted with no key name and no
 known prefix; a value made only of digits under such a key, which is the cost
 of keeping `TOKEN_TTL=86400` quiet; and an unquoted password of letters that
 reads as code, such as `SMTP_PASSWORD=correct.horse.battery`, which is the cost
-of keeping code quiet.
+of keeping code quiet. A block of base64 whose decoded text holds a secret or a
+connection string with credentials, such as the output of `base64 .env` or a
+Kubernetes `.dockerconfigjson`, is masked as a whole, on one line or wrapped at
+60, 64 or 76 characters, inside YAML or a JSON string, with the line numbers
+`grep -n` (with or without `-C`) or `cat -n` print in front of its lines, and in
+a diff that adds or deletes it. In a diff of a block changed in place, the new
+lines are read without the unchanged line above them, so part of a new value
+can stay readable.
+The `auth` value that `docker login` writes to a Docker `config.json` and npm's
+`_auth`, each a base64 `user:password`, are secrets as well, and so is Docker's
+`identitytoken`. Besides base64, only percent escapes that form UTF-8 text are
+decoded (`alice%40example.com` is an email): hex, compressed or reversed text,
+or a value with spaces put between its characters, reaches the model as it was
+written.
 
 ## What is recorded
 

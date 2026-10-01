@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import ipaddress
 import re
 import string
@@ -493,7 +495,7 @@ _SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str | None, float, bool], ...] = 
     ),
     (
         re.compile(
-            r'"(?:auth|identitytoken)"\s*:\s*"(?P<value>[A-Za-z0-9+/]{8,}={0,2})"',
+            r'"identitytoken"\s*:\s*"(?P<value>(?!\$\{|<)[^"\s]{8,})"',
             re.IGNORECASE,
         ),
         "value",
@@ -639,7 +641,109 @@ def _scan_db_uri(text: str) -> list[Match]:
     return results
 
 
+_BASE64_LINE = re.compile(
+    r"(?:(?<![\w+/\\])|(?<=\\[nrt]))[A-Za-z0-9+/]{24,}={0,2}(?![\w+/=])"
+)
+_BASE64_RUN = r"[ \t]*([A-Za-z0-9+/]{4,}={0,2})[ \t]*(?=[\r\n\"']|\\[rn]|$)"
+_BASE64_NEXT = re.compile(
+    r"[ \t]*(?:\r\n?|\n|(?:\\r)?\\n)"
+    r"(?:(?:[^\r\n:\\\"]+[:-])?\d+[:-]|[ \t]*\d+\t|-)?" + _BASE64_RUN
+)
+_DIFF_NEXT = re.compile(r"[ \t]*(?:\r\n?|\n)\+" + _BASE64_RUN)
+_WRAP_WIDTHS = (60, 64, 76)
+_BASIC_AUTH = re.compile(
+    r'"auth"\s*:\s*"(?P<value>[A-Za-z0-9+/]{8,}={0,2})"'
+    r"|(?<![\w-])(?:npm_config_)?_auth\s*=\s*(?P<quote>[\"']?)"
+    r"(?P<bare>[A-Za-z0-9+/]{8,}={0,2})(?P=quote)(?![\w+/=])",
+    re.IGNORECASE,
+)
+
+
+def _decoded(block: str) -> str | None:
+    body = block.rstrip("=")
+    if len(body) % 4 == 1:
+        body = body[:-1]
+    try:
+        data = base64.b64decode(body + "=" * (-len(body) % 4), validate=True)
+    except binascii.Error:
+        return None
+    return data.decode("utf-8", "replace")
+
+
+def _holds_secret(text: str) -> bool:
+    return bool(_scan_secret(text) or _scan_db_uri(text) or _scan_basic_auth(text))
+
+
+def _encoded_block(
+    text: str, start: int, end: int, follow: re.Pattern
+) -> tuple[int, bool]:
+    width = end - start
+    parts, ends = [text[start:end]], [end]
+    while (
+        width in _WRAP_WIDTHS
+        and len(parts[-1]) == width
+        and not parts[-1].endswith("=")
+    ):
+        more = follow.match(text, ends[-1])
+        if more is None or len(more.group(1)) > width:
+            break
+        parts.append(more.group(1))
+        ends.append(more.end(1))
+    for count in (len(parts), len(parts) - 1):
+        decoded = _decoded("".join(parts[:count])) if count else None
+        if decoded is not None:
+            return ends[count - 1], _holds_secret(decoded)
+    return end, False
+
+
+def _scan_encoded_secret(text: str) -> list[Match]:
+    results: list[Match] = []
+    position = 0
+    while found := _BASE64_LINE.search(text, position):
+        start, end = found.span()
+        indent = start
+        while indent and text[indent - 1] in " \t":
+            indent -= 1
+        attempts = [(start, _BASE64_NEXT)]
+        if text[indent - 1 : indent] == "+" and text[indent - 2 : indent - 1] in "\r\n":
+            attempts.insert(0, (start, _DIFF_NEXT))
+        elif text[start] == "+" and text[start - 1 : start] in "\r\n":
+            attempts.insert(0, (start + 1, _DIFF_NEXT))
+        if start == 0:
+            attempts.extend((shift, _BASE64_NEXT) for shift in (1, 2, 3))
+        position = end
+        for begin, follow in attempts:
+            stop, secret = _encoded_block(text, begin, end, follow)
+            position = max(position, stop)
+            if secret:
+                results.append(Match("SECRET", begin, stop, 0.97))
+                break
+    return results
+
+
+def _a_login(value: str) -> bool:
+    body = value.rstrip("=")
+    try:
+        data = base64.b64decode(body + "=" * (-len(body) % 4), validate=True)
+        login = data.decode("utf-8").rstrip("\r\n")
+    except (binascii.Error, UnicodeDecodeError):
+        return False
+    user, colon, password = login.partition(":")
+    return bool(colon and user and password and login.isprintable())
+
+
+def _scan_basic_auth(text: str) -> list[Match]:
+    results: list[Match] = []
+    for found in _BASIC_AUTH.finditer(text):
+        group = "value" if found.group("value") else "bare"
+        if _a_login(found.group(group)):
+            results.append(Match("SECRET", found.start(group), found.end(group), 0.97))
+    return results
+
+
 def _scan_email(text: str) -> list[Match]:
+    if "@" not in text:
+        return []
     found = _scan(text, "EMAIL_ADDRESS", _EMAIL_PATTERNS, validate=_validate_email)
     if "://" not in text:
         return found
@@ -685,6 +789,8 @@ _RECOGNIZERS: tuple[tuple[str, Callable[[str], list[Match]]], ...] = (
     ("TR_VKN", _scan_vkn),
     ("SECRET", _scan_secret),
     ("DB_URI", _scan_db_uri),
+    ("SECRET", _scan_encoded_secret),
+    ("SECRET", _scan_basic_auth),
 )
 
 
