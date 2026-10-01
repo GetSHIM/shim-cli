@@ -21,6 +21,8 @@ shim config -> guarded TOML -> Policy
 shim scan/redact (stdin) -> detector -> counts or typed redaction
 shim install/status/doctor/revert -> client settings + guarded file boundary
 shim report / shim ledger purge -> session-owned records
+shim audit -> Claude Code transcripts -> detector -> counts; --purge deletes sessions
+shim keys <file> -> .env/INI parser -> detector -> names, states, entity types
 
 prompt event -> client codec (+ Claude @ files read from disk) -> Policy -> detector
              -> allow/report | Copilot rewrite | native block + 0600 suggestion

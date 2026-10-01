@@ -24,7 +24,8 @@ Python 3.9 or newer, which is what a stock macOS provides. Claude Code and VS
 Code reach it; current Codex loads no plugin hook.
 
 **The plugin is the hooks, and only the hooks.** `shim watch`, `shim report`,
-and `shim config` are CLI commands and are not in the archive. The hook is a
+`shim config`, `shim audit` and `shim keys` are CLI commands and are not in the
+archive. The hook is a
 cold-start subprocess on every event and must not import command-only code.
 Install the package to use those commands; for Claude, adding it does not
 duplicate hook registration because the launcher simply prefers the package.

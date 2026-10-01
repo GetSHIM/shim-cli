@@ -26,7 +26,7 @@ stable interface and the JSON is.
 
 **`--yes`** skips the confirmation prompt on the commands that change a file
 (`install`, `revert`, `config`). Without it you are shown what will happen and
-asked.
+asked. `audit --purge` has no `--yes`: it always asks you to type `delete N`.
 
 **`--help`** works on every command, and `shim help` is the same as
 `shim --help`. Each command's help repeats its own options, so this document is
@@ -295,7 +295,8 @@ already wrote into tool results are counted as `already masked by shim`.
 Sub-agent transcripts count under their session; the task prompt a parent agent
 wrote into one, compaction summaries and the client's own state records are
 skipped. A line over 8 MB or not JSON, and a text the detector cannot analyse,
-are counted as skipped and said so.
+are counted as skipped and said so. It looks for the types your settings enable
+and your custom patterns; a per-tool `[entities]` rule does not apply.
 
 Exits `0` when nothing reached the model, `1` when something did, `2` when the
 history is missing or unreadable.
@@ -585,7 +586,7 @@ wrote back is `observe`, because the client has already shown it.
 | `XDG_CONFIG_HOME` | Where `shim/config.toml` lives. |
 | `XDG_STATE_HOME` | Where the ledger lives. |
 | `TMPDIR` | Where session records and withheld prompts are written. |
-| `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `COPILOT_HOME` | Where each client keeps its settings; shim follows them. |
+| `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `COPILOT_HOME` | Where each client keeps its settings; shim follows them, and `shim audit` reads Claude Code's history there. |
 
 ## Where shim keeps things
 
