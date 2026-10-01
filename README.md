@@ -18,7 +18,6 @@
   <a href="https://scorecard.dev/viewer/?uri=github.com/GetSHIM/shim-cli"><img src="https://api.scorecard.dev/projects/github.com/GetSHIM/shim-cli/badge" alt="OpenSSF Scorecard"></a>
   <a href="https://pypi.org/project/shim/"><img src="https://img.shields.io/pypi/pyversions/shim.svg?logo=python&amp;logoColor=white" alt="Python versions"></a>
   <a href="https://github.com/GetSHIM/shim-cli/blob/main/LICENSE"><img src="https://img.shields.io/github/license/GetSHIM/shim-cli.svg" alt="License"></a>
-  <a href="https://github.com/GetSHIM/shim-cli/stargazers"><img src="https://img.shields.io/github/stars/GetSHIM/shim-cli.svg?style=flat&amp;logo=github" alt="GitHub stars"></a>
 </p>
 
 shim-cli shows you what your coding agent actually sends to the model — how
@@ -45,8 +44,7 @@ Two commands, two different questions:
 
 ## Measure a session
 
-Nobody can tell you where their agent's context window actually goes. `shim
-watch` puts a local proxy in front of the client for one command, forwards
+`shim watch` puts a local proxy in front of the client for one command, forwards
 every byte unchanged, and reports what went past:
 
 ```console
@@ -60,9 +58,9 @@ shim watch -- claude -p "explain this repo"
 </p>
 
 On the session above, **the tools array was 88% of the input tokens** — before
-a single line of the user's own code. That is one session on one repository,
-not a universal figure, which is the point: it is your number and you have no
-other way to get it.
+a single line of the user's own code. That is one session on one repository.
+Claude Code's `/context` shows the same split for the session in front of you;
+`shim watch` adds what was in each part and what came back.
 
 The three `IBAN`s came from a file the agent read with a tool: shim scans every
 text field the model reads, including tool results, and says which part of the
