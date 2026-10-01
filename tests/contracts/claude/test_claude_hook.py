@@ -256,3 +256,69 @@ def test_a_compacted_result_says_nothing_to_the_model(tmp_path: Path) -> None:
         b'"updatedToolOutput":{"type":"text","content":'
         b'"{\\"rows\\":[{\\"id\\":0},{\\"id\\":1},{\\"id\\":2},{\\"id\\":3}]}"}}}'
     )
+
+
+def _failure(error: object) -> bytes:
+    return json.dumps(
+        {
+            "session_id": "failed-command",
+            "cwd": "/workspace",
+            "permission_mode": "default",
+            "hook_event_name": "PostToolUseFailure",
+            "tool_name": "Bash",
+            "tool_input": {"command": "cat .env && cat missing-file"},
+            "tool_use_id": "toolu_00000000000000000000000000",
+            "error": error,
+            "is_interrupt": False,
+        },
+        separators=(",", ":"),
+    ).encode()
+
+
+def _isolated(tmp_path: Path) -> dict:
+    return {"SHIM_CONFIG": str(tmp_path / "absent" / "config.toml")}
+
+
+def test_a_failed_command_that_printed_a_secret_is_reported_to_both(
+    tmp_path: Path,
+) -> None:
+    error = (
+        "Exit code 1\nAWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE\n"
+        "cat: missing-file: No such file or directory"
+    )
+
+    result = _run(_failure(error), tmp_path, _isolated(tmp_path))
+    spooled = b"".join(path.read_bytes() for path in tmp_path.rglob("*.jsonl"))
+
+    assert (result.returncode, result.stderr) == (0, b"")
+    assert result.stdout == (
+        b'{"systemMessage":"shim: found SECRET (1) in a failed Bash. Claude Code '
+        b'does not let this output be masked; the model has these values.",'
+        b'"hookSpecificOutput":{"hookEventName":"PostToolUseFailure",'
+        b'"additionalContext":"shim: the output of this failed Bash contained '
+        b'SECRET (1). Do not repeat these values in replies, files or commands."}}'
+    )
+    assert b'"event": "PostToolUseFailure"' in spooled
+    assert b'"action": "report"' in spooled
+    assert b"AKIA" not in spooled
+    assert b"missing-file" not in spooled
+
+
+def test_a_failed_command_with_nothing_sensitive_says_nothing(tmp_path: Path) -> None:
+    error = "Exit code 1\ncat: missing-file: No such file or directory"
+
+    result = _run(_failure(error), tmp_path, _isolated(tmp_path))
+
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"", b"")
+
+
+def test_a_failed_command_whose_error_is_not_text_is_reported_uninspected(
+    tmp_path: Path,
+) -> None:
+    result = _run(_failure(5), tmp_path, _isolated(tmp_path))
+
+    assert (result.returncode, result.stderr) == (0, b"")
+    assert result.stdout == (
+        b'{"systemMessage":"shim: this tool event could not be inspected and was '
+        b'not modified."}'
+    )

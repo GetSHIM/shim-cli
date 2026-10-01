@@ -49,7 +49,7 @@ class Adapter:
     event: str
     root: str
     decode: Callable[[bytes | dict[str, object]], Event]
-    encode: Callable[[str, object, str], bytes]
+    encode: Callable[[str, object, str, str, str], bytes]
     # No default: a new adapter must say which of the three it is, because
     # claiming more than the client grants is how a user ends up trusting a
     # block that never happened. (A default would also clash with __slots__,
@@ -218,6 +218,8 @@ def process(
                 MASK if can_rewrite else DENY if action == DENY else REPORT,
                 emitted,
                 message,
+                _summary(counts),
+                tool_label,
             ),
             record(
                 action,
@@ -246,7 +248,7 @@ def process(
                 ),
             )
         return Outcome(
-            entry.encode(MASK, rewritten, ""),
+            entry.encode(MASK, rewritten, "", "", tool_label),
             record(
                 ALLOW,
                 out_bytes=_size(rewritten),
@@ -272,7 +274,7 @@ def process(
 
     message = _message(tool_label, counts, action)
     emitted = rewritten if action == MASK and changed else body
-    output = entry.encode(action, emitted, message)
+    output = entry.encode(action, emitted, message, _summary(counts), tool_label)
     out_bytes = _size(emitted) if action == MASK else in_bytes
     return Outcome(
         output,

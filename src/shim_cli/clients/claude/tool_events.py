@@ -3,7 +3,13 @@ from __future__ import annotations
 import json
 
 from shim_cli.clients.user_prompt_hook import parse_object
-from shim_cli.events.pipeline import INCOMPLETE_MESSAGE, REWRITE, Adapter, Event
+from shim_cli.events.pipeline import (
+    INCOMPLETE_MESSAGE,
+    REPORT_ONLY,
+    REWRITE,
+    Adapter,
+    Event,
+)
 from shim_cli.policy import ALLOW, DENY, MASK, REPORT
 
 MAX_INPUT_BYTES = 1_000_000
@@ -13,6 +19,14 @@ _ERROR_MESSAGE = "shim: this tool event could not be inspected and was not modif
 _MASKED_CONTEXT = (
     "Placeholders such as <EMAIL_1> stand for real values in the source; "
     "the source does not contain placeholders."
+)
+_FAILED_MESSAGE = (
+    "shim: found {found} in a failed {tool}. Claude Code does not let this "
+    "output be masked; the model has these values."
+)
+_FAILED_CONTEXT = (
+    "shim: the output of this failed {tool} contained {found}. Do not repeat "
+    "these values in replies, files or commands."
 )
 _TARGET_KEYS = ("file_path", "notebook_path", "path", "url")
 _FILE_VIEW_KEYS = ("file_path", "notebook_path", "path")
@@ -44,7 +58,10 @@ def _decoder(expected_event: str, root: str):
                 isinstance(tool_input.get(key), str) and tool_input[key]
                 for key in _FILE_VIEW_KEYS
             )
-        return Event(tool, document.get(root), target, views_file)
+        payload = document.get(root)
+        if root == "error" and payload is not None and not isinstance(payload, str):
+            raise ValueError("tool-hook error must be text")
+        return Event(tool, payload, target, views_file)
 
     return decode
 
@@ -60,7 +77,9 @@ def _specific(event: str, **fields) -> dict:
     return {"hookSpecificOutput": dict({"hookEventName": event}, **fields)}
 
 
-def pre_tool_use(action: str, payload: object, message: str) -> bytes:
+def pre_tool_use(
+    action: str, payload: object, message: str, _found: str, _tool: str
+) -> bytes:
     if action == ALLOW:
         return b""
     if action == REPORT:
@@ -83,7 +102,9 @@ def pre_tool_use(action: str, payload: object, message: str) -> bytes:
     raise ValueError("unsupported action")
 
 
-def post_tool_use(action: str, payload: object, message: str) -> bytes:
+def post_tool_use(
+    action: str, payload: object, message: str, _found: str, _tool: str
+) -> bytes:
     if action == ALLOW:
         return b""
     if action == REPORT:
@@ -100,6 +121,29 @@ def post_tool_use(action: str, payload: object, message: str) -> bytes:
     if action == DENY:
         raise ValueError("a tool result cannot be denied")
     raise ValueError("unsupported action")
+
+
+def post_tool_use_failure(
+    action: str, _payload: object, message: str, found: str, tool: str
+) -> bytes:
+    if action == ALLOW:
+        return b""
+    if action != REPORT:
+        raise ValueError("a failed tool call can only be reported")
+    if not found:
+        return _dump({"systemMessage": message})
+    system = _FAILED_MESSAGE.format(found=found, tool=tool)
+    if message.endswith(INCOMPLETE_MESSAGE):
+        system = f"{system} {INCOMPLETE_MESSAGE}"
+    return _dump(
+        {
+            "systemMessage": system,
+            **_specific(
+                "PostToolUseFailure",
+                additionalContext=_FAILED_CONTEXT.format(found=found, tool=tool),
+            ),
+        }
+    )
 
 
 def error_output() -> bytes:
@@ -123,6 +167,14 @@ TOOL_EVENTS = {
         post_tool_use,
         power=REWRITE,
     ),
+    "PostToolUseFailure": Adapter(
+        "claude",
+        "PostToolUseFailure",
+        "error",
+        _decoder("PostToolUseFailure", "error"),
+        post_tool_use_failure,
+        power=REPORT_ONLY,
+    ),
 }
 INSTALLED_EVENTS = tuple(sorted(TOOL_EVENTS))
 
@@ -132,7 +184,7 @@ def coverage() -> tuple:
         {
             "event": event,
             "sees": TOOL_EVENTS[event].root,
-            "can_mask": True,
+            "can_mask": TOOL_EVENTS[event].power == REWRITE,
             "can_report": True,
             "verified": True,
         }

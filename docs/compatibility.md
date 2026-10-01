@@ -7,7 +7,7 @@
 | Python | CPython 3.10 through 3.13 for the package; the plugin archive runs on 3.9 through 3.13 |
 | Operating systems | macOS and Linux target |
 | Prompt hooks | Codex CLI, Claude Code, GitHub Copilot CLI, and VS Code |
-| Tool hooks | Claude Code `PreToolUse` and `PostToolUse`, masked; VS Code `PreToolUse` reports and denies, `PostToolUse` reports only |
+| Tool hooks | Claude Code `PreToolUse` and `PostToolUse`, masked, and `PostToolUseFailure`, reported only; VS Code `PreToolUse` reports and denies, `PostToolUse` reports only |
 | `shim watch` | Claude Code only. Codex is refused: it reads its endpoint from its own configuration, so the proxy is bypassed and the session measured as empty ([probe](probe-2026-09-codex-watch.md)). Copilot out of scope because a custom endpoint removes GitHub authentication |
 
 ## Install
@@ -60,7 +60,7 @@ unaffected, and the zero-install plugin path could not reach the archive under
 Codex before 0.3.0, so no working Codex plugin install was broken.
 
 Codex and Copilot install prompt hooks only. The repository contains no
-Codex, Copilot, `PostToolUseFailure`, or `PostToolBatch` tool adapter. Tool
+Codex, Copilot or `PostToolBatch` tool adapter. Tool
 coverage is based on live protocol evidence rather than documentation and is
 printed by `shim doctor <client>`.
 
@@ -251,6 +251,7 @@ must not be copied into its release record without a fresh run.
 | Codex `shim watch` transport | Codex CLI 0.151.0 on 8 September 2026, ChatGPT sign-in, macOS 26.4.0 arm64. With the base URL passed as a config override every request reached the proxy; with `OPENAI_BASE_URL` alone **nothing did**. `chatgpt.com` returned 200 to a request re-sent by Python's `http.client` with a stock TLS context, `cf-ray` present, no challenge — so there is no fingerprint rejection. A WebSocket upgrade was attempted and fell back to HTTP 0.602 s after a 426. The usage shape is still uncaptured: the account's quota returned 429 before any turn completed. [Probe](probe-2026-09-codex-watch.md). |
 | Claude auth header shape | Claude Code subscription sign-in on 8 September 2026 sends `authorization` and no `x-api-key`, with `anthropic-beta` and `anthropic-version`; upstream 200 through the same harness. |
 | Codex live prompt hook | Codex CLI 0.151.0 on 8 September 2026, ChatGPT sign-in, macOS 26.4.0 arm64. With the hook trusted, a prompt carrying a synthetic address reported `hook: UserPromptSubmit Completed` under `observe` and `hook: UserPromptSubmit Blocked` under `enforce`, the blocked prompt never reaching the model. The same prompt with the hook untrusted produced no hook line at all and was sent unchanged. |
+| `PostToolUseFailure` channel | Claude Code 2.1.286 on 30 September 2026, a capture hook answering with shim's report object for `cat .env && cat missing-file`: the input carries `tool_name`, `tool_input`, `error` (a string that starts `Exit code 1`), `is_interrupt` and `duration_ms`, and no `tool_response`. The `systemMessage` was shown (`PostToolUseFailure:Bash says: shim: found …`), and the model answered that a hook had told it not to repeat the values and repeated none. A returned `updatedToolOutput` was ignored on 2.1.278 and 2.1.284: the model quoted the unmodified output. |
 | `Stop` scan cost | 66 KB final assistant text, hook end to end: 41 ms median, 50 ms p95 on macOS 26.5.2 arm64, CPython 3.13.5. Text beyond the detector's 100,000-character limit is not scanned and the record says `truncated`. |
 
 The native Claude capture and the decisions made from it are preserved in the

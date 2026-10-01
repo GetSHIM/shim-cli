@@ -17,6 +17,7 @@ from shim_cli.clients.claude.settings import (
     tool_hook_group,
 )
 from shim_cli.clients.claude.tool_events import INSTALLED_EVENTS
+from shim_cli.clients.hook_settings import add_groups, installed_events
 from shim_cli.session import SESSION_EVENTS
 
 
@@ -134,3 +135,64 @@ def test_claude_code_revert_leaves_a_foreign_tool_hook_untouched(
 def test_claude_code_settings_reject_malformed_documents(content: bytes) -> None:
     with pytest.raises(ValueError):
         add_hook(content)
+
+
+def test_the_installed_fragment_names_six_events_in_order(tmp_path: Path) -> None:
+    assert [event for event, _group in hook_groups(tmp_path / "python")] == [
+        "UserPromptSubmit",
+        "PostToolUse",
+        "PostToolUseFailure",
+        "PreToolUse",
+        "SessionEnd",
+        "Stop",
+    ]
+
+
+def _five(interpreter: Path) -> bytes:
+    return add_groups(
+        None,
+        [
+            registration
+            for registration in hook_groups(interpreter)
+            if registration[0] != "PostToolUseFailure"
+        ],
+    )
+
+
+def test_a_1_0_2_install_upgrades_by_adding_only_the_failure_entry(
+    tmp_path: Path,
+) -> None:
+    interpreter = tmp_path / "python"
+    five = _five(interpreter)
+
+    before = json.loads(five)["hooks"]
+    after = json.loads(add_hook(five, interpreter))["hooks"]
+
+    assert set(after) - set(before) == {"PostToolUseFailure"}
+    assert after["PostToolUseFailure"] == [tool_hook_group(interpreter)]
+    assert {event: after[event] for event in before} == before
+
+
+def test_installed_events_names_the_groups_that_are_present(tmp_path: Path) -> None:
+    interpreter = tmp_path / "python"
+    registrations = hook_groups(interpreter)
+
+    assert installed_events(_five(interpreter), registrations) == frozenset(
+        {"UserPromptSubmit", "PostToolUse", "PreToolUse", "SessionEnd", "Stop"}
+    )
+    assert installed_events(add_hook(None, interpreter), registrations) == frozenset(
+        event for event, _group in registrations
+    )
+    assert installed_events(b"{}", registrations) == frozenset()
+    assert installed_events(_five(tmp_path / "other"), registrations) == frozenset()
+
+
+def test_reverting_a_1_0_2_install_removes_all_five_entries(tmp_path: Path) -> None:
+    interpreter = tmp_path / "python"
+    foreign = {"matcher": "Bash", "hooks": [{"type": "command", "command": "audit"}]}
+    five = json.loads(_five(interpreter))
+    five["hooks"]["PreToolUse"].insert(0, foreign)
+
+    reverted = remove_hook(json.dumps(five).encode(), interpreter)
+
+    assert json.loads(reverted) == {"hooks": {"PreToolUse": [foreign]}}

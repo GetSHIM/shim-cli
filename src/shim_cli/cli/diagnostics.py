@@ -21,7 +21,8 @@ from shim_cli.clients.claude import settings as claude_settings
 from shim_cli.clients.claude.tool_events import coverage as claude_coverage
 from shim_cli.clients.codex import settings as codex_settings
 from shim_cli.clients.copilot import settings as copilot_settings
-from shim_cli.clients.hook_settings import interpreter_path
+from shim_cli.clients.hook_settings import installed_events, interpreter_path
+from shim_cli.settings_files import StateKind, inspect_file
 
 
 @dataclass(frozen=True)
@@ -210,13 +211,7 @@ def _has_legacy_fragment(client: str) -> bool:
         return False
 
 
-def _hook_state(client: str, legacy_fragment: bool = False) -> Check | None:
-    """None when the only true thing to say is what the legacy check says.
-
-    A 0.2.0 fragment is not shim's current group, so the plan reads
-    `not_installed` — and doctor printed "not installed" two lines above
-    "the installed hook fragment ...". One of them had to go.
-    """
+def _hook_state(client: str, on_disk: bool = False) -> Check | None:
     name = client_name(client)
     try:
         label, state = plan_status(client_plan(client, "install"))
@@ -234,7 +229,7 @@ def _hook_state(client: str, legacy_fragment: bool = False) -> Check | None:
         "conflict": f"{name} hook configuration needs manual review.",
         "unsafe": f"{name} hook configuration cannot be trusted safely.",
     }
-    if state == "not_installed" and legacy_fragment:
+    if state == "not_installed" and on_disk:
         return None
     return Check("hook_configuration", label, messages[state])
 
@@ -375,23 +370,10 @@ def _runner_check(client: str) -> Check:
     )
 
 
-def _installed_hook_runs_this_package(client: str) -> bool:
-    """`shim install` writes this interpreter's absolute path into the client.
-
-    So a fragment that matches what this package would write names an
-    interpreter that is, by definition, the one running right now — no PATH
-    entry required, and none written.
-    """
-    try:
-        return plan_status(client_plan(client, "install"))[1] == "installed"
-    except (OSError, ValueError):
-        return False
-
-
-def _resolution_check(client: str) -> Check:
+def _resolution_check(client: str, installed: frozenset) -> Check:
     resolution = resolve()
     if resolution.source == "none":
-        if _installed_hook_runs_this_package(client):
+        if installed:
             return Check(
                 "hook_resolution",
                 "PASS",
@@ -413,7 +395,7 @@ def _resolution_check(client: str) -> Check:
     return Check("hook_resolution", "PASS", resolution.detail)
 
 
-def _duplicate_check(client: str) -> Check:
+def _duplicate_check(client: str, installed: frozenset) -> Check:
     if client != "claude":
         return Check(
             "duplicate_hooks",
@@ -422,12 +404,6 @@ def _duplicate_check(client: str) -> Check:
             "installed both the plugin and `shim install`, remove one.",
         )
     plugins = installed_plugins()
-    try:
-        _label, state = plan_status(client_plan(client, "install"))
-    except (OSError, ValueError):
-        return Check(
-            "duplicate_hooks", "WARN", "The client hook settings could not be read."
-        )
     if len(plugins) > 1:
         alias = next(p for p in plugins if p["key"].startswith("shim-guard@"))
         return Check(
@@ -437,7 +413,7 @@ def _duplicate_check(client: str) -> Check:
             "installed; every event is inspected twice. Run "
             f"`claude plugin uninstall {alias['key']}`.",
         )
-    if plugins and state == "installed":
+    if plugins and installed:
         return Check(
             "duplicate_hooks",
             "FAIL",
@@ -475,7 +451,21 @@ def _session_record_check() -> Check:
     )
 
 
-def _coverage_rows(client: str, installed: bool) -> list:
+def _installed_events(client: str, hook_state: Check | None) -> frozenset:
+    if client == "copilot":
+        passed = hook_state is not None and hook_state.status == "PASS"
+        return frozenset({"UserPromptSubmit"}) if passed else frozenset()
+    module = claude_settings if client == "claude" else codex_settings
+    state = inspect_file(module.target_path(), module.MAX_CONFIG_BYTES)
+    if state.kind is not StateKind.FILE or state.content is None:
+        return frozenset()
+    try:
+        return installed_events(state.content, module.hook_groups())
+    except ValueError:
+        return frozenset()
+
+
+def _coverage_rows(client: str, installed: frozenset) -> list:
     rows = [
         {
             "event": "UserPromptSubmit",
@@ -483,11 +473,10 @@ def _coverage_rows(client: str, installed: bool) -> list:
             "can_mask": client == "copilot",
             "can_report": client != "copilot",
             "verified": True,
-            "installed": installed,
         }
     ]
     if client == "claude":
-        rows.extend({**row, "installed": installed} for row in claude_coverage())
+        rows.extend(claude_coverage())
         rows.append(
             {
                 "event": "Stop",
@@ -495,7 +484,6 @@ def _coverage_rows(client: str, installed: bool) -> list:
                 "can_mask": False,
                 "can_report": True,
                 "verified": True,
-                "installed": installed,
             }
         )
         rows.append(
@@ -505,10 +493,9 @@ def _coverage_rows(client: str, installed: bool) -> list:
                 "can_mask": False,
                 "can_report": False,
                 "verified": True,
-                "installed": installed,
             }
         )
-    return rows
+    return [{**row, "installed": row["event"] in installed} for row in rows]
 
 
 def _coverage_check(client: str, rows: list) -> Check:
@@ -550,10 +537,9 @@ def doctor(*, client: str, as_json: bool) -> None:
     if client == "codex":
         checks.append(_codex_hooks_feature())
     legacy_fragment = _has_legacy_fragment(client)
-    hook_state = _hook_state(client, legacy_fragment)
-    rows = _coverage_rows(
-        client, hook_state is not None and hook_state.status == "PASS"
-    )
+    installed = _installed_events(client, _hook_state(client))
+    hook_state = _hook_state(client, legacy_fragment or bool(installed))
+    rows = _coverage_rows(client, installed)
     checks.extend(
         check
         for check in (
@@ -563,8 +549,8 @@ def doctor(*, client: str, as_json: bool) -> None:
             _custom_patterns(),
             _session_record_check(),
             _runner_check(client),
-            _resolution_check(client),
-            _duplicate_check(client),
+            _resolution_check(client, installed),
+            _duplicate_check(client, installed),
             _coverage_check(client, rows),
             _activation_check(client),
         )

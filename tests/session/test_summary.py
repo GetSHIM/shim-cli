@@ -338,3 +338,67 @@ def test_bare_numbers_are_totalled_in_the_json_report() -> None:
 
     assert document["bare_numbers"] == 5
     assert summary.as_json([_record()])["bare_numbers"] == 0
+
+
+def _failed(**changes: object) -> dict:
+    failed: dict = {
+        "event": "PostToolUseFailure",
+        "tool_name": "Bash",
+        "target": "",
+        "action": "report",
+    }
+    return _record(**{**failed, **changes})
+
+
+def test_a_failed_call_is_counted_as_unmasked_right_after_masked() -> None:
+    text = summary.render(
+        [
+            _record(entities={"SECRET": 1}),
+            _failed(entities={"SECRET": 4, "DB_URI": 1}),
+            _record(tool_name="Bash", target="", action="deny"),
+            _record(event="UserPromptSubmit", tool_name="", target="", action="report"),
+        ]
+    )
+
+    assert text.splitlines()[1:6] == [
+        "  masked    1 SECRET  (Read .env)",
+        "  unmasked  4 SECRET  (failed Bash)",
+        "            1 DB_URI  (failed Bash)",
+        "  blocked   1 SECRET  (Bash)",
+        "  warned    1 SECRET  (your prompt)",
+    ]
+
+
+def test_an_unmasked_line_never_merges_with_warned() -> None:
+    text = summary.render(
+        [_failed(), _record(tool_name="Bash", target="", action="report")]
+    )
+
+    assert "  unmasked  1 SECRET  (failed Bash)" in text.splitlines()
+    assert "  warned    1 SECRET  (Bash)" in text.splitlines()
+
+
+def test_a_failed_call_names_its_file_when_it_has_one() -> None:
+    text = summary.render([_failed(tool_name="Read", target="/work/missing/.env")])
+
+    assert "(failed Read .env)" in text
+
+
+def test_unmasked_is_its_own_json_key_and_never_under_actions() -> None:
+    document = summary.as_json([_failed(), _record(action="report")])
+
+    assert document["actions"]["report"]["entities"] == {"SECRET": 1}
+    assert document["actions"]["report"]["events"] == 1
+    assert document["unmasked"] == {
+        "entities": {"SECRET": 1},
+        "sources": ["failed Bash"],
+        "events": 1,
+    }
+
+
+def test_a_session_without_failed_calls_carries_an_empty_unmasked_key() -> None:
+    assert summary.as_json([_record()])["unmasked"] == {}
+
+
+def test_an_observed_failed_call_is_not_counted() -> None:
+    assert summary.render([_failed(action="allow")]) == ""
