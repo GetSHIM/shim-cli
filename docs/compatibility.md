@@ -139,7 +139,7 @@ persisted trust record per hook and silently skips any hook it does not have
 one for: no warning, no line in the transcript, and prompts reach the model
 uninspected. Writing the fragment is therefore only half of `shim install
 codex` — review and trust it in Codex, which is why `shim doctor codex` ends
-on `Codex hook activation is client UI state; verify SHIM with /hooks`. shim
+on `Codex hook activation is client UI state; verify shim with /hooks`. shim
 cannot read that record and does not write it; a diagnosis that claimed to
 would be guessing. `codex exec --dangerously-bypass-hook-trust` runs enabled
 hooks without it, which is useful to confirm an install and wrong as a habit.
@@ -267,16 +267,21 @@ could pass. It has been superseded by:
 
 | Corpus | Cases | Contract |
 | --- | ---: | --- |
-| `guard-v2.json` | 53 | Exact redacted output for every case, plus source spans for normalization-sensitive cases. |
+| `guard-v2.json` | 146 | Exact redacted output for every case, plus source spans for normalization-sensitive cases. |
 | `guard-tools-v1.json` | 24 | Exact output at 25 scanned paths in captured tool payloads, per event and policy direction. |
 | `parity-v1.json` | 475 | Exact findings, spans, scores, and redacted output from the previous Presidio implementation. |
+| `custom-v1.json` | 10 | Exact output with your own patterns, including where they overlap a built-in type. |
+| `reveal-v1.json` | 8 | Exact output with the last digits kept by `[reveal]`. |
 
-Of the 475 parity cases, 473 remain byte-identical. The two intentional
-differences are `0.0.0.0` and `::1`, which identify no person or remote host and
-whose masking erased a meaningful bind-address distinction. Both live in
-`DELIBERATE_DIVERGENCES` with reasons and tightly pinned new output. The parity
-corpus is generated migration evidence and must never be regenerated to make a
-test pass.
+Of the 475 parity cases, 430 remain byte-identical. Eight are deliberately
+left unmasked: `0.0.0.0` and `::1`, which identify no person or remote host and
+whose masking erased a meaningful bind-address distinction; five bare ids the
+phone recognizer used to claim; and a connection string with no credentials in
+it. Thirty-seven still mask, over fewer characters: thirty-six connection
+strings lose only their user and password, and one address no longer runs into
+a query string. All of them live in `DELIBERATE_DIVERGENCES` or `NARROWED_SPANS`
+with reasons and tightly pinned new output. The parity corpus is generated
+migration evidence and must never be regenerated to make a test pass.
 
 The fixture-bound metrics report 100% synthetic precision, recall, and exact
 output. That is deterministic contract evidence, not a real-world statistical

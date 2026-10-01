@@ -310,7 +310,7 @@ def render(session, seconds: float) -> str:
     if count:
         lines.append(
             f"  @ files   {count} inlined, {_thousands(size)} bytes "
-            f"(invisible to hooks)"
+            f"(not masked by any hook)"
         )
 
     by_section = entity_section_totals(exchanges)

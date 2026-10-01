@@ -22,7 +22,7 @@ shim scan/redact (stdin) -> detector -> counts or typed redaction
 shim install/status/doctor/revert -> client settings + guarded file boundary
 shim report / shim ledger purge -> session-owned records
 
-prompt event -> client codec -> Policy -> detector
+prompt event -> client codec (+ Claude @ files read from disk) -> Policy -> detector
              -> allow/report | Copilot rewrite | native block + 0600 suggestion
 
 verified Claude tool event -> Claude adapter -> shared event pipeline

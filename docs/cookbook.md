@@ -11,7 +11,9 @@ Everything here runs locally. Nothing in this document sends anything anywhere.
 - [Teach it your project's own secrets](#teach-it-your-projects-own-secrets)
 - [Quieten a noisy tool](#quieten-a-noisy-tool)
 - [Keep the last four digits](#keep-the-last-four-digits)
+- [Keep a connection string's host](#keep-a-connection-strings-host)
 - [Be strict about shell commands](#be-strict-about-shell-commands)
+- [When a command fails](#when-a-command-fails)
 - [See what a whole session sent](#see-what-a-whole-session-sent)
 - [Use it in CI and in scripts](#use-it-in-ci-and-in-scripts)
 - [Know what your client can actually do](#know-what-your-client-can-actually-do)
@@ -50,7 +52,7 @@ the value that produced them, so it is safe to keep and useless to steal.
 
 ## Stop a secret before it leaves
 
-Shim ships deliberately asymmetric defaults. Your prompt is reported and sent,
+shim ships deliberately asymmetric defaults. Your prompt is reported and sent,
 because rewriting what you typed under you is worse than telling you. Tool
 results are masked, because that is content you never read.
 
@@ -116,7 +118,7 @@ everything. This is almost always better than `shim config --disable PHONE`,
 which switches phone numbers off for your prompts too.
 
 Bare numbers are the usual complaint — an order id that looks like a phone
-number. Shim counts those separately and says so in the report rather than
+number. shim counts those separately and says so in the report rather than
 masking them; if a specific tool is still noisy, narrow it here.
 
 ## Keep the last four digits
@@ -131,6 +133,25 @@ shim config --reveal IBAN=4 --yes
 can do this, at most four digits. `SECRET` cannot, and that refusal is
 deliberate: a partial key is worth guessing at.
 
+## Keep a connection string's host
+
+A connection string keeps its scheme, host, port and database and loses its
+user and password, so the agent can still tell production from staging:
+
+```console
+$ printf 'postgresql://app:synthetic-password@db-prod.internal:5432/kasa' | shim redact
+postgresql://<DB_URI_1>@db-prod.internal:5432/kasa
+```
+
+A connection string with no user and password in it is not a finding at all. If
+your host names are sensitive in themselves, teach shim their shape:
+
+```console
+$ shim config --custom 'INTERNAL_HOST=\bdb-[a-z-]+\.internal\b' --yes
+$ printf 'postgresql://app:synthetic-password@db-prod.internal:5432/kasa' | shim redact
+postgresql://<DB_URI_1>@<CUSTOM_1>:5432/kasa
+```
+
 ## Be strict about shell commands
 
 A command is not a document: text going into a shell can act. Tighten that one
@@ -143,7 +164,31 @@ Bash = "enforce"
 
 For a command or a local write, `enforce` means the call is refused rather than
 rewritten, because silently editing a command the model is about to run would
-change what it does. Shim tells you what it found and stops there.
+change what it does. shim tells you what it found and stops there.
+
+## When a command fails
+
+The output of a command that failed reaches the model as it is: Claude Code
+gives it to the hook afterwards and does not let it be replaced. When
+`cat .env && cat missing-file` exits 1, the model has read `.env`. shim says
+what was in it, tells the model not to repeat it, and counts it on its own line:
+
+```text
+  unmasked  5 SECRET  (failed Bash)
+```
+
+That needs the hook's `PostToolUseFailure` entry. The plugin has it from 1.0.3;
+a hook installed with `shim install claude` before 1.0.3 does not, so run the
+install once more and let doctor confirm it:
+
+```console
+shim install claude
+shim doctor claude
+```
+
+`Coverage: 6 of 6 events installed` means it is there. To have a file masked,
+ask the agent to read it ("read .env"): a tool result that succeeds is masked
+before the model sees it.
 
 ## See what a whole session sent
 
@@ -165,10 +210,10 @@ a custom endpoint there removes GitHub authentication altogether.
 
 ## Use it in CI and in scripts
 
-`scan` follows grep's convention — exit `1` means it found something:
+`scan` exits `1` when it found something, so a pipeline step fails on a finding:
 
 ```console
-shim scan < notes.md || echo "clean"
+shim scan < notes.md && echo "clean"
 ```
 
 ```yaml
@@ -176,7 +221,8 @@ shim scan < notes.md || echo "clean"
   run: git diff --name-only origin/main | xargs cat | shim scan
 ```
 
-`redact` always exits `0` and writes the rewritten text, so it composes:
+`redact` exits `0` and writes the rewritten text, so it composes; when stdin
+cannot be read or scanned in full it writes nothing and exits `1`:
 
 ```console
 kubectl logs api-7f4 | shim redact | pbcopy
@@ -190,7 +236,7 @@ layout is not a stable interface; the JSON is.
 
 ## Know what your client can actually do
 
-Shim can only do what the client grants its hooks, and the clients differ more
+shim can only do what the client grants its hooks, and the clients differ more
 than their documentation suggests. `shim doctor <client>` prints exactly which
 events are installed and what shim can change at each one.
 
@@ -229,7 +275,7 @@ the hook line, the events installed, the launcher in use, and the version the
 archive and the package disagree about, if they do. The common answers:
 
 **Nothing happens at all.** In Codex, a hook does not run until you trust it:
-open `/hooks`, review the shim entry, enable it. Shim cannot read that record
+open `/hooks`, review the shim entry, enable it. shim cannot read that record
 and does not pretend to.
 
 **Everything is inspected twice.** Both the marketplace plugin and `shim
@@ -239,7 +285,7 @@ that removes the other.
 **`No module named shim_guard`.** A hook written by 0.2.0. `shim install
 <client>` rewrites the line.
 
-**Your settings file is refused.** Shim will not read settings that anything
+**Your settings file is refused.** shim will not read settings that anything
 else can rewrite — a symlink, another user's file, a group-writable location.
 Anything that can edit your settings can turn detection off. `shim config
 --reset --yes` starts over.

@@ -1,7 +1,8 @@
 # shim-cli plugin
 
 This plugin registers shim's local hooks. Claude Code gets the prompt,
-verified `PreToolUse` and `PostToolUse`, `Stop`, and `SessionEnd` events. Codex
+verified `PreToolUse` and `PostToolUse`, `PostToolUseFailure` (report only),
+`Stop`, and `SessionEnd` events. Codex
 gets the prompt event only. VS Code gets the prompt, `PreToolUse`,
 `PostToolUse` and `Stop`. There shim never masks, stops a prompt or denies a
 call under `enforce`, and only reports on a result: measured against VS Code
@@ -19,7 +20,8 @@ prompt twice helps nobody.
 
 The plugin carries a self-contained hook in `bin/shim.pyz` on `main` and on
 every tag, so it needs no package-manager step and no prerequisite beyond
-Python 3.9 or newer, which is what a stock macOS provides. Both clients reach it.
+Python 3.9 or newer, which is what a stock macOS provides. Claude Code and VS
+Code reach it; current Codex loads no plugin hook.
 
 **The plugin is the hooks, and only the hooks.** `shim watch`, `shim report`,
 and `shim config` are CLI commands and are not in the archive. The hook is a
@@ -42,6 +44,10 @@ the first that works:
    `${PLUGIN_ROOT}` as the argument, as the Codex plugin guide documents.
 3. Nothing runnable — the prompt is **allowed** and one line is written to
    stderr explaining why it was not inspected.
+
+On Windows (Git Bash, MSYS, Cygwin) it does none of this: it writes
+`shim: shim-cli does not support Windows yet; nothing was inspected.` to stderr
+and allows the prompt.
 
 Case 3 never blocks. A guard that cannot run is a guard that is off, not a
 reason to refuse someone's prompt. The same holds for a tool event: an empty

@@ -14,10 +14,11 @@ in Copilot's timeline.
 
 At Claude's verified `PostToolUse` event, the default configuration prevents
 detected local data in eligible tool results from entering model context. A
-file read, grep, command output, or MCP response is masked in place before the
-model sees it. Codex and Copilot currently install no tool-event adapter.
+file read, grep, the output of a command that succeeded, or an MCP response is
+masked in place before the model sees it. Codex and Copilot currently install no
+tool-event adapter.
 
-Three things follow, and all three are limits rather than features:
+Four things follow, and all four are limits rather than features:
 
 - Masking an outbound tool argument is **egress control**, not model
   protection. The model produced that argument, so it has already seen the
@@ -25,6 +26,9 @@ Three things follow, and all three are limits rather than features:
 - `Bash` commands and `Write`/`Edit` content are **never rewritten**. Editing a
   command changes what runs, and editing a write payload puts a placeholder
   into a real file. Both are detected and can be warned about or denied.
+- The output of a failed tool call is **not masked**. Claude Code delivers it to
+  `PostToolUseFailure` and ignores a replacement there, so shim reports it,
+  tells the model not to repeat it, and counts it as `unmasked`.
 - Files attached with `@` are inlined by Claude Code after the prompt hook
   runs, so they cannot be masked. The prompt hook reads them first and warns
   before they are sent, or stops the prompt under `enforce`.
@@ -32,8 +36,10 @@ Three things follow, and all three are limits rather than features:
 A formatted phone number (`+90 532 123 45 67`, `(555) 123-4567`,
 `0212 555 12 34`) is masked. A bare run of digits is a phone number only when it
 is Turkish-shaped (`5321234567`, `05321234567`, `905321234567`, `02125551234`)
-or when a cue such as `tel`, `phone`, `gsm`, `cep` or `no` sits within 16
-characters before it; cues are Turkish and English only. A decimal is never a
+or when a cue such as `tel`, `phone`, `gsm`, `cep` or `no` comes directly
+before it, with at most four spaces or punctuation marks between
+(`tel: 4155552671`, `phone number: 4155552671`); cues are Turkish and English
+only. A decimal is never a
 phone number. A bare timestamp or id is left as it was and counted on the
 summary's `warned` line. Bare numbers in other national
 formats without a cue are not detected, for example a CSV column of US numbers
@@ -65,7 +71,7 @@ no suggestion file. The raw prompt and detected raw values are not written by
 shim.
 
 The temporary redaction remains until the user deletes it, the operating
-system cleans temporary storage, or a registered `SessionEnd` hook sweeps SHIM
+system cleans temporary storage, or a registered `SessionEnd` hook sweeps shim
 suggestions older than 24 hours. Claude installs `SessionEnd`; Codex and
 Copilot do not. The file can still contain sensitive content the detector
 missed, so users must review it before resubmission and delete it when finished
@@ -78,7 +84,9 @@ file causes the hook to return its generic fail-closed response rather than
 silently ignoring the policy.
 
 Where a checksum exists it is verified, so a mistyped IBAN or Turkish national
-ID is not reported. Detection also stays deliberately quiet on values that name
+ID is not reported. An email address counts only on a public domain, one on the
+public suffix list, so `ops@acme.internal` or `dev@build.local` is not an email
+to shim; a team with internal mail domains adds a custom pattern. Detection also stays deliberately quiet on values that name
 nobody: the loopback and unspecified addresses (`127.0.0.1`, `0.0.0.0`, `::1`)
 and connection strings that carry no credentials, wherever they point. Private
 and public IP addresses are still detected. A connection string is masked over
@@ -104,7 +112,7 @@ when a secret word is one of its segments, in any case: `DB_PASSWORD`,
 prefixes are AWS, GitHub (classic and fine-grained), GitLab, Slack, Google, npm,
 Hugging Face, Stripe, OpenAI and SendGrid, plus JSON web tokens, private key
 blocks, Slack and Discord webhook URLs, Azure storage `AccountKey` values and
-HTTP `Authorization` headers. A
+HTTP `Authorization: Basic` and `Bearer` headers. A
 value is not a secret when it only refers to another variable (`${DB_PASS}`,
 `os.environ[…]`, `process.env.X`), is a placeholder shim already wrote, or is a
 type name (`string`). For a key that is more than the bare word, such as
@@ -117,7 +125,7 @@ a secret when the key's last part is `_id`, `_ids`, `_type`, `_name`,
 that reads as a call or lookup, closed or continued by a quote, comma or `]`
 (`tokenizer.encode(text)`, `self.auth_token`, `settings["DB_PASSWORD"]`), or,
 after a `:`, as a type name that is `String`, or that repeats a word of its key
-and ends like code (`apiKey: String`, `authToken: AuthToken;`). A value with a
+and ends like code (`clientSecret: String`, `authToken: AuthToken;`). A value with a
 digit in it, or longer than 1 KB, is never read as code, and a YAML password
 such as `adminPassword: BlueHarbor` or `REDIS_PASSWORD: RedisPassword` is
 masked. Three things stay undetected: a secret pasted with no key name and no
