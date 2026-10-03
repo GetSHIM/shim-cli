@@ -404,11 +404,14 @@ _SECRET_KEY = (
     + r"|access[_-]?key|private[_-]?key|signing[_-]?key|encryption[_-]?key"
     + r"|credentials?|auth[_-]?token|pass"
 )
-_SECRET_ASSIGNMENT = re.compile(
+_SECRET_WORD = (
     r"(?:(?<![^\W_])|(?-i:(?<=[a-z0-9])(?=[A-Z])))"
     r"(?:" + _SECRET_KEY + r")"
     r"(?:(?![^\W_])|(?-i:(?<=[a-z])(?=[A-Z])))"
-    r"(?P<tail>[\w.-]{0,64})[\"']?\s*[=:]\s*"
+)
+_SECRET_NAME = re.compile(_SECRET_WORD, re.IGNORECASE)
+_SECRET_ASSIGNMENT = re.compile(
+    _SECRET_WORD + r"(?P<tail>[\w.-]{0,64})[\"']?\s*[=:]\s*"
     r"(?:(?P<quote>[\"'])(?P<quoted>[^\r\n]{6,}?)(?P=quote)"
     r"|(?P<bare>[^\s,}\]\"']{6}))",
     re.IGNORECASE,
@@ -444,6 +447,14 @@ _PATH_VALUE = re.compile(
     r"(?:~|\.{1,2})/\S*|/[a-z0-9._/-]+|/\S*\.[A-Za-z][A-Za-z0-9]{0,4}"
 )
 _URL_VALUE = re.compile(r"https?://", re.IGNORECASE)
+_URL_USERINFO = re.compile(r"(?i)\b(?:https?|ftp|wss?)://(?P<userinfo>[^\s/?#'\"<>]+)@")
+_DB_URI = re.compile(
+    r"(?i)\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis(?:s)?|mssql)://"
+    r"([^\s'\"<>]*)"
+)
+_NOT_A_CREDENTIAL = re.compile(r"[….*•:]+|(?:\$\{\w+\}|\{\w*\}|\$\w+|%\w+%|:)+")
+_QUERY_PARAMETER = re.compile(r"[?&;](?P<key>[^=&;#]*)=(?P<value>[^&;#]+)")
+_AUTHORITY_END = re.compile(r"[/?#]")
 _SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str | None, float, bool], ...] = (
     (
         re.compile(
@@ -576,6 +587,17 @@ def _scan_secret(text: str) -> list[Match]:
                 end = _trim_trailing_prose(text, start, end)
             if start < end:
                 results.append(Match("SECRET", start, end, score))
+    for match in _URL_USERINFO.finditer(text):
+        if not _NOT_A_CREDENTIAL.fullmatch(match.group("userinfo")):
+            results.append(Match("SECRET", *match.span("userinfo"), 0.99))
+    for match in _DB_URI.finditer(text):
+        start, end = match.span(1)
+        query = text.find("?", start, end)
+        if query < 0:
+            continue
+        for parameter in _QUERY_PARAMETER.finditer(text, query, end):
+            if _SECRET_NAME.search(parameter.group("key")):
+                results.append(Match("SECRET", *parameter.span("value"), 0.97))
     position = 0
     run = (0, 0)
     while match := _SECRET_ASSIGNMENT.search(text, position):
@@ -601,46 +623,37 @@ def _scan_secret(text: str) -> list[Match]:
     return deduplicate(results)
 
 
-_DB_URI_PATTERN = re.compile(
-    r"(?i)\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis(?:s)?|"
-    r"mssql)://[^\s'\"<>]+"
-)
-_LOOPBACK = ("localhost", "127.0.0.1", "::1", "0.0.0.0")
-
-
-def _is_local_and_open(uri: str) -> bool:
-    authority = uri.split("://", 1)[1].split("/", 1)[0]
-    if "@" in authority:
-        return False
-    if authority.startswith("["):
-        host = authority[1:].split("]", 1)[0]
-    elif authority.count(":") == 1:
-        host = authority.rsplit(":", 1)[0]
-    else:
-        host = authority
-    return host.lower() in _LOOPBACK
-
-
 def _scan_db_uri(text: str) -> list[Match]:
     results: list[Match] = []
-    for match in _DB_URI_PATTERN.finditer(text):
-        start, end = match.span()
-        end = _trim_trailing_prose(text, start, end)
-        if start >= end:
+    for match in _DB_URI.finditer(text):
+        start, end = match.span(1)
+        at = text.rfind("@", start, end)
+        if at > start:
+            if not _NOT_A_CREDENTIAL.fullmatch(text, start, at):
+                results.append(Match("DB_URI", start, at, 0.99))
             continue
-        if _is_local_and_open(text[start:end]):
-            continue
-        results.append(Match("DB_URI", start, end, 0.99))
+        authority = _AUTHORITY_END.split(text[start:end], maxsplit=1)[0]
+        host, colon, port = authority.rpartition(":")
+        if colon and host and not host.startswith("[") and not port.isdigit():
+            results.append(Match("DB_URI", start, start + len(authority), 0.99))
     return results
 
 
+def _scan_email(text: str) -> list[Match]:
+    found = _scan(text, "EMAIL_ADDRESS", _EMAIL_PATTERNS, validate=_validate_email)
+    if "://" not in text:
+        return found
+    authority = {match.end("userinfo") for match in _URL_USERINFO.finditer(text)}
+    authority.update(
+        text.rfind("@", *match.span(1)) for match in _DB_URI.finditer(text)
+    )
+    return [
+        item for item in found if text.find("@", item.start, item.end) not in authority
+    ]
+
+
 _RECOGNIZERS: tuple[tuple[str, Callable[[str], list[Match]]], ...] = (
-    (
-        "EMAIL_ADDRESS",
-        lambda text: _scan(
-            text, "EMAIL_ADDRESS", _EMAIL_PATTERNS, validate=_validate_email
-        ),
-    ),
+    ("EMAIL_ADDRESS", _scan_email),
     ("PHONE_NUMBER", _scan_phone),
     (
         "CREDIT_CARD",

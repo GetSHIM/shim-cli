@@ -3,7 +3,7 @@
   "corpus": {
     "file": "guard-v2.json",
     "version": 2,
-    "case_count": 129
+    "case_count": 146
   },
   "evaluation_unit": "exact redacted output",
   "claim_scope": "Synthetic fixture-bound evidence only; not a real-world statistical claim.",
@@ -13,21 +13,21 @@
     "exact_output": 1.0
   },
   "exact_output": {
-    "cases": 129,
-    "matching": 129,
+    "cases": 146,
+    "matching": 146,
     "ratio": 1.0
   },
   "exact_source_spans": {
-    "cases": 14,
-    "matching": 14,
+    "cases": 15,
+    "matching": 15,
     "ratio": 1.0
   },
   "categories": {
     "EMAIL": {
-      "true_positive": 13,
+      "true_positive": 15,
       "false_positive": 0,
       "false_negative": 0,
-      "negative_cases": 116,
+      "negative_cases": 131,
       "precision": 1.0,
       "recall": 1.0
     },
@@ -35,7 +35,7 @@
       "true_positive": 10,
       "false_positive": 0,
       "false_negative": 0,
-      "negative_cases": 119,
+      "negative_cases": 136,
       "precision": 1.0,
       "recall": 1.0
     },
@@ -43,7 +43,7 @@
       "true_positive": 2,
       "false_positive": 0,
       "false_negative": 0,
-      "negative_cases": 127,
+      "negative_cases": 144,
       "precision": 1.0,
       "recall": 1.0
     },
@@ -51,7 +51,7 @@
       "true_positive": 1,
       "false_positive": 0,
       "false_negative": 0,
-      "negative_cases": 128,
+      "negative_cases": 145,
       "precision": 1.0,
       "recall": 1.0
     },
@@ -59,7 +59,7 @@
       "true_positive": 2,
       "false_positive": 0,
       "false_negative": 0,
-      "negative_cases": 127,
+      "negative_cases": 144,
       "precision": 1.0,
       "recall": 1.0
     },
@@ -67,7 +67,7 @@
       "true_positive": 2,
       "false_positive": 0,
       "false_negative": 0,
-      "negative_cases": 127,
+      "negative_cases": 144,
       "precision": 1.0,
       "recall": 1.0
     },
@@ -75,7 +75,7 @@
       "true_positive": 3,
       "false_positive": 0,
       "false_negative": 0,
-      "negative_cases": 126,
+      "negative_cases": 143,
       "precision": 1.0,
       "recall": 1.0
     },
@@ -83,7 +83,7 @@
       "true_positive": 1,
       "false_positive": 0,
       "false_negative": 0,
-      "negative_cases": 128,
+      "negative_cases": 145,
       "precision": 1.0,
       "recall": 1.0
     },
@@ -91,23 +91,23 @@
       "true_positive": 2,
       "false_positive": 0,
       "false_negative": 0,
-      "negative_cases": 127,
+      "negative_cases": 144,
       "precision": 1.0,
       "recall": 1.0
     },
     "SECRET": {
-      "true_positive": 35,
+      "true_positive": 38,
       "false_positive": 0,
       "false_negative": 0,
-      "negative_cases": 94,
+      "negative_cases": 108,
       "precision": 1.0,
       "recall": 1.0
     },
     "DB_URI": {
-      "true_positive": 3,
+      "true_positive": 10,
       "false_positive": 0,
       "false_negative": 0,
-      "negative_cases": 126,
+      "negative_cases": 136,
       "precision": 1.0,
       "recall": 1.0
     }

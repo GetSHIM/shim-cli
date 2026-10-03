@@ -420,7 +420,7 @@
       "categories": [
         "DB_URI"
       ],
-      "expected_output": "Connect <DB_URI_1>."
+      "expected_output": "Connect postgresql://<DB_URI_1>@db.example.com/app."
     },
     {
       "id": "db-uri-safe-negative",
@@ -429,12 +429,10 @@
       "expected_output": "The postgres adapter has no configured URI"
     },
     {
-      "id": "db-uri-trailing-paren",
+      "id": "db-uri-no-credential-quiet",
       "text": "Connect (mysql://db.example.com/app)",
-      "categories": [
-        "DB_URI"
-      ],
-      "expected_output": "Connect (<DB_URI_1>)"
+      "categories": [],
+      "expected_output": "Connect (mysql://db.example.com/app)"
     },
     {
       "id": "overlap-db-uri-secret",
@@ -442,7 +440,7 @@
       "categories": [
         "DB_URI"
       ],
-      "expected_output": "<DB_URI_1>."
+      "expected_output": "postgresql://<DB_URI_1>@db.example.com/app."
     },
     {
       "id": "overlap-phone-ssn",
@@ -1025,6 +1023,135 @@
       "text": "AccountKey=short",
       "categories": [],
       "expected_output": "AccountKey=short"
+    },
+    {
+      "id": "db-uri-postgres-userinfo",
+      "text": "postgresql://kasa_app:synthetic-password@db-prod.kasa.internal:5432/kasa",
+      "categories": [
+        "DB_URI"
+      ],
+      "expected_output": "postgresql://<DB_URI_1>@db-prod.kasa.internal:5432/kasa"
+    },
+    {
+      "id": "db-uri-mysql-userinfo",
+      "text": "mysql://app:synthetic@db.example.com:3306/app",
+      "categories": [
+        "DB_URI"
+      ],
+      "expected_output": "mysql://<DB_URI_1>@db.example.com:3306/app"
+    },
+    {
+      "id": "db-uri-mongodb-srv-userinfo",
+      "text": "mongodb+srv://app:synthetic@cluster0.example.mongodb.net/db?retryWrites=true",
+      "categories": [
+        "DB_URI"
+      ],
+      "expected_output": "mongodb+srv://<DB_URI_1>@cluster0.example.mongodb.net/db?retryWrites=true"
+    },
+    {
+      "id": "db-uri-redis-empty-user",
+      "text": "redis://:synthetic@cache.example.com:6379/0",
+      "categories": [
+        "DB_URI"
+      ],
+      "expected_output": "redis://<DB_URI_1>@cache.example.com:6379/0"
+    },
+    {
+      "id": "db-uri-mssql-userinfo",
+      "text": "mssql://sa:synthetic@db.example.com:1433/app",
+      "categories": [
+        "DB_URI"
+      ],
+      "expected_output": "mssql://<DB_URI_1>@db.example.com:1433/app"
+    },
+    {
+      "id": "db-uri-user-only",
+      "text": "postgres://admin@db.example.com/app",
+      "categories": [
+        "DB_URI"
+      ],
+      "expected_output": "postgres://<DB_URI_1>@db.example.com/app"
+    },
+    {
+      "id": "db-uri-slash-in-password",
+      "text": "mysql://user:pa/ss@db.example.com/app",
+      "categories": [
+        "DB_URI"
+      ],
+      "expected_output": "mysql://<DB_URI_1>@db.example.com/app"
+    },
+    {
+      "id": "db-uri-loopback-with-password",
+      "text": "redis://:hunter2@localhost:6379",
+      "categories": [
+        "DB_URI"
+      ],
+      "expected_output": "redis://<DB_URI_1>@localhost:6379"
+    },
+    {
+      "id": "db-uri-query-password",
+      "text": "postgres://db.internal:5432/kasa?sslmode=require&password=synthetic0",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "postgres://db.internal:5432/kasa?sslmode=require&password=<SECRET_1>"
+    },
+    {
+      "id": "db-uri-remote-no-credential-quiet",
+      "text": "postgres://db-prod.internal:5432/kasa",
+      "categories": [],
+      "expected_output": "postgres://db-prod.internal:5432/kasa"
+    },
+    {
+      "id": "url-userinfo-sentry-dsn",
+      "text": "https://0123456789abcdef0123456789abcdef@o123456.ingest.sentry.io/1234567",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "https://<SECRET_1>@o123456.ingest.sentry.io/1234567"
+    },
+    {
+      "id": "url-userinfo-basic-auth",
+      "text": "https://user:synthetic@example.com/path",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "https://<SECRET_1>@example.com/path"
+    },
+    {
+      "id": "url-then-email",
+      "text": "see https://example.com/docs alice@example.com",
+      "categories": [
+        "EMAIL"
+      ],
+      "expected_output": "see https://example.com/docs <EMAIL_1>"
+    },
+    {
+      "id": "url-path-with-at-quiet",
+      "text": "https://medium.com/@someone/a-post",
+      "categories": [],
+      "expected_output": "https://medium.com/@someone/a-post"
+    },
+    {
+      "id": "email-mailto",
+      "text": "mailto:alice@example.com",
+      "categories": [
+        "EMAIL"
+      ],
+      "expected_output": "mailto:<EMAIL_1>"
+    },
+    {
+      "id": "db-uri-placeholder-userinfo-quiet",
+      "text": "postgresql://…@db-prod.kasa.internal:5432/kasa",
+      "categories": [],
+      "expected_output": "postgresql://…@db-prod.kasa.internal:5432/kasa",
+      "expected_spans": []
+    },
+    {
+      "id": "url-userinfo-stars-quiet",
+      "text": "https://***@example.com/path",
+      "categories": [],
+      "expected_output": "https://***@example.com/path"
     }
   ],
   "generated_cases": [

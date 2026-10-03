@@ -129,7 +129,9 @@ def test_a_real_read_result_is_masked_in_place() -> None:
     result, findings, changed = mask(document, evaluate)
 
     assert changed is True
-    assert result["file"]["content"] == "DATABASE_URL=<DB_URI_1>\n"
+    assert result["file"]["content"] == (
+        "DATABASE_URL=postgresql://<DB_URI_1>@db.example.com/app\n"
+    )
     assert result["file"]["numLines"] == 1
     assert result["file"]["truncatedByTokenCap"] is False
     assert result["type"] == "text"

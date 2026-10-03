@@ -217,6 +217,7 @@ QUIET = (
     "mongodb://127.0.0.1:27017",
     "redis://[::1]:6379",
     'REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")',
+    "postgres://db.internal.example.com:5432/orders",
     "the server listens on 0.0.0.0:8080 in production",
 )
 
@@ -230,7 +231,6 @@ LOUD = (
     ("postgres://user:pw@localhost/db", "DB_URI"),
     ("redis://:hunter2@localhost:6379", "DB_URI"),
     ("postgres://admin@localhost/db", "DB_URI"),
-    ("postgres://db.internal.example.com:5432/orders", "DB_URI"),
     ("postgres://rw:0123456789abcdef@db.internal.example.com:5432/orders", "DB_URI"),
     ("mysql://user:pw@host/db", "DB_URI"),
 )
@@ -756,3 +756,105 @@ def test_a_value_too_long_to_be_code_or_a_path_is_still_a_secret() -> None:
 )
 def test_a_docker_login_token_is_a_secret(text: str) -> None:
     assert evaluate(text).counts == (("SECRET", 1),)
+
+
+def test_an_email_right_after_a_url_is_found_once_as_email() -> None:
+    decision = evaluate("https://example.com/x alice@example.com")
+
+    assert decision.counts == (("EMAIL", 1),)
+    assert decision.redacted_text == "https://example.com/x <EMAIL_1>"
+
+
+def test_a_long_run_of_schemes_stays_fast_and_still_masks_the_credential() -> None:
+    text = (
+        "DATABASE_URL=postgresql://app:synthetic-password@db.example.com/app\n"
+        + "mysql://" * 12_000
+    )
+
+    started = time.perf_counter()
+    decision = evaluate(text)
+
+    assert time.perf_counter() - started < 2
+    assert "synthetic-password" not in decision.redacted_text
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    (
+        (
+            "REDIS_URL=redis://:%40Synthetic1@redis:6379/0",
+            "REDIS_URL=redis://<DB_URI_1>@redis:6379/0",
+        ),
+        ("redis://:!@Synthetic1@cache:6379", "redis://<DB_URI_1>@cache:6379"),
+        ("postgres://:@hunter22@localhost/db", "postgres://<DB_URI_1>@localhost/db"),
+        ("redis://:!@#$%^&*()@cache:6379", "redis://<DB_URI_1>@cache:6379"),
+        ("https://:@Synthetic1@localhost:8080/", "https://<SECRET_1>@localhost:8080/"),
+    ),
+)
+def test_the_whole_user_info_decides_whether_it_is_a_credential(
+    text: str, expected: str
+) -> None:
+    assert evaluate(text).redacted_text == expected
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    (
+        (
+            "DATABASE_URL=postgres://db.example.com/app?user=app&password=pw",
+            "DATABASE_URL=postgres://db.example.com/app?user=app&password=<SECRET_1>",
+        ),
+        (
+            "postgres://db.example.com/app?password=admin",
+            "postgres://db.example.com/app?password=<SECRET_1>",
+        ),
+        ("redis://redis:6379?password=pw", "redis://redis:6379?password=<SECRET_1>"),
+        (
+            "jdbc:postgresql://db.example.com:5432/app?user=admin&password=root",
+            "jdbc:postgresql://db.example.com:5432/app?user=admin&password=<SECRET_1>",
+        ),
+        (
+            "postgres://db.example.com/app?db_password=12345678",
+            "postgres://db.example.com/app?db_password=<SECRET_1>",
+        ),
+    ),
+)
+def test_a_short_query_password_in_a_connection_string_is_masked(
+    text: str, expected: str
+) -> None:
+    assert evaluate(text).redacted_text == expected
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    (
+        (
+            "postgres://user:synth%20etic@db:5432/app",
+            "postgres://<DB_URI_1>%20etic@db:5432/app",
+        ),
+        (
+            "postgres://user:synth'etic@db:5432/app",
+            "postgres://<DB_URI_1>'etic@db:5432/app",
+        ),
+    ),
+)
+def test_a_password_cut_short_by_a_quote_or_escape_keeps_its_start_masked(
+    text: str, expected: str
+) -> None:
+    assert evaluate(text).redacted_text == expected
+
+
+@pytest.mark.parametrize(
+    "text",
+    (
+        'url = f"https://{user}:{password}@{host}/api"',
+        "const url = `https://${user}:${pass}@${host}/`",
+        "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/app",
+        "postgresql://***@db-prod.kasa.internal:5432/kasa",
+        "postgresql://HOST:5432/DATABASE",
+    ),
+)
+def test_user_info_made_of_references_or_elisions_is_not_a_credential(
+    text: str,
+) -> None:
+    assert evaluate(text).redacted_text == text

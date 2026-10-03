@@ -142,9 +142,13 @@ are verified where they exist, so a mistyped IBAN or national ID is not
 reported.
 
 It deliberately stays quiet on values that name nobody: loopback and
-unspecified addresses (`127.0.0.1`, `0.0.0.0`, `::1`) and connection strings to
-them that carry no credentials (`redis://localhost:6379/0`). Private ranges,
-real hosts, and anything with a `user:password@` are still detected. Once
+unspecified addresses (`127.0.0.1`, `0.0.0.0`, `::1`) and connection strings
+that carry no credentials (`redis://cache.example.com:6379/0`). Private and
+public IP addresses are still detected. A connection string keeps its
+scheme, host, port and database and loses only its credentials:
+`postgresql://kasa_app:synthetic-password@db-prod.kasa.internal:5432/kasa`
+reaches the model as `postgresql://<DB_URI_1>@db-prod.kasa.internal:5432/kasa`,
+so the agent can still tell production from staging. Once
 `0.0.0.0` and `127.0.0.1` both read as `<IP_ADDRESS_1>`, the model can no
 longer tell "listen on every interface" from "loopback only" — detection that
 fires where there is nothing to find is how people learn to ignore it. It also

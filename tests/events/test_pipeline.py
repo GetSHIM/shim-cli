@@ -102,7 +102,9 @@ def test_a_read_result_is_masked_in_place_under_enforce() -> None:
 
     assert document["hookSpecificOutput"]["hookEventName"] == "PostToolUse"
     assert outcome.record.direction == INBOUND
-    assert updated["file"]["content"].startswith("DATABASE_URL=<DB_URI_1>")
+    assert updated["file"]["content"].startswith(
+        "DATABASE_URL=postgresql://<DB_URI_1>@db.example.com/app"
+    )
     assert "s3cr3tpw" not in outcome.output.decode()
     assert updated["type"] == "text"
     assert updated["file"]["numLines"] == 6

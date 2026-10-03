@@ -78,11 +78,22 @@ silently ignoring the policy.
 Where a checksum exists it is verified, so a mistyped IBAN or Turkish national
 ID is not reported. Detection also stays deliberately quiet on values that name
 nobody: the loopback and unspecified addresses (`127.0.0.1`, `0.0.0.0`, `::1`)
-and connection strings to them that carry no credentials. Private ranges, real
-hosts, and any URI with a `user:password@` are still detected. This is a
-precision choice with a cost attached — a `10.x` address that really is
-internal topology is still masked, and the exemption is written narrowly so it
-can never be a way to smuggle a credential past.
+and connection strings that carry no credentials, wherever they point. Private
+and public IP addresses are still detected. A connection string is masked over
+its user and password only, as one placeholder:
+`postgresql://<DB_URI_1>@db-prod.kasa.internal:5432/kasa` keeps the host the
+agent needs, and a password-like parameter in its query string (`?password=…`)
+is a `SECRET` at any length. A connection string's user-info is left alone only
+when it holds no credential at all: references such as
+`${POSTGRES_USER}:${POSTGRES_PASSWORD}` or `{user}:{password}`, or elision
+marks such as `…` and `***`. The user and
+password in any `http`, `https`, `ftp`, `ws` or `wss` URL are a `SECRET` too,
+so a Sentry DSN reads `https://<SECRET_1>@o123456.ingest.sentry.io/1234567`; a
+plain address and a `mailto:` link stay `EMAIL`. This is a precision choice
+with a cost attached — a `10.x` address that really is internal topology is
+still masked, and a team that wants internal host names hidden adds a [custom
+pattern](commands.md#shim-config). The exemptions are written narrowly, so that
+they drop noise rather than credentials.
 
 A secret is found by its key name or by its vendor prefix. A key name counts
 when a secret word is one of its segments, in any case: `DB_PASSWORD`,
