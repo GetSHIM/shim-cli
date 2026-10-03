@@ -1616,6 +1616,9 @@ WINDOWS_REFUSAL = (
         ["scan"],
         ["redact"],
         ["demo", "claude"],
+        ["audit"],
+        ["audit", "--purge"],
+        ["keys", ".env"],
     ),
 )
 def test_on_windows_every_command_refuses_before_touching_a_file(

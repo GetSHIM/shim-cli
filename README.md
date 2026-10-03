@@ -595,7 +595,7 @@ Every figure here was measured on the released build, not estimated.
 </p>
 
 Hook output is asserted byte for byte, not by shape: a safe event must produce
-exactly zero bytes on stdout and stderr. 422 contract tests hold that, plus the
+exactly zero bytes on stdout and stderr. 428 contract tests hold that, plus the
 import boundaries, the rule that no committed file carries the machine it was
 written on, and a byte-identical rebuild of the shipped plugin archive.
 
@@ -647,6 +647,7 @@ reinstalling later finds your entity choices and custom patterns still there.
 - [Architecture](https://github.com/GetSHIM/shim-cli/blob/main/docs/architecture.md)
 - [Compatibility](https://github.com/GetSHIM/shim-cli/blob/main/docs/compatibility.md)
 - [Privacy](https://github.com/GetSHIM/shim-cli/blob/main/docs/privacy.md)
+- [1.1.0 release notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/1.1.0.md)
 - [1.0.3 release notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/1.0.3.md)
 - [1.0.2 release notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/1.0.2.md)
 - [1.0.1 release notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/1.0.1.md)

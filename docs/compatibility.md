@@ -190,6 +190,23 @@ tool listings). `history.jsonl`, beside `projects/`, holds one line per
 interactive prompt with the keys `display`, `pastedContents`, `project`,
 `sessionId` and `timestamp`; `sessionId` is the transcript's file name.
 
+## 1.1.0 release evidence
+
+Recorded 1 October 2026 on macOS 26.4 arm64, CPython 3.13.5, uv 0.12.5, on the
+1.1.0 candidate with the rebuilt `bin/shim.pyz`. The hook is the 1.0.3 hook; what
+is new are two commands that read files on this machine, run against Claude
+Code's own history and synthetic files.
+
+| Evidence | Recorded result |
+| --- | --- |
+| Local gate | `python scripts/check.py` green: 2,554 tests, lint, format, types, build. |
+| Claude Code | tested: 2.1.286. **`shim audit`** read a real 166 MB history in 70 s and analysed every text in it. **`--purge`**, limited with `--project` to a scratch folder holding two throwaway sessions, run in a pseudo-terminal: `deleted 1 session (1 file, 0 directories) and 0 lines of history.jsonl, on this computer only.`; `claude --resume` found the kept session and answered `No conversation found` for the deleted one, and `history.jsonl` was byte-identical to a copy taken before. **`shim keys`:** with only a `CLAUDE.md` line pointing at it and `Read` allowed, the model ran `shim keys .env` instead of opening the file and said it had seen no value. |
+| Codex CLI | tested: 0.159.0. Not re-run: 1.1.0 changes no hook, installer or message, and `shim audit` reads Claude Code's history only. |
+| GitHub Copilot CLI | tested: 1.0.83. Not re-run, for the same reason. |
+| VS Code | tested: 1.137.0. Not re-run, for the same reason. |
+| Python 3.14 | The full suite on CPython 3.14.3: 2,554 passed. `pipx install --python python3.14` of the built 1.1.0 wheel: `shim --version` answered `shim 1.1.0`, `shim keys .env` listed a synthetic file (`DB_PASSWORD  set  SECRET`), and `shim audit` on an empty home answered `shim: no Claude Code history at ~/.claude/projects.` with exit 2. |
+| Windows | Simulated, not run: with the Windows check set, `shim audit`, `shim audit --purge` and `shim keys` refuse with exit 2 and write nothing, as every other command does (`test_on_windows_every_command_refuses_before_touching_a_file`). |
+
 ## 1.0.3 release evidence
 
 Recorded 1 October 2026 on macOS 26.4 arm64, CPython 3.13.5, uv 0.12.5, on the
