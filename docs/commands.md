@@ -40,9 +40,10 @@ the thing to read when you want the whole surface at once.
 | `1` | Nothing to show, or a finding. `report` with no session, `status` when no hook is installed, `scan` when it found something. |
 | `2` | Refused. Bad input, an unsafe or unreadable file, a client shim cannot support. |
 
-`scan` follows grep: exit `1` means *it found something*, which is what makes
-`shim scan < file || echo "clean"` work in CI. `redact` always exits `0`,
-because its answer is the rewritten text.
+`scan` exits `1` when it found something and `0` when it found nothing, the
+reverse of grep, so `shim scan < file && echo "clean"` works in CI. `redact`
+exits `0`, because its answer is the rewritten text, unless stdin cannot be read
+or scanned in full: then both print `Unable to process stdin.` and exit `1`.
 
 ## Setting up
 
@@ -84,7 +85,9 @@ say so.
 One line: is shim's hook in that client's settings file?
 
 Exits `0` when installed, `1` when not. `--json` gives `{"state": "installed"}`
-or `"not_installed"`, which is the form to use in a script.
+or `"not_installed"`, which is the form to use in a script. A Claude Code hook
+installed by 1.0.2 or earlier reads as not installed, and exits `1`, until
+`shim install claude` adds its `PostToolUseFailure` entry.
 
 ### `shim doctor <client>`
 
@@ -159,6 +162,10 @@ what the model itself wrote back. It is kept apart from everything else and is
 not called a leak, but it is not called invented either: the model may repeat
 a value it was given, for example from a file you attached with `@`.
 
+A file attached with `@` is counted under `warned` with its name, as `(@.env)`.
+`skipped` counts what shim could not inspect and let through, such as an
+attached file past the limits.
+
 Exits `1` when there is no session to show.
 
 ### `shim ledger show`
@@ -211,8 +218,12 @@ shim watch — 2m 34s, 3 requests
     system    ~      51,456   62%
     messages  ~         708    1%
   request   3 DB_URI, 3 EMAIL in messages
+  response  1 EMAIL in model text; 1 EMAIL in thinking
+            written by the model; it may repeat values it was given
   compare   EMAIL   3 in request, 2 in response (text, thinking)
+            DB_URI  3 in request, 0 in response
   spend     ~$0.69  (approximate, 2026-08-30 prices)
+  largest   one request was 112,384 bytes, system 61% of it
   nothing was modified, and no request body was written to disk
 ```
 
@@ -333,11 +344,16 @@ $ printf 'nothing here' | shim scan
 PASS No supported sensitive data found.
 ```
 
-Exit `1` means it found something. That makes it usable as a gate:
+Exit `1` means it found something and `0` that it found nothing. That makes it
+usable as a gate:
 
 ```console
-shim scan < config.env || echo "clean"
+shim scan < config.env && echo "clean"
 ```
+
+If part of stdin cannot be scanned, `scan` and `redact` print
+`Unable to process stdin.` and exit `1`, as they do for input that cannot be
+read at all.
 
 ### `shim redact`
 
@@ -348,7 +364,8 @@ $ printf 'key AKIAIOSFODNN7EXAMPLE' | shim redact
 key <SECRET_1>
 ```
 
-Always exits `0`.
+Exits `0`, or `1` with `Unable to process stdin.` when stdin cannot be read or
+scanned in full.
 
 ### `shim demo <client>`
 
@@ -385,7 +402,7 @@ location — `/tmp`, a group-writable mount — shim will refuse it.
 
 ```toml
 # Which types to look for. Default: all of them.
-enabled_entities = ["EMAIL", "SECRET", "DB_URI"]
+enabled_entities = ["EMAIL", "SECRET", "DB_URI", "IBAN", "CUSTOM"]
 
 # Keep records past the end of a session, for 30 days. Default: false.
 ledger = false
@@ -399,8 +416,9 @@ diet = true
 IBAN = 4
 
 # Your own terms. Names are UPPER_CASE, digits and underscores.
-[custom]
-PROJECT_CODENAME = '\bATLAS-[0-9]{4}\b'
+[[custom]]
+name = "PROJECT_CODENAME"
+pattern = '\bATLAS-[0-9]{4}\b'
 
 # What to do, per direction, per event, or per tool. The first match wins,
 # most specific first: tool name, then event name, then direction.

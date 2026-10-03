@@ -28,7 +28,7 @@ detector add no network destination, account, API key, or telemetry. The opt-in
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/GetSHIM/shim-cli/main/docs/assets/shots/masked-tool-result.png" width="880"
-       alt="A terminal: the agent runs Read on a .env file holding an AWS key, an IBAN and an email; the model is handed AWS_ACCESS_KEY_ID=&lt;SECRET_1&gt;, BILLING_IBAN=&lt;IBAN_1&gt; and &lt;EMAIL_1&gt; instead.">
+       alt="A terminal: the agent runs Read on a .env file holding an AWS key, an IBAN and an email; the model is handed AWS_ACCESS_KEY_ID=&lt;SECRET_1&gt;, BILLING_IBAN=&lt;IBAN_1&gt; and OWNER_EMAIL=&lt;EMAIL_1&gt; instead.">
 </p>
 
 Two commands, two different questions:
@@ -135,8 +135,8 @@ shim-cli detects email addresses, phone numbers, credit cards, IBANs, IP and
 MAC addresses, US SSNs, Turkish national and tax IDs, secrets, and database
 URIs. Secrets include named keys such as `DB_PASSWORD` and
 `AWS_SECRET_ACCESS_KEY`, and vendor tokens: Slack, Google, GitHub, GitLab, npm,
-Hugging Face, Azure storage `AccountKey` values and HTTP `Authorization`
-headers. Checksums
+Hugging Face, Azure storage `AccountKey` values and
+HTTP `Authorization: Basic` and `Bearer` headers. Checksums
 are verified where they exist, so a mistyped IBAN or national ID is not
 reported.
 
@@ -339,11 +339,13 @@ independently of the hook — reported two email addresses in the whole session,
 both from the client's own system messages. None of the sixty reached the
 model.
 
-Two more lines appear when they have something to say. A session with your own
-patterns names which one matched, and a scanned model reply is counted apart
-from everything else, because the model wrote it:
+More lines appear when they have something to say. `unmasked` counts what a
+failed command printed, which Claude Code does not let shim mask; a session with
+your own patterns names which one matched; and a scanned model reply is counted
+apart from everything else, because the model wrote it:
 
 ```text
+  unmasked  5 SECRET  (failed Bash)
   masked    3 CUSTOM  (Read config/settings.py)
   custom    2 PROJECT_CODENAME, 1 INTERNAL_HOST
   model     1 EMAIL in its replies (written by the model; it may repeat values it was given)

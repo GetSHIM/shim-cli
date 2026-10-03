@@ -37,11 +37,11 @@ Apply the `ponytail:ponytail` and `code-writing-guidelines` skills to every impl
   and costs a reviewer time. `tests/contracts/test_no_local_leakage.py` checks
   every tracked file, with the markers read from the environment so it protects
   whoever runs it.
-- Install may create a missing client settings file or append SHIM's exact hook
+- Install may create a missing client settings file or append shim's exact hook
   groups last while preserving unrelated settings and hooks; revert removes
   only those groups and retains the document even when empty.
 - Keep install and revert idempotent, leave Codex inline `config.toml` hooks
-  untouched, preview only SHIM's fragment, and require manual setup for malformed,
+  untouched, preview only shim's fragment, and require manual setup for malformed,
   ambiguous, unsafe, or concurrently changed files.
 - Do not add clients, auth, telemetry, daemons, plugin frameworks, or
   compatibility shims without an approved requirement. `shim watch` is the only
@@ -58,8 +58,8 @@ Apply the `ponytail:ponytail` and `code-writing-guidelines` skills to every impl
 
 ## Checks
 
-Use CPython 3.13 and a compatible uv 0.12.x. CI also covers the supported
-CPython 3.10 floor. Run the complete local check from the repository root:
+Use CPython 3.13 and a compatible uv 0.12.x. CI also covers the CPython 3.10
+floor and 3.14. Run the complete local check from the repository root:
 
 ```bash
 python scripts/check.py

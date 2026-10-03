@@ -78,13 +78,13 @@ def test_the_tools_array_is_reported_as_the_largest_contributor() -> None:
     assert "largest" in text
 
 
-def test_at_files_are_called_out_as_invisible_to_hooks() -> None:
+def test_at_files_are_called_out_as_not_masked() -> None:
     text = report.render(
         _session(_exchange(at_files=measure.AtFiles(count=3, bytes=8_120))), 62.0
     )
 
     assert "3 inlined" in text
-    assert "invisible to hooks" in text
+    assert "(not masked by any hook)" in text
 
 
 def test_spend_is_priced_per_kind_of_token() -> None:
