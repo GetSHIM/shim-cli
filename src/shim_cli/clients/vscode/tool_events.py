@@ -73,7 +73,9 @@ def _dump(document: dict) -> bytes:
     return output
 
 
-def pre_tool_use(action: str, _payload: object, message: str) -> bytes:
+def pre_tool_use(
+    action: str, _payload: object, message: str, _found: str, _tool: str
+) -> bytes:
     if action == ALLOW:
         return b""
     if action == REPORT:
@@ -93,7 +95,9 @@ def pre_tool_use(action: str, _payload: object, message: str) -> bytes:
     raise ValueError("unsupported action")
 
 
-def post_tool_use(action: str, _payload: object, message: str) -> bytes:
+def post_tool_use(
+    action: str, _payload: object, message: str, _found: str, _tool: str
+) -> bytes:
     if action == ALLOW:
         return b""
     if action == REPORT:

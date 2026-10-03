@@ -128,6 +128,18 @@ def _match(groups: list, group: dict[str, object]) -> int | None:
     return matches[0] if matches else None
 
 
+def installed_events(
+    content: bytes, registrations: Sequence[Registration]
+) -> frozenset:
+    hooks = _load(content).get("hooks", {})
+    assert isinstance(hooks, dict)
+    return frozenset(
+        event
+        for event, group in registrations
+        if _match(hooks.get(event, []), group) is not None
+    )
+
+
 def add_groups(content: bytes | None, registrations: Sequence[Registration]) -> bytes:
     if not registrations:
         assert content is not None

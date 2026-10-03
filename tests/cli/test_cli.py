@@ -454,7 +454,7 @@ def test_confirmation_and_doctor(monkeypatch, tmp_path: Path) -> None:
 
 
 _CLIENT_FIXTURES = {
-    "claude": (_claude_home, _claude, 5),
+    "claude": (_claude_home, _claude, 6),
     "codex": (_codex_home, _codex, 1),
     "copilot": (_copilot_home, _copilot, 1),
 }
@@ -1016,7 +1016,7 @@ def test_the_coverage_table_says_what_stop_sees_and_that_it_changes_nothing(
 ) -> None:
     from shim_cli.cli.diagnostics import _coverage_rows
 
-    rows = {row["event"]: row for row in _coverage_rows("claude", installed=True)}
+    rows = {row["event"]: row for row in _coverage_rows("claude", frozenset({"Stop"}))}
 
     assert "last_assistant_message" in rows["Stop"]["sees"]
     assert rows["Stop"]["can_mask"] is False
@@ -1207,11 +1207,8 @@ def test_a_venv_install_is_not_reported_as_no_hook(monkeypatch, tmp_path) -> Non
             None,
         ),
     )
-    monkeypatch.setattr(
-        diagnostics, "_installed_hook_runs_this_package", lambda _client: True
-    )
 
-    check = diagnostics._resolution_check("codex")
+    check = diagnostics._resolution_check("codex", frozenset({"UserPromptSubmit"}))
 
     assert check.status == "PASS"
     assert "nothing is needed on PATH" in check.detail
@@ -1231,11 +1228,8 @@ def test_no_hook_anywhere_is_still_a_failure(monkeypatch, tmp_path) -> None:
             None,
         ),
     )
-    monkeypatch.setattr(
-        diagnostics, "_installed_hook_runs_this_package", lambda _client: False
-    )
 
-    assert diagnostics._resolution_check("codex").status == "FAIL"
+    assert diagnostics._resolution_check("codex", frozenset()).status == "FAIL"
 
 
 def _legacy_claude_settings(home: Path, *, foreign: bool = False) -> Path:
@@ -1501,3 +1495,88 @@ def test_each_unsafe_settings_state_names_its_own_cause(
     assert "writable by another user" in writable
     # Only this family gets the explanation; a symlink does not need it.
     assert "turn detection off" in writable
+
+
+def _five_of_six(monkeypatch, tmp_path: Path) -> Path:
+    from shim_cli.clients.claude import settings as claude_settings
+    from shim_cli.clients.hook_settings import add_groups
+
+    home = _claude_home(monkeypatch, tmp_path)
+    _claude(monkeypatch, tmp_path)
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}/usr/bin{os.pathsep}/bin")
+    claude_settings.target_path().write_bytes(
+        add_groups(
+            None,
+            [
+                registration
+                for registration in claude_settings.hook_groups()
+                if registration[0] != "PostToolUseFailure"
+            ],
+        )
+    )
+    return home
+
+
+def test_doctor_on_a_1_0_2_install_without_shim_hook_on_path_still_passes_resolution(
+    monkeypatch, tmp_path: Path
+) -> None:
+    _five_of_six(monkeypatch, tmp_path)
+
+    result = runner.invoke(app, ["doctor", "claude"])
+    text = " ".join(unstyle(result.output).split())
+
+    assert "PASS The installed Claude Code hook runs this package directly" in text
+    assert "No hook is runnable" not in text
+    assert result.exit_code == 0
+
+
+def test_doctor_finds_a_plugin_beside_a_1_0_2_install(
+    monkeypatch, tmp_path: Path
+) -> None:
+    home = _five_of_six(monkeypatch, tmp_path)
+    manifest = home / ".claude" / "plugins" / "installed_plugins.json"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text(
+        json.dumps({"plugins": {"shim-cli@shim-cli": [{"version": "1.0.2"}]}}),
+        encoding="utf-8",
+    )
+
+    text = " ".join(unstyle(runner.invoke(app, ["doctor", "claude"]).output).split())
+
+    assert (
+        "FAIL Both the shim-cli@shim-cli plugin and a settings hook are installed"
+        in text
+    )
+
+
+def test_doctor_counts_a_1_0_2_install_as_five_of_six(
+    monkeypatch, tmp_path: Path
+) -> None:
+    from shim_cli.clients.claude import settings as claude_settings
+    from shim_cli.clients.hook_settings import add_groups
+
+    _claude_home(monkeypatch, tmp_path)
+    _claude(monkeypatch, tmp_path)
+    claude_settings.target_path().write_bytes(
+        add_groups(
+            None,
+            [
+                registration
+                for registration in claude_settings.hook_groups()
+                if registration[0] != "PostToolUseFailure"
+            ],
+        )
+    )
+
+    text, table, installed = _coverage("claude")
+    rows = json.loads(runner.invoke(app, ["doctor", "claude", "--json"]).output)
+
+    assert "WARN Coverage: 5 of 6 events installed; run shim install claude." in text
+    assert "hook group is not installed" not in text
+    assert "PostToolUseFailure error no no" in text
+    assert installed == [
+        row["event"] != "PostToolUseFailure" for row in rows["coverage"]
+    ]
+    assert runner.invoke(app, ["doctor", "claude"]).exit_code == 0
+    assert runner.invoke(app, ["install", "claude", "--yes"]).exit_code == 0
+    assert "PASS Coverage: 6 of 6 events installed." in _coverage("claude")[0]

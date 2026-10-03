@@ -123,7 +123,7 @@ removes GitHub authentication altogether, so there is nothing to watch.
 
 | Client | Your typed prompt | Tool input and results |
 | --- | --- | --- |
-| [Claude Code](https://github.com/anthropics/claude-code) | Reports what it found and lets it through; blocks under `enforce` | Eligible structured arguments and inbound results are masked; commands and local writes are report-or-deny only |
+| [Claude Code](https://github.com/anthropics/claude-code) | Reports what it found and lets it through; blocks under `enforce` | Eligible structured arguments and inbound results are masked; commands and local writes are report-or-deny only; the output of a failed call is reported, not masked |
 | [Codex CLI](https://github.com/openai/codex) | Reports what it found and lets it through; blocks under `enforce` | Not installed — no verified native tool-event adapter |
 | [GitHub Copilot CLI](https://github.com/github/copilot-cli) | Replaces the model-facing prompt with the redacted text | Not installed — no verified native tool-event adapter |
 | [VS Code](https://code.visualstudio.com/docs/agent-customization/agent-plugins) | Reports what it found and lets it through; stops the prompt before it is sent under `enforce` | A call is reported, and denied under `enforce`, before it runs. A **result** can only be reported: by then the model has it, and nothing takes it back. Never masked |
@@ -514,10 +514,11 @@ reported.
 - The host client receives the raw prompt before its hook runs, and other hooks
   may receive it concurrently.
 - Detection is best-effort and may miss sensitive values.
-- **The output of a failed tool call is not masked.** Claude Code passes it
-  to a separate hook event that shim does not install, so a command such as
-  `cat .env && cat missing-file` exits non-zero and the model reads `.env`
-  as it is, with nothing in the session summary.
+- **The output of a failed tool call cannot be masked: Claude Code does not
+  allow it.** shim tells you what was in it, tells the model not to repeat it,
+  and counts it as `unmasked` in the session summary. A command such as
+  `cat .env && cat missing-file` exits non-zero, and the model reads `.env` as
+  it is.
 - A disabled, untrusted, crashed, or timed-out hook may fail open according to
   client behavior.
 - Clients, providers, and other tools may retain data independently of shim.

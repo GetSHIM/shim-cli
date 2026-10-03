@@ -5,9 +5,11 @@ from statistics import median
 
 ACTION_LABELS = (
     ("mask", "masked"),
+    ("unmasked", "unmasked"),
     ("deny", "blocked"),
     ("report", "warned"),
 )
+FAILED_EVENT = "PostToolUseFailure"
 MAX_SOURCES = 3
 BYTES_PER_TOKEN = 4
 MODEL_OUTPUT = "model-output"
@@ -23,6 +25,8 @@ def _sources(records: list) -> list:
         tool = tool if isinstance(tool, str) else ""
         target = target if isinstance(target, str) else ""
         if tool:
+            if record.get("event") == FAILED_EVENT:
+                tool = f"failed {tool}"
             where = f"{tool} {_basename(target)}" if target else tool
         else:
             event = record.get("event")
@@ -140,6 +144,12 @@ def _custom_totals(records: list) -> list:
     return sorted(counts.items(), key=lambda pair: (-pair[1], pair[0]))
 
 
+def _action(record: dict) -> object:
+    if record.get("event") == FAILED_EVENT and record.get("action") == "report":
+        return "unmasked"
+    return record.get("action")
+
+
 def _acted(records: list) -> list:
     return [
         record
@@ -179,7 +189,7 @@ def render(records: list, capped: bool = False) -> str:
     ]
     lines: list = []
     for action, label in ACTION_LABELS:
-        matching = [record for record in acted if record.get("action") == action]
+        matching = [record for record in acted if _action(record) == action]
         if not matching:
             continue
         first = True
@@ -195,7 +205,7 @@ def render(records: list, capped: bool = False) -> str:
             lines.append(f"  {column:<9} {count} {entity}{_where(relevant)}")
     bare = _bare(records)
     if bare:
-        warned = any(record.get("action") == "report" for record in acted)
+        warned = any(_action(record) == "report" for record in acted)
         column = "" if warned else "warned"
         total = sum(record["bare_numbers"] for record in bare)
         lines.append(f"  {column:<9} {total} {BARE_NUMBERS}{_where(bare)}")
@@ -251,18 +261,20 @@ def as_json(records: list, capped: bool = False) -> dict:
     median, p95 = _overhead(records)
     actions: dict = {}
     for action, _label in ACTION_LABELS:
-        matching = [record for record in acted if record.get("action") == action]
+        matching = [record for record in acted if _action(record) == action]
         if matching:
             actions[action] = {
                 "entities": dict(_totals(matching)),
                 "sources": _sources(matching),
                 "events": len(matching),
             }
+    unmasked = actions.pop("unmasked", {})
     saved = _saved(records)
     return {
         "events": len(records),
         "acted": len(acted),
         "actions": actions,
+        "unmasked": unmasked,
         "overhead_ms": {"median": median, "p95": p95},
         "bytes_saved": saved,
         "tokens_saved_approx": saved // BYTES_PER_TOKEN,

@@ -95,7 +95,7 @@ def test_a_double_install_is_reported_with_the_uninstall_command(
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / ".claude"))
 
-    check = diagnostics._duplicate_check("claude")
+    check = diagnostics._duplicate_check("claude", frozenset())
 
     assert check.status == "FAIL"
     assert "inspected twice" in check.detail

@@ -60,9 +60,9 @@ shim install claude --dry-run    # shows the change and exits
 `--dry-run` prints a sentence and then the exact JSON fragment:
 
 ```
-WARN Would add 5 hook entries (UserPromptSubmit, PostToolUse, PreToolUse,
-SessionEnd, Stop), each running /usr/bin/python3 -m shim_cli.hook claude.
-Nothing else in the file changes.
+WARN Would add 6 hook entries (UserPromptSubmit, PostToolUse,
+PostToolUseFailure, PreToolUse, SessionEnd, Stop), each running
+/usr/bin/python3 -m shim_cli.hook claude. Nothing else in the file changes.
 ```
 
 Installing is additive and surgical: your other hooks stay, and shim appends
@@ -105,8 +105,10 @@ than the version shim was tested against. **Both are normal and doctor exits
 
 The coverage line counts the events whose hook is in the client's settings
 file, and the table's `Installed` column reads the same file:
-`PASS Coverage: 5 of 5 events installed.` once shim is installed, and
-`WARN Coverage: 0 of 5 events installed; run shim install claude.` before. A
+`PASS Coverage: 6 of 6 events installed.` once shim is installed, and
+`WARN Coverage: 0 of 6 events installed; run shim install claude.` before. An
+install made by 1.0.2 or earlier reads `5 of 6`, because `PostToolUseFailure`
+is new; `shim install claude` adds it and leaves the other five alone. A
 hook still in the 0.2.0 shape does not count, because 1.0 does not run it:
 doctor reports it as `FAIL` with `run shim install <client>`. The coverage
 `WARN` on its own exits `0`.
@@ -149,8 +151,10 @@ shim — this session
   overhead  102 ms median, 120 ms p95
 ```
 
-`masked` is what the model did not see. `warned` is what shim found in your
-prompt and left alone — prompts are reported, not rewritten. `model` counts
+`masked` is what the model did not see. `unmasked` is what a failed tool call
+printed: Claude Code does not let it be masked, so the model saw it, and shim
+told you and told the model not to repeat it. `warned` is what shim found in
+your prompt and left alone — prompts are reported, not rewritten. `model` counts
 what the model itself wrote back; it is recall, not a leak, and is labelled
 that way.
 

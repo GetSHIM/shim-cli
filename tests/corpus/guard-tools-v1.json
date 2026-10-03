@@ -280,7 +280,7 @@
       "client": "claude",
       "event": "PostToolUseFailure",
       "direction": "inbound",
-      "expected_action": "mask",
+      "expected_action": "report",
       "rewritable": true,
       "fixture": "claude/PostToolUseFailure-Bash-bash-connection-string-1.json",
       "scanned": [

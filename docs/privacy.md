@@ -247,11 +247,17 @@ Commands and local writes are never rewritten. If no inspection is possible,
 the event passes through unchanged and unmasked with a visible warning; prompt
 errors still fail closed.
 
-**A tool call that fails is not inspected at all.** Claude Code delivers its
-output, including everything the command printed before it failed, to
-`PostToolUseFailure`, which shim does not install. `cat .env && cat
-missing-file` exits 1, and the model reads `.env` unmasked; no warning is
-shown and the session summary does not count it.
+**The output of a failed tool call cannot be masked.** Claude Code delivers
+it, including everything the command printed before it failed, to
+`PostToolUseFailure`, and ignores a replacement there: a returned
+`updatedToolOutput` was not used (Claude Code 2.1.278 and 2.1.284), while
+`additionalContext` reached the model (2.1.284 and 2.1.286). So shim inspects
+it, shows you `shim: found DB_URI (1), SECRET (4) in a failed Bash. Claude Code
+does not let this output be masked; the model has these values.`, tells the
+model not to repeat those values in replies, files or commands, and counts them
+on the summary's `unmasked` line. `cat .env && cat missing-file` exits 1 and
+the model still reads `.env` as it is; the record keeps entity names and counts,
+never the output or the command.
 
 **A large field is scanned in pieces, and the seams are the residual risk.**
 The detector works on at most 100,000 characters at a time. A longer field is

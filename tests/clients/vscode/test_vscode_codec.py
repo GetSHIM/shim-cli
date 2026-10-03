@@ -101,12 +101,14 @@ def test_the_diet_never_rewrites_a_vs_code_result() -> None:
 @pytest.mark.parametrize("event", sorted(TOOL_EVENTS))
 def test_masking_is_refused_rather_than_faked(event: str) -> None:
     with pytest.raises(ValueError, match="cannot"):
-        TOOL_EVENTS[event].encode(MASK, {"any": "payload"}, "message")
+        TOOL_EVENTS[event].encode(MASK, {"any": "payload"}, "message", "", "tool")
 
 
 def test_a_result_can_never_be_withheld() -> None:
     with pytest.raises(ValueError, match="cannot withhold"):
-        TOOL_EVENTS["PostToolUse"].encode(DENY, {"any": "payload"}, "message")
+        TOOL_EVENTS["PostToolUse"].encode(
+            DENY, {"any": "payload"}, "message", "", "tool"
+        )
 
 
 def test_each_event_claims_only_what_the_client_grants() -> None:
