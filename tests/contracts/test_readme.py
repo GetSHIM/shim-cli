@@ -99,3 +99,16 @@ def test_requires_python_has_no_upper_bound() -> None:
 
     assert "<" not in project["project"]["requires-python"]
     assert "Programming Language :: Python :: 3.14" in project["project"]["classifiers"]
+
+
+def test_the_readme_shows_no_counter_badge_and_no_untrue_claim() -> None:
+    text = (ROOT / "README.md").read_text(encoding="utf-8")
+    prose = " ".join(text.split())
+
+    assert "img.shields.io/github/stars" not in text
+    assert "no other way" not in prose
+    assert "Nobody can tell you" not in prose
+    assert (
+        "Claude Code's `/context` shows the same split for the session in front "
+        "of you; `shim watch` adds what was in each part and what came back."
+    ) in prose
