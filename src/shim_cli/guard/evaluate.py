@@ -1,15 +1,11 @@
 from __future__ import annotations
 
-import re
 from collections.abc import Iterable, Iterator
 
 from .analyze import analyze_counting
-from .entities import ENTITY_TYPES, MAX_REVEAL_DIGITS
+from .entities import ENTITY_TYPES
 from .models import Finding, GuardDecision
 from .normalize import MAX_SOURCE_CHARACTERS
-
-# The one definition of what a placeholder looks like, in both forms.
-PLACEHOLDER = re.compile(rf"<[A-Z_]+_[0-9]+(?::[0-9]{{1,{MAX_REVEAL_DIGITS}}})?>")
 
 
 def _tail(span: str, digits: int) -> str:

@@ -84,6 +84,35 @@ precision choice with a cost attached — a `10.x` address that really is
 internal topology is still masked, and the exemption is written narrowly so it
 can never be a way to smuggle a credential past.
 
+A secret is found by its key name or by its vendor prefix. A key name counts
+when a secret word is one of its segments, in any case: `DB_PASSWORD`,
+`AWS_SECRET_ACCESS_KEY`, `LEDGER_API_TOKEN`, `client.secret`, `x-api-key`,
+`clientSecret`; `MAX_TOKENS`, `tokenizer` and `SORT_KEY` are not secrets. The
+prefixes are AWS, GitHub (classic and fine-grained), GitLab, Slack, Google, npm,
+Hugging Face, Stripe, OpenAI and SendGrid, plus JSON web tokens, private key
+blocks, Slack and Discord webhook URLs, Azure storage `AccountKey` values and
+HTTP `Authorization` headers. A
+value is not a secret when it only refers to another variable (`${DB_PASS}`,
+`os.environ[…]`, `process.env.X`), is a placeholder shim already wrote, or is a
+type name (`string`). For a key that is more than the bare word, such as
+`TOKEN_TTL` or `DB_PASSWORD_FILE`, a value made only of digits, an `http(s)`
+URL or a file path is not a secret either, so configuration stays quiet. Code
+that only names a secret stays quiet the same way: under such a key nothing is
+a secret when the key's last part is `_id`, `_ids`, `_type`, `_name`,
+`_header`, `_count`, `_limit`, `_regex` or `_service` (`token_type`,
+`api_key_header`, `tokenService`), and neither is an unquoted value of letters
+that reads as a call or lookup, closed or continued by a quote, comma or `]`
+(`tokenizer.encode(text)`, `self.auth_token`, `settings["DB_PASSWORD"]`), or,
+after a `:`, as a type name that is `String`, or that repeats a word of its key
+and ends like code (`apiKey: String`, `authToken: AuthToken;`). A value with a
+digit in it, or longer than 1 KB, is never read as code, and a YAML password
+such as `adminPassword: BlueHarbor` or `REDIS_PASSWORD: RedisPassword` is
+masked. Three things stay undetected: a secret pasted with no key name and no
+known prefix; a value made only of digits under such a key, which is the cost
+of keeping `TOKEN_TTL=86400` quiet; and an unquoted password of letters that
+reads as code, such as `SMTP_PASSWORD=correct.horse.battery`, which is the cost
+of keeping code quiet.
+
 ## What is recorded
 
 shim keeps a record of what it did, so that a tool which is silent when it

@@ -134,8 +134,12 @@ and what shim can and cannot change at each one.
 
 shim-cli detects email addresses, phone numbers, credit cards, IBANs, IP and
 MAC addresses, US SSNs, Turkish national and tax IDs, secrets, and database
-URIs. Checksums are verified where they exist, so a mistyped IBAN or national
-ID is not reported.
+URIs. Secrets include named keys such as `DB_PASSWORD` and
+`AWS_SECRET_ACCESS_KEY`, and vendor tokens: Slack, Google, GitHub, GitLab, npm,
+Hugging Face, Azure storage `AccountKey` values and HTTP `Authorization`
+headers. Checksums
+are verified where they exist, so a mistyped IBAN or national ID is not
+reported.
 
 It deliberately stays quiet on values that name nobody: loopback and
 unspecified addresses (`127.0.0.1`, `0.0.0.0`, `::1`) and connection strings to

@@ -3,6 +3,8 @@ from __future__ import annotations
 import importlib
 import json
 import os
+import random
+import string
 import subprocess
 import sys
 import time
@@ -546,3 +548,211 @@ def test_bare_numbers_counts_the_ids_no_recogniser_claimed() -> None:
     assert evaluate("ids 2147483648 2026091012", ("EMAIL",)).bare_numbers == 0
     assert evaluate("TCKN 12345678950", ("PHONE",)).bare_numbers == 1
     assert evaluate("TCKN 12345678950").bare_numbers == 0
+
+
+@pytest.mark.parametrize(
+    "token",
+    ("xox" + "b-0000000000-EXAMPLEEXAMPLE", "AIza" + "0" * 35, "npm_" + "0" * 36),
+)
+def test_a_vendor_prefix_counts_only_as_a_whole_token(token: str) -> None:
+    assert evaluate(f"rotate {token} today").counts == (("SECRET", 1),)
+    assert evaluate(f"rotate id{token} today").counts == ()
+
+
+def test_scanning_resumes_inside_a_value_it_dropped() -> None:
+    text = "TOKEN_URL=https://x.example.com/?a=1&api_key=0123456789abcdef&b=2"
+
+    assert evaluate(text).redacted_text == (
+        "TOKEN_URL=https://x.example.com/?a=1&api_key=<SECRET_1>"
+    )
+
+
+def test_a_reference_under_a_bare_key_is_not_a_secret() -> None:
+    assert evaluate("password=${DB_PASS}").counts == ()
+
+
+@pytest.mark.parametrize(
+    ("text", "value"),
+    (
+        ('credentials = Credentials(token="example-token-0000")', "example-token-0000"),
+        (
+            'db_credentials = dict(password="example-password-0000")',
+            "example-password-0000",
+        ),
+        (
+            'token_auth = HTTPBasicAuth(password="example-password-0000")',
+            "example-password-0000",
+        ),
+        ('auth_token=Token(secret="example-secret-0000")', "example-secret-0000"),
+        (
+            'client_secret = get_secret(api_key="example-key-00000000")',
+            "example-key-00000000",
+        ),
+        ('const credentials = {token: "example-token-0000"}', "example-token-0000"),
+        ("credentials: {password: example-password-0000}", "example-password-0000"),
+    ),
+)
+def test_a_secret_inside_a_newly_reached_value_is_still_masked(
+    text: str, value: str
+) -> None:
+    assert value not in evaluate(text).redacted_text
+
+
+@pytest.mark.parametrize(
+    "text",
+    (
+        "DATABASE_URL=\nDB_PASSWORD=\nSTRIPE_SECRET_KEY=\nSLACK_BOT_TOKEN=\n"
+        "NEXT_PUBLIC_API_URL=http://localhost:3000",
+        "if not token_usage:\n    return None",
+        "credentials:\n  username: admin",
+    ),
+)
+def test_an_empty_value_does_not_take_the_next_line(text: str) -> None:
+    assert evaluate(text).redacted_text == text
+
+
+def test_a_1_0_2_key_still_reads_its_value_from_the_next_line() -> None:
+    assert evaluate("password:\n  hunter22secret").counts == (("SECRET", 1),)
+
+
+@pytest.mark.parametrize(
+    "text",
+    (
+        "token_" * 16_000,
+        "token=" * 16_000,
+        "token_id=" * 11_000,
+        "TOKEN_URL=https://a/" * 4_999,
+        "x.token=" * 12_000,
+    ),
+    ids=("token_", "token=", "token_id=", "TOKEN_URL=", "x.token="),
+)
+def test_a_long_run_of_key_like_text_stays_fast(text: str) -> None:
+    started = time.perf_counter()
+    evaluate(text)
+
+    assert time.perf_counter() - started < 1
+
+
+@pytest.mark.parametrize(
+    ("text", "value"),
+    (
+        ('password="${PREFIX}example-literal-0000"', "example-literal-0000"),
+        ("password: ${PGPASS:-example-dev-password}", "example-dev-password"),
+        ('secret="${VAULT_VALUE:-example-dev-password}"', "example-dev-password"),
+    ),
+)
+def test_a_literal_beside_a_reference_is_still_masked(text: str, value: str) -> None:
+    assert value not in evaluate(text).redacted_text
+
+
+@pytest.mark.parametrize(
+    "text",
+    (
+        "credentials.password=12345678",
+        "secret.token=12345678",
+        "app.credentials.api_key=12345678",
+    ),
+)
+def test_a_dotted_key_ending_in_a_1_0_2_word_keeps_its_digits_masked(
+    text: str,
+) -> None:
+    assert evaluate(text).counts == (("SECRET", 1),)
+
+
+@pytest.mark.parametrize(
+    "token",
+    ("AIza" + "0" * 34, "AIza" + "0" * 36, "npm_" + "0" * 35, "npm_" + "0" * 37),
+)
+def test_a_fixed_length_vendor_token_needs_its_exact_length(token: str) -> None:
+    assert evaluate(f"rotate {token} today").counts == ()
+
+
+@pytest.mark.parametrize(
+    "text",
+    (
+        "token_ids = tokenizer.encode(text)",
+        '"token_type": "Bearer"',
+        'api_key_header = "X-Api-Key"',
+        '{"apiKeyName": "billing-key"}',
+        "constructor(private tokenService: TokenService) {}",
+        "tokenService = TokenService()",
+        "SECRET_NAME=prod-db-password",
+        'password_regex = "^(?=.*[A-Z]).{12,}$"',
+        "client_secret = load_secret(path)",
+        "Client(auth_token=self.auth_token)",
+        "const authToken = session?.authToken;",
+        'db_password = settings["DB_PASSWORD"]',
+        "access_key: Option<String>,",
+        "pub api_token: String,",
+        "val signingKey: SigningKeyPair?",
+        "private authToken: AuthToken;",
+        "credentials: Optional[grpc.CallCredentials] = None",
+        "refresh_token: Required[str]",
+        "secret_backend: Mapped[str] = mapped_column()",
+    ),
+)
+def test_code_that_names_a_secret_is_not_one(text: str) -> None:
+    assert evaluate(text).counts == ()
+
+
+@pytest.mark.parametrize(
+    "text",
+    (
+        "DB_PASSWORD=Xk9(mP2qL7",
+        "SMTP_PASSWORD=Sunshine",
+        "ADMIN_PASSWORD=ChangeMe",
+        "JWT_SECRET=SuperSecretKey",
+        "SESSION_SECRET=KeyboardCat",
+        "export DB_PASSWORD=CorrectHorseBatteryStaple",
+        "DB_PASSWORD=abcXYZ(9mP2qL7",
+        "DB_PASSWORD=Ab<9xQ!z",
+        "DB_PASSWORD=Secret[2024]",
+        "DB_PASSWORD=pass(word)x",
+        "DB_PASSWORD=abc(def",
+        "REDIS_PASSWORD: ChangeMeNow",
+        "  adminPassword: BlueHarbor",
+        "    JWT_SECRET: SuperSecret",
+        "    REDIS_PASSWORD: RedisPassword",
+        "  adminPassword: AdminPassword",
+        "    API_TOKEN: MyToken",
+        'SMTP_PASSWORD="correct.horse.battery"',
+        "DISCORD_TOKEN=MTAwMDAwMDAwMDAwMDAwMDAw.GsYnTh.EXAMPLE0example0EXAMPLE0",
+        "password = get_password()",
+        "API_KEY_HEADER_VALUE=0123456789abcdef-synthetic",
+        "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE",
+    ),
+)
+def test_a_value_that_only_resembles_code_is_still_a_secret(text: str) -> None:
+    assert evaluate(text).counts == (("SECRET", 1),)
+
+
+def test_a_random_password_under_a_named_key_is_masked() -> None:
+    symbols = "!#$&()*+-./:;<=>?@[^_`{|~"
+    alphabet = string.ascii_letters + string.digits + symbols
+    generator = random.Random(33)
+    passwords = [
+        "".join(generator.choice(alphabet) for _ in range(16)) for _ in range(2_000)
+    ]
+
+    missed = [
+        password
+        for password in passwords
+        if not evaluate(f"DB_PASSWORD={password}").counts
+    ]
+
+    assert len(missed) <= 2, missed
+
+
+def test_a_value_too_long_to_be_code_or_a_path_is_still_a_secret() -> None:
+    assert evaluate("DB_PASSWORD=/" + "a/" * 600 + "key.pem").counts == (("SECRET", 1),)
+
+
+@pytest.mark.parametrize(
+    "text",
+    (
+        '{"auths": {"registry.example.com": {"auth": "Y2ktYm90OlN5bnRoZXRpYy0wMDAw"}}}',
+        '"identitytoken": "c3ludGhldGljLWlkZW50aXR5LXRva2VuLTAwMDA="',
+    ),
+)
+def test_a_docker_login_token_is_a_secret(text: str) -> None:
+    assert evaluate(text).counts == (("SECRET", 1),)

@@ -131,8 +131,9 @@ per-match timeout and the hook is what a user is waiting on.
 
 Substitution is the one place a policy setting changes the output text.
 `[reveal]` keeps the last one to four digits of an `IBAN`, `CREDIT_CARD` or
-`PHONE` span, separators skipped, as `<TYPE_n:tail>`; `guard/evaluate.py`
-holds the single definition of what a placeholder looks like in either form.
+`PHONE` span, separators skipped, as `<TYPE_n:tail>`; `guard/entities.py`
+holds the single definition of what a placeholder looks like in either form,
+and the secret recognizer uses it to leave a value shim already masked alone.
 Detection, counting and spans are untouched, so with no table the output is
 byte-identical to a build without the feature.
 

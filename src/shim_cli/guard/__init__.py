@@ -1,6 +1,12 @@
 from .analyze import analyze
-from .entities import BUILT_IN_TYPES, DEFAULT_ENTITIES, ENTITY_TYPES, normalize_entities
-from .evaluate import PLACEHOLDER, evaluate
+from .entities import (
+    BUILT_IN_TYPES,
+    DEFAULT_ENTITIES,
+    ENTITY_TYPES,
+    PLACEHOLDER,
+    normalize_entities,
+)
+from .evaluate import evaluate
 from .models import Finding, GuardDecision
 from .normalize import MAX_NORMALIZED_CHARACTERS, MAX_SOURCE_CHARACTERS
 

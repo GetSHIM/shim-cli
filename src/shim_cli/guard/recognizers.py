@@ -7,6 +7,7 @@ import re
 import string
 from typing import TYPE_CHECKING, NamedTuple
 
+from .entities import PLACEHOLDER
 from .iban_patterns import regex_per_country
 from .suffixes import is_registrable
 
@@ -395,10 +396,54 @@ def _scan_phone(text: str) -> list[Match]:
     return results
 
 
-_SECRET_KEY = (
+_LEGACY_KEY = (
     r"password|passwd|pwd|api[_-]?key|secret|token|db[_-]?pass|postgres_password"
 )
-_SECRET_ASSIGNMENT = r"(?<![\w-])[\"']?(?:" + _SECRET_KEY + r")[\"']?\s*(?:=|:)\s*"
+_SECRET_KEY = (
+    _LEGACY_KEY
+    + r"|access[_-]?key|private[_-]?key|signing[_-]?key|encryption[_-]?key"
+    + r"|credentials?|auth[_-]?token|pass"
+)
+_SECRET_ASSIGNMENT = re.compile(
+    r"(?:(?<![^\W_])|(?-i:(?<=[a-z0-9])(?=[A-Z])))"
+    r"(?:" + _SECRET_KEY + r")"
+    r"(?:(?![^\W_])|(?-i:(?<=[a-z])(?=[A-Z])))"
+    r"(?P<tail>[\w.-]{0,64})[\"']?\s*[=:]\s*"
+    r"(?:(?P<quote>[\"'])(?P<quoted>[^\r\n]{6,}?)(?P=quote)"
+    r"|(?P<bare>[^\s,}\]\"']{6}))",
+    re.IGNORECASE,
+)
+_BARE_END = re.compile(r"[\s,}\]\"']")
+_LEGACY_ASSIGNMENT = re.compile(
+    r"(?<![\w-])[\"']?(?:" + _LEGACY_KEY + r")[\"']?\s*[=:]\s*\Z",
+    re.IGNORECASE,
+)
+_REFERENCE = re.compile(
+    r"\$\{\w+\}?|\$[A-Za-z_]\w*|%\w+%"
+    r"|(?:os\.environ\W|process\.env\.|(?:os\.)?getenv\(|env\().*"
+)
+_TYPE_NAME = re.compile(
+    r"(?:string|number|boolean|object|unknown|undefined|SecretStr|Optional\[\w*)"
+    r"[;,?|)>\[\]]*"
+)
+_QUALIFIER = re.compile(
+    r"(?:[_.-]|(?-i:(?<=[a-z0-9])(?=[A-Z])))"
+    r"(?:ids?|type|name|header|count|limit|regex|service)\Z",
+    re.IGNORECASE,
+)
+_CODE_PATH = r"[A-Za-z_]+(?:\??\.[A-Za-z_]+)*"
+_CODE_VALUE = re.compile(
+    _CODE_PATH + r"(?:[(\[<]|\([A-Za-z_.]*\)|\[[A-Za-z_.]*\]|<[A-Za-z_.<>]*>)[;)]*"
+    r"|(?:[A-Za-z_]+\??\.)+[A-Za-z_]+[;)]*"
+)
+_OPEN_CODE_VALUE = re.compile(_CODE_PATH + r"[(\[<][A-Za-z_.=(\[<]*")
+_TYPE_VALUE = re.compile(r"(?P<name>(?:[A-Z][a-z]+){2,}|String)(?P<end>[?;)>]*)")
+_NAME_WORD = re.compile(r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])")
+_MAX_SHAPED_VALUE = 1_024
+_PATH_VALUE = re.compile(
+    r"(?:~|\.{1,2})/\S*|/[a-z0-9._/-]+|/\S*\.[A-Za-z][A-Za-z0-9]{0,4}"
+)
+_URL_VALUE = re.compile(r"https?://", re.IGNORECASE)
 _SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str | None, float, bool], ...] = (
     (
         re.compile(
@@ -416,7 +461,10 @@ _SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str | None, float, bool], ...] = 
             r"sk_(?:live|test)_[A-Za-z0-9]{16,}|"
             r"sk-(?:proj-)?[A-Za-z0-9_-]{16,}|"
             r"SG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}|"
-            r"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)"
+            r"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+|"
+            r"(?<![\w-])(?:xox[abposr]-[0-9A-Za-z-]{10,}|AIza[0-9A-Za-z_-]{35}|"
+            r"github_pat_[0-9A-Za-z_]{22,}|glpat-[0-9A-Za-z_-]{20,}|"
+            r"npm_[0-9A-Za-z]{36}|hf_[0-9A-Za-z]{30,})(?![\w-]))"
         ),
         None,
         0.99,
@@ -434,7 +482,7 @@ _SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str | None, float, bool], ...] = 
     ),
     (
         re.compile(
-            _SECRET_ASSIGNMENT + r"(?P<quote>[\"'])(?P<value>[^\r\n]{6,}?)(?P=quote)",
+            r'"(?:auth|identitytoken)"\s*:\s*"(?P<value>[A-Za-z0-9+/]{8,}={0,2})"',
             re.IGNORECASE,
         ),
         "value",
@@ -443,7 +491,17 @@ _SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str | None, float, bool], ...] = 
     ),
     (
         re.compile(
-            _SECRET_ASSIGNMENT + r"(?P<value>[^\s,}\]\"']{6,})",
+            r"(?<![\w-])AccountKey=(?P<value>[A-Za-z0-9+/]{64,}={0,2})",
+            re.IGNORECASE,
+        ),
+        "value",
+        0.97,
+        False,
+    ),
+    (
+        re.compile(
+            r"(?<![\w-])[\"']?authorization[\"']?\s*:\s*[\"']?(?:basic|bearer)\s+"
+            r"(?P<value>[A-Za-z0-9._~+/=-]{6,})",
             re.IGNORECASE,
         ),
         "value",
@@ -468,6 +526,47 @@ _SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str | None, float, bool], ...] = 
 )
 
 
+def _words(name: str) -> set[str]:
+    return {word.lower() for word in _NAME_WORD.findall(name)}
+
+
+def _a_type_of(key: str, value: str, after: str) -> bool:
+    found = _TYPE_VALUE.fullmatch(value)
+    if found is None:
+        return False
+    if found["name"] == "String":
+        return True
+    ended = bool(found["end"]) or after == ","
+    return ended and bool(_words(found["name"]) & _words(key))
+
+
+def _not_a_secret(
+    value: str, new_key: str | None, quoted: bool, typed: bool, after: str
+) -> bool:
+    shaped = len(value) <= _MAX_SHAPED_VALUE
+    if shaped and (
+        _REFERENCE.fullmatch(value)
+        or PLACEHOLDER.fullmatch(value)
+        or _TYPE_NAME.fullmatch(value)
+    ):
+        return True
+    if new_key is None:
+        return False
+    code = not quoted and (
+        _CODE_VALUE.fullmatch(value)
+        or (after in ('"', "'", ",", "]") and _OPEN_CODE_VALUE.fullmatch(value))
+        or (typed and _a_type_of(new_key, value, after))
+    )
+    return bool(
+        _QUALIFIER.search(new_key)
+        or _URL_VALUE.match(value)
+        or (
+            shaped
+            and (code or _BARE_DIGITS.fullmatch(value) or _PATH_VALUE.fullmatch(value))
+        )
+    )
+
+
 def _scan_secret(text: str) -> list[Match]:
     results: list[Match] = []
     for pattern, value_group, score, trim in _SECRET_PATTERNS:
@@ -477,6 +576,28 @@ def _scan_secret(text: str) -> list[Match]:
                 end = _trim_trailing_prose(text, start, end)
             if start < end:
                 results.append(Match("SECRET", start, end, score))
+    position = 0
+    run = (0, 0)
+    while match := _SECRET_ASSIGNMENT.search(text, position):
+        quoted = match.group("quoted") is not None
+        start, end = match.span("quoted" if quoted else "bare")
+        if not quoted:
+            if not run[0] <= start < run[1]:
+                found = _BARE_END.search(text, start)
+                run = (start, found.start() if found else len(text))
+            end = run[1]
+        position = start
+        separator = text[match.end("tail") : match.start("quote") if quoted else start]
+        legacy = _LEGACY_ASSIGNMENT.search(
+            text, match.start(), match.start("quote") if quoted else start
+        )
+        if legacy is None and "\n" in separator:
+            continue
+        new_key = None if legacy else text[match.start() : match.end("tail")]
+        value = text[start : min(end, start + _MAX_SHAPED_VALUE + 1)]
+        after = "" if quoted else text[end : end + 1]
+        if not _not_a_secret(value, new_key, quoted, ":" in separator, after):
+            results.append(Match("SECRET", start, end, 0.97))
     return deduplicate(results)
 
 
