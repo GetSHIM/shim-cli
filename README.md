@@ -118,6 +118,47 @@ rather than a dead end. The Codex prompt hook is unaffected. Copilot is out of
 scope: it accepts a custom endpoint only through bring-your-own-key, which
 removes GitHub authentication altogether, so there is nothing to watch.
 
+## See what already went out
+
+Everything above starts at install, but the months before are on your disk:
+Claude Code keeps every session under `~/.claude/projects`. `shim audit` reads
+that history and counts what reached the model, by kind, by project and by the
+way it came in:
+
+```console
+shim audit
+```
+
+```text
+shim audit — Claude Code history, 3 sessions in 2 projects, 2026-09-28 to 2026-09-30
+
+reached the model
+  SECRET          10  in 2 sessions   @.env 5 · failed Bash 5
+  EMAIL            3  in 3 sessions   @.env 1 · failed Bash 1 · your prompt 1
+  DB_URI           2  in 2 sessions   @.env 1 · failed Bash 1
+
+by project
+  ~/work/kasa-mutabakat      SECRET 10, DB_URI 2, EMAIL 2 · last 2026-09-30
+  ~/work/site                EMAIL 1 · last 2026-09-29
+
+already masked by shim       3 values in 1 session
+model output                 2 EMAIL (written by the model; it may repeat values it was given)
+
+scanned 3 sessions, 5 KB, in 0.0 s. Nothing was changed, written or sent.
+```
+
+It prints no value, keeps nothing and sends nothing; without `--purge` it opens
+no file for writing. It reads Claude Code's history only, and only when you run
+it. `--since 2026-09-01` and `--project ~/work/kasa-mutabakat` narrow it, and
+`--json` gives the same counts per session.
+
+`shim audit --purge` deletes the transcripts of the sessions that sent
+something, and their lines in `history.jsonl`, after you type a confirmation. It
+leaves the other files Claude Code keeps per session, such as its backups of the
+files the agent edited in `file-history/`, and it does not change what the
+model provider already received. Claude Code also deletes transcripts on its
+own, after `cleanupPeriodDays` in its settings (30 by default).
+
 ## Supported clients
 
 | Client | Your typed prompt | Tool input and results |
