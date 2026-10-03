@@ -166,6 +166,23 @@ payload Codex handed it, captured and replayed with `user-prompt = "enforce"`,
 was answered with `shim blocked this prompt: SECRET (1).`
 The README therefore sends Codex users to `shim install codex`.
 
+## 1.0.3 release evidence
+
+Recorded 1 October 2026 on macOS 26.4 arm64, CPython 3.13.5, uv 0.12.5, on the
+1.0.3 candidate with the rebuilt `bin/shim.pyz`. The hook ran from the candidate,
+installed into a scratch project's own `.claude/settings.json` and driven with
+`claude -p --setting-sources project`; every value was synthetic.
+
+| Evidence | Recorded result |
+| --- | --- |
+| Local gate | `python scripts/check.py` green: 2,434 tests, lint, format, types, build. |
+| Claude Code | tested: 2.1.286. **Named secrets:** a `Read` of a `.env` reached the model as `AWS_SECRET_ACCESS_KEY=<SECRET_2>`, `SLACK_BOT_TOKEN=<SECRET_3>`, `LEDGER_API_TOKEN=<SECRET_4>`, with `MAX_TOKENS=4096` left as it was, and the model answered "A hook masked the sensitive values before they reached me." **Connection strings:** the model was handed `postgresql://<DB_URI_1>@db-prod.kasa.example.internal:5432/kasa` and named the production host. **Failed commands:** `cat .env && cat config/local_overrides.env` showed `shim: found DB_URI (1), EMAIL (1), SECRET (5) in a failed Bash. Claude Code does not let this output be masked; the model has these values.` and the summary line `unmasked 5 SECRET (failed Bash)`. **`@` files:** `@.env explain these variables` showed `shim: @.env holds DB_URI (1), SECRET (5), EMAIL (1). …`; under `enforce` the prompt was stopped and no value reached the transcript; `@q.sql` holding `LIKE '%admin%'` was read, found clean and answered with no shim line; a 314 KB `@big.log` was not attached by the client, and shim said nothing. **Code that names a secret:** a `Read` of a Python file holding `api_key_header = "X-Api-Key"`, `token_type = "Bearer"`, `self.auth_token = settings.auth_token`, `token_ids = tokenizer.encode(text)` and one `LEDGER_API_TOKEN` masked only the token (`masked 1 SECRET (Read client.py)`), and the model quoted the rest verbatim. **Percent signs:** under `enforce`, a prompt holding `LIKE '%admin%'` and `echo %DATE%` was answered, not withheld. **Red team:** 27 sessions in four rounds worked as a user would on a synthetic project (`.env`, docker-compose, Helm values, Kubernetes secrets, JSON and Django settings, tfvars, `.npmrc`, logs, a customer CSV, git history and a planted prompt injection): onboarding, `git diff` and `git log -p`, a sub-agent, edits and copies of `.env`, a password grep, `base64 .env`, base64 in Helm values, a JSON file and an `export` line, a grep for base64 blobs, a registry secret and a stack trace. Four gaps found there were fixed before this release (YAML passwords read as type names, base64 output, base64 beside a path in grep output, a wrapped base64 block in grep's numbered output). What still reached the model was values the agent disguised on request (a hex dump, spaced characters) or decoded and reprinted without their key, files attached with `@` under the default `warn`, and a pasted key, which shim reports. |
+| Codex CLI | tested: 0.159.0. Not re-run: 1.0.3 changes no Codex hook file, installer or message. The detector changes are the same code for every client and are graded by the corpus. |
+| GitHub Copilot CLI | tested: 1.0.83. Not re-run, for the same reason: neither the `com.github.copilot` hook file nor `shim install copilot` changed. |
+| VS Code | tested: 1.137.0. Not re-run: the plugin's `com.github.copilot/hooks/hooks.json`, which VS Code reads, is unchanged. A `~/.claude/settings.json` written by `shim install claude`, which VS Code also reads by default, gains a `PostToolUseFailure` entry, and VS Code passes over an event name it does not know: in the 1.139.1 bundle its hook-file event map has no `PostToolUseFailure`, and an unmapped key is skipped. |
+| Python 3.14 | The full suite on CPython 3.14.3: 2,434 passed. `pipx install --python python3.14` of the built 1.0.3 wheel: `shim --version` answered `shim 1.0.3`, and `shim doctor claude` ran on Python 3.14.3 (`PASS Local hook runner allowed and protected direct fixtures correctly.`). |
+| Windows | Simulated, not run: `sys.platform` set to `win32`, `fcntl` and the `SIGALRM` timer API removed. The hook printed `shim: shim-cli does not support Windows yet; nothing was inspected.`, wrote nothing to stdout and exited 0; the launcher did the same with `uname` printing `MINGW64_NT-10.0-19045`; `shim install claude` refused with exit 2. |
+
 ## 1.0.2 release evidence
 
 Recorded 29 September 2026 on macOS 26.4 arm64, CPython 3.13.5, uv 0.12.5, on the

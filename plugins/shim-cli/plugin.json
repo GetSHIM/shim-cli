@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "shim-cli",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Finds secrets and personal data locally, in your prompts and in the tool results the agent reads, and tells you what it found. In VS Code it reports, and with enforcement on it stops a prompt or denies a tool call before it runs; a result that has already reached the model is reported, never masked. No account, no network destination, no telemetry.",
   "author": {
     "name": "shim Engineering"

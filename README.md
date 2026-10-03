@@ -537,19 +537,19 @@ Every figure here was measured on the released build, not estimated.
 
 | | |
 | --- | --- |
-| Tests | **1,900+**, one command: `python scripts/check.py` — lock, lint, format, types, suite, wheel, sdist |
+| Tests | **2,300+**, one command: `python scripts/check.py` — lock, lint, format, types, suite, wheel, sdist |
 | Hook cost | **70 ms** median end to end, interpreter start included; **42 ms** for a session summary |
 | With 32 custom patterns | **+0.6 ms** median against the same prompt with none |
-| Detector corpus | **589 cases**, graded on exact redacted output rather than category presence |
+| Detector corpus | **663 cases**, graded on exact redacted output rather than category presence |
 | Release evidence | SBOM, provenance and Sigstore bundles on the release page from 0.3.2, with the `gh attestation verify` command in [the compatibility record](https://github.com/GetSHIM/shim-cli/blob/main/docs/compatibility.md#100-release-evidence) |
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/GetSHIM/shim-cli/main/docs/assets/shots/shim-doctor.png" width="880"
-       alt="shim doctor claude: twelve checks, each PASS or WARN — the hook group is present, no 0.2.0 names are left, 12 of 12 entities are enabled, the runner protected a sensitive fixture, and coverage is 5 of 5 events.">
+       alt="shim doctor claude: eleven checks, ten PASS and one WARN — Claude Code 2.1.286 is the tested version, the hook group is present, no 0.2.0 names are left, 12 of 12 entities are enabled, the runner protected a sensitive fixture, and coverage is 6 of 6 events, with a table of what each event sees and can mask.">
 </p>
 
 Hook output is asserted byte for byte, not by shape: a safe event must produce
-exactly zero bytes on stdout and stderr. 346 contract tests hold that, plus the
+exactly zero bytes on stdout and stderr. 422 contract tests hold that, plus the
 import boundaries, the rule that no committed file carries the machine it was
 written on, and a byte-identical rebuild of the shipped plugin archive.
 
@@ -601,6 +601,9 @@ reinstalling later finds your entity choices and custom patterns still there.
 - [Architecture](https://github.com/GetSHIM/shim-cli/blob/main/docs/architecture.md)
 - [Compatibility](https://github.com/GetSHIM/shim-cli/blob/main/docs/compatibility.md)
 - [Privacy](https://github.com/GetSHIM/shim-cli/blob/main/docs/privacy.md)
+- [1.0.3 release notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/1.0.3.md)
+- [1.0.2 release notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/1.0.2.md)
+- [1.0.1 release notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/1.0.1.md)
 - [1.0.0 release notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/1.0.0.md)
 - [0.3.3 release notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/0.3.3.md)
 - [0.3.2 release notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/0.3.2.md)
