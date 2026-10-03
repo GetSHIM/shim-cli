@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import codecs
 import re
 import unicodedata
 from dataclasses import dataclass
@@ -9,7 +8,7 @@ MAX_SOURCE_CHARACTERS = 100_000
 MAX_NORMALIZED_CHARACTERS = 200_000
 
 _INVISIBLE = re.compile(r"[\u00ad\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]")
-_PERCENT_BYTE = re.compile(r"%([0-9A-Fa-f]{2})")
+_PERCENT_RUN = re.compile(r"(?:%[0-9A-Fa-f]{2})+")
 _SourceSpan = tuple[int, int]
 
 
@@ -33,54 +32,26 @@ def _decode_percent(text: str) -> tuple[str, list[_SourceSpan]]:
     output: list[str] = []
     spans: list[_SourceSpan] = []
     index = 0
-    while index < len(text):
-        if not text[index].isascii():
-            output.append(text[index])
-            spans.append((index, index + 1))
-            index += 1
-            continue
-
-        end = index + 1
-        while end < len(text) and text[end].isascii():
-            end += 1
-        encoded: list[tuple[int, _SourceSpan]] = []
-        while index < end:
-            match = _PERCENT_BYTE.match(text, index)
-            if match:
-                encoded.append((int(match.group(1), 16), (index, index + 3)))
-                index += 3
-            else:
-                encoded.append((ord(text[index]), (index, index + 1)))
-                index += 1
-
-        decoder = codecs.getincrementaldecoder("utf-8")("strict")
-        pending: list[_SourceSpan] = []
-        for byte, span in encoded:
-            pending.append(span)
-            decoded = decoder.decode(bytes((byte,)))
-            if not decoded:
+    for run in _PERCENT_RUN.finditer(text):
+        output.extend(text[index : run.start()])
+        spans.extend((at, at + 1) for at in range(index, run.start()))
+        escapes = range(run.start(), run.end(), 3)
+        data = bytes(int(text[at + 1 : at + 3], 16) for at in escapes)
+        consumed = 0
+        for character in data.decode("utf-8", "surrogateescape"):
+            start = escapes[consumed]
+            if "\udc80" <= character <= "\udcff":
+                output.extend(text[start : start + 3])
+                spans.extend((at, at + 1) for at in range(start, start + 3))
+                consumed += 1
                 continue
-            buffered = len(decoder.getstate()[0])
-            consumed = pending[:-buffered] if buffered else pending
-            if not consumed:
-                raise ValueError("Guard normalization failed safely.")
-            source_span = (consumed[0][0], consumed[-1][1])
-            output.extend(decoded)
-            spans.extend([source_span] * len(decoded))
-            if len(output) > MAX_NORMALIZED_CHARACTERS:
-                raise _too_large()
-            pending = pending[-buffered:] if buffered else []
-        decoded = decoder.decode(b"", final=True)
-        if decoded:
-            if not pending:
-                raise ValueError("Guard normalization failed safely.")
-            source_span = (pending[0][0], pending[-1][1])
-            output.extend(decoded)
-            spans.extend([source_span] * len(decoded))
-        elif pending:
-            raise ValueError("Guard normalization failed safely.")
-        if len(output) > MAX_NORMALIZED_CHARACTERS:
-            raise _too_large()
+            size = len(character.encode("utf-8"))
+            output.append(character)
+            spans.append((start, escapes[consumed + size - 1] + 3))
+            consumed += size
+        index = run.end()
+    output.extend(text[index:])
+    spans.extend((at, at + 1) for at in range(index, len(text)))
     return "".join(output), spans
 
 
@@ -147,10 +118,7 @@ def normalize(text: str) -> NormalizedText:
             tuple((index, index + 1) for index in range(len(text))),
         )
 
-    try:
-        decoded, spans = _decode_percent(text)
-    except UnicodeDecodeError as error:
-        raise ValueError("Guard input contains malformed percent encoding.") from error
+    decoded, spans = _decode_percent(text)
     visible_text: list[str] = []
     visible_spans: list[_SourceSpan] = []
     if len(decoded) != len(spans):

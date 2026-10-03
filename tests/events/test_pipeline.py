@@ -594,7 +594,7 @@ def test_a_per_tool_entity_scope_narrows_only_that_tool() -> None:
 # "x" * 100_001 used to belong here: past the detector's single-pass limit,
 # so the sibling was left whole. It is now scanned in pieces, and the test
 # below asserts that instead.
-@pytest.mark.parametrize("bad", ["%ff"], ids=["invalid-encoding"])
+@pytest.mark.parametrize("bad", ["\ufdfa" * 12_000], ids=["over-expansion"])
 def test_uninspectable_sibling_preserves_redaction_and_reports_partial(bad):
     outcome = _process(
         _fetched({"credential": "AKIAIOSFODNN7EXAMPLE", "bad": bad}), ENFORCE
@@ -613,7 +613,7 @@ def test_uninspectable_sibling_preserves_redaction_and_reports_partial(bad):
 @pytest.mark.parametrize("mode", [WARN, OBSERVE])
 def test_partial_inspection_respects_non_rewriting_modes(mode):
     outcome = _process(
-        _fetched({"credential": "AKIAIOSFODNN7EXAMPLE", "bad": "%ff"}), mode
+        _fetched({"credential": "AKIAIOSFODNN7EXAMPLE", "bad": "\ufdfa" * 12_000}), mode
     )
     output = json.loads(outcome.output)
     assert "hookSpecificOutput" not in output
