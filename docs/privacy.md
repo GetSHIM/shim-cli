@@ -470,7 +470,8 @@ no other time; the hook still never reads `transcript_path`.
 
 From each transcript it takes the prompts you typed or queued, tool results,
 files attached with `@`, edited-file snippets and what the model wrote, and
-scans them in memory as the hook scans a prompt. What it prints is entity
+scans them in memory as the hook scans a prompt, for the types your settings
+enable and your custom patterns. What it prints is entity
 names, counts, dates, and project folders with your home shown as `~`, tool
 names and attachment names, each scrubbed by the detector like a session
 record's target. It writes no record, no ledger entry, no cache and no

@@ -39,6 +39,13 @@ attached. The last of these is the one people expect least, and it is why
 [Stop a secret before it leaves](#stop-a-secret-before-it-leaves) says to ask
 the agent to read a file rather than attach it.
 
+Two more ways in can appear. `edited config.py` is a snippet of a file that
+changed while the session was open, which Claude Code sends with your next
+prompt. `model output` is what the model wrote, kept on its own line because it
+may repeat a value it was given. `--json` gives the same counts per session,
+and the exit code is `1` when something reached the model, so a script can act
+on it. It counts the types your settings enable.
+
 If you would rather those sessions were not kept on this computer:
 
 ```console
@@ -120,7 +127,9 @@ that:
 shim keys .env
 ```
 
-Tell the agent once, in the project's `CLAUDE.md`:
+`shim keys` comes with the package (`uv tool install --python 3.12 shim`); the
+plugin carries only the hooks. Tell the agent once, in the project's
+`CLAUDE.md`:
 
 ```markdown
 To see which variables a `.env` file defines, run `shim keys <file>`: it lists
