@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import importlib
 import json
 import os
@@ -795,10 +796,18 @@ def test_a_value_too_long_to_be_code_or_a_path_is_still_a_secret() -> None:
     (
         '{"auths": {"registry.example.com": {"auth": "Y2ktYm90OlN5bnRoZXRpYy0wMDAw"}}}',
         '"identitytoken": "c3ludGhldGljLWlkZW50aXR5LXRva2VuLTAwMDA="',
+        '"identitytoken": "synthetic-identity_token.0000-AAAA"',
     ),
 )
 def test_a_docker_login_token_is_a_secret(text: str) -> None:
     assert evaluate(text).counts == (("SECRET", 1),)
+
+
+@pytest.mark.parametrize("value", ("${DOCKER_IDENTITY_TOKEN}", "<your-identity-token>"))
+def test_a_placeholder_identity_token_is_left_alone(value: str) -> None:
+    text = f'"identitytoken": "{value}"'
+
+    assert evaluate(text).redacted_text == text
 
 
 def test_an_email_right_after_a_url_is_found_once_as_email() -> None:
@@ -1015,3 +1024,314 @@ def test_a_connection_string_on_the_overlap_start_keeps_its_password_masked() ->
     assert "Synthetic" not in decision.redacted_text
     assert "pass-7007" not in decision.redacted_text
     assert dict(decision.counts) == {"DB_URI": 1}
+
+
+ENV_TEXT = "APP_ENV=production\nDB_PASSWORD=Synthetic-pass-0000\nOPS=ops@example.com\n"
+STRADDLING = base64.b64encode(
+    b"APP_ENV=production\nAPP_NAME=billing-service\nDB_PASSWORD=Synthetic-pass-0000\n"
+).decode()
+FULL_LINE = base64.b64encode(
+    b"DB_PASSWORD=Synthetic-pass-0000\nAPP_ENV=production-abcde\n"
+).decode()
+
+
+def _wrapped(encoded: str, width: int, separator: str = "\n") -> str:
+    return separator.join(
+        encoded[start : start + width] for start in range(0, len(encoded), width)
+    )
+
+
+@pytest.mark.parametrize("width", (0, 60, 64, 76), ids=("one line", "60", "64", "76"))
+def test_a_secret_sent_as_base64_is_masked_as_a_whole(width: int) -> None:
+    encoded = base64.b64encode(ENV_TEXT.encode()).decode()
+    if width:
+        encoded = _wrapped(encoded, width)
+
+    decision = evaluate(f"$ base64 .env\n{encoded}\n")
+
+    assert decision.redacted_text == "$ base64 .env\n<SECRET_1>\n"
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    (
+        (
+            f"data:\n  .env: |\n    {_wrapped(STRADDLING, 76, chr(10) + '    ')}\n",
+            "data:\n  .env: |\n    <SECRET_1>\n",
+        ),
+        (f"{_wrapped(STRADDLING, 76, '   ' + chr(10))}   \n", "<SECRET_1>   \n"),
+        (f"{_wrapped(STRADDLING, 76, chr(13) + chr(10))}\r\n", "<SECRET_1>\r\n"),
+        (f"{_wrapped(STRADDLING, 76, chr(13))}\r", "<SECRET_1>\r"),
+        (
+            '{"content": "' + _wrapped(STRADDLING, 60, "\\n") + '\\n"}',
+            '{"content": "<SECRET_1>\\n"}',
+        ),
+        (
+            '{"output": "$ base64 .env\\n' + STRADDLING + '\\n"}',
+            '{"output": "$ base64 .env\\n<SECRET_1>\\n"}',
+        ),
+        (
+            f"helm/values.yaml:5:    {STRADDLING[:76]}\n"
+            f"helm/values.yaml:6:    {STRADDLING[76:]}\n",
+            "helm/values.yaml:5:    <SECRET_1>\n",
+        ),
+        (
+            f"     5\t    {STRADDLING[:76]}\n     6\t    {STRADDLING[76:]}\n",
+            "     5\t    <SECRET_1>\n",
+        ),
+        (
+            f"2:envFile: |\n3-    {STRADDLING[:76]}\n4-    {STRADDLING[76:]}\n5-x: 1\n",
+            "2:envFile: |\n3-    <SECRET_1>\n5-x: 1\n",
+        ),
+        (
+            f"helm/values.yaml-3-    {STRADDLING[:76]}\n"
+            f"helm/values.yaml-4-    {STRADDLING[76:]}\n",
+            "helm/values.yaml-3-    <SECRET_1>\n",
+        ),
+        (
+            f"My Project/values.yaml:3:    {STRADDLING[:76]}\n"
+            f"My Project/values.yaml:4:    {STRADDLING[76:]}\n",
+            "My Project/values.yaml:3:    <SECRET_1>\n",
+        ),
+        (f"@@ -0,0 +1 @@\n+{STRADDLING}\n", "@@ -0,0 +1 @@\n+<SECRET_1>\n"),
+        (f"+{STRADDLING[:76]}\n+{STRADDLING[76:]}\n", "+<SECRET_1>\n"),
+        (
+            f"+  envFile: |\n+    {STRADDLING[:76]}\n+    {STRADDLING[76:]}\n",
+            "+  envFile: |\n+    <SECRET_1>\n",
+        ),
+        (f"-    {STRADDLING[:76]}\n-    {STRADDLING[76:]}\n", "-    <SECRET_1>\n"),
+        ('{"row": "id\\t' + STRADDLING + '"}', '{"row": "id\\t<SECRET_1>"}'),
+        (
+            '{"content": "' + _wrapped(STRADDLING, 76, "\\r\\n") + '\\r\\n"}',
+            '{"content": "<SECRET_1>\\r\\n"}',
+        ),
+        (
+            '{"content": "' + _wrapped(STRADDLING, 60, "\\n") + '"}',
+            '{"content": "<SECRET_1>"}',
+        ),
+        (
+            '{"out": "helm/values.yaml:5:    '
+            + STRADDLING[:76]
+            + "\\nhelm/values.yaml:6:    "
+            + STRADDLING[76:]
+            + '\\n"}',
+            '{"out": "helm/values.yaml:5:    <SECRET_1>\\n"}',
+        ),
+    ),
+    ids=(
+        "indented YAML",
+        "trailing spaces",
+        "CRLF",
+        "CR",
+        "JSON-escaped lines",
+        "after a JSON-escaped line",
+        "grep -n",
+        "cat -n",
+        "grep -A",
+        "rg context",
+        "a path with a space",
+        "git diff",
+        "git diff wrapped",
+        "git diff indented",
+        "git diff deleted",
+        "after an escaped tab",
+        "escaped CRLF",
+        "ends at the closing quote",
+        "grep -n in JSON",
+    ),
+)
+def test_a_secret_split_across_wrapped_lines_is_masked(
+    text: str, expected: str
+) -> None:
+    assert evaluate(text).redacted_text == expected
+
+
+@pytest.mark.parametrize(
+    "prefix",
+    (
+        "ENV_FILE_B64=",
+        "export ENV_FILE_B64=",
+        "kubectl create secret generic app --from-literal=env=",
+    ),
+)
+def test_base64_right_after_an_equals_sign_is_read(prefix: str) -> None:
+    assert evaluate(prefix + STRADDLING).redacted_text == prefix + "<SECRET_1>"
+
+
+def test_base64_without_its_padding_is_read() -> None:
+    assert STRADDLING.endswith("==")
+
+    assert evaluate(f"value: {STRADDLING.rstrip('=')}").redacted_text == (
+        "value: <SECRET_1>"
+    )
+
+
+def test_base64_of_text_that_is_not_utf8_is_still_read() -> None:
+    text = "# Türkçe açıklama\nDB_PASSWORD=Synthetic-pass-0000\n".encode("cp1254")
+
+    assert evaluate(f"value: {base64.b64encode(text).decode()}").redacted_text == (
+        "value: <SECRET_1>"
+    )
+
+
+@pytest.mark.parametrize(
+    "after", ("Done.", "config/settings.py:1:import os", "abcd efgh")
+)
+def test_a_full_base64_line_is_not_joined_with_the_line_after_it(after: str) -> None:
+    assert len(FULL_LINE) == 76
+
+    decision = evaluate(f"k8s/env.yaml:7:  data: {FULL_LINE}\n{after}")
+
+    assert decision.redacted_text == f"k8s/env.yaml:7:  data: <SECRET_1>\n{after}"
+
+
+PADDED = base64.b64encode(
+    b"DB_PASSWORD=Synthetic-pass-0000\nAPP_ENV=production-abcd\n"
+).decode()
+TOKEN_BLOCK = base64.b64encode(
+    b"GITHUB_TOKEN=ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8\n"
+).decode()
+CLEAN_BLOCK = base64.b64encode(
+    b"APP_ENV=staging\nAPP_NAME=billing-service\nLOG_LEVEL=info\nREGION=eu-west-1\n"
+).decode()
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    (
+        (f"{PADDED}\n{TOKEN_BLOCK}\n", "<SECRET_1>\n<SECRET_2>\n"),
+        (
+            f"config/prod.env.b64:1:{PADDED}\n"
+            f"config/staging.env.b64:1:{CLEAN_BLOCK[:76]}\n"
+            f"config/staging.env.b64:2:{CLEAN_BLOCK[76:]}\n",
+            f"config/prod.env.b64:1:<SECRET_1>\n"
+            f"config/staging.env.b64:1:{CLEAN_BLOCK[:76]}\n"
+            f"config/staging.env.b64:2:{CLEAN_BLOCK[76:]}\n",
+        ),
+    ),
+    ids=("two blocks", "a grep listing"),
+)
+def test_padding_ends_a_block(text: str, expected: str) -> None:
+    assert len(PADDED) == 76
+    assert PADDED.endswith("=")
+
+    assert evaluate(text).redacted_text == expected
+
+
+LOGIN = "Y2ktYm90OlN5bnRoZXRpYy1yZWdpc3RyeS0wMDAw"
+LOGIN_WITH_NEWLINE = base64.b64encode(b"ci-bot:Synthetic-registry-0000\n").decode()
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    (
+        (
+            f"//registry.example.com/:_auth={LOGIN}\n",
+            "//registry.example.com/:_auth=<SECRET_1>\n",
+        ),
+        (f'_auth="{LOGIN}"\n', '_auth="<SECRET_1>"\n'),
+        (f"_auth='{LOGIN}'\n", "_auth='<SECRET_1>'\n"),
+        (f"export NPM_CONFIG__AUTH={LOGIN}\n", "export NPM_CONFIG__AUTH=<SECRET_1>\n"),
+        (f'{{"auth": "{LOGIN_WITH_NEWLINE}"}}', '{"auth": "<SECRET_1>"}'),
+    ),
+    ids=(
+        "npm",
+        "npm quoted",
+        "npm single quotes",
+        "npm environment",
+        "docker with a newline",
+    ),
+)
+def test_a_login_in_base64_is_a_secret(text: str, expected: str) -> None:
+    assert evaluate(text).redacted_text == expected
+
+
+@pytest.mark.parametrize(
+    "value", ("required", "anonymous", "keycloak", "basicAuth", "anVzdC1hLXRva2Vu")
+)
+def test_an_auth_setting_that_is_not_a_login_is_left_alone(value: str) -> None:
+    text = f'{{"route": "/admin", "auth": "{value}"}}'
+
+    assert evaluate(text).redacted_text == text
+
+
+def test_lines_of_another_width_are_not_joined() -> None:
+    secret = base64.b64encode(ENV_TEXT.encode() + b"x" * 1).decode()
+    noise = base64.b64encode(bytes(range(200, 256)) + bytes(range(16))).decode()
+    assert len(secret) == len(noise) == 96
+
+    decision = evaluate(f"{secret}\n{noise}\nabcd")
+
+    assert decision.redacted_text == f"<SECRET_1>\n{noise}\nabcd"
+
+
+@pytest.mark.parametrize(
+    "config",
+    (
+        '{"auths":{"registry.example.com":{"password":"Synthetic-registry-0000"}}}',
+        '{"auths":{"registry.example.com":'
+        '{"auth":"Y2ktYm90OlN5bnRoZXRpYy1yZWdpc3RyeS0wMDAw"}}}',
+    ),
+    ids=("password", "docker login"),
+)
+def test_a_registry_login_inside_a_kubernetes_secret_is_masked(config: str) -> None:
+    text = f"  .dockerconfigjson: {base64.b64encode(config.encode()).decode()}"
+
+    assert evaluate(text).redacted_text == "  .dockerconfigjson: <SECRET_1>"
+
+
+@pytest.mark.parametrize(
+    "value",
+    (
+        base64.b64encode(b"just a sentence with nothing secret in it").decode(),
+        base64.b64encode(bytes(range(48))).decode(),
+        base64.b64encode(bytes(range(128, 256))).decode(),
+        "AbstractSingletonProxyFactoryBeanImplementation",
+    ),
+    ids=("plain text", "control characters", "not UTF-8", "identifier"),
+)
+def test_base64_that_holds_no_secret_is_left_alone(value: str) -> None:
+    assert evaluate(f"value: {value}").counts == ()
+
+
+def test_a_long_base64_blob_is_scanned_for_emails_quickly() -> None:
+    blob = base64.b64encode(random.Random(7).randbytes(74_997)).decode()
+
+    started = time.perf_counter()
+    evaluate(blob, ("EMAIL",))
+
+    assert time.perf_counter() - started < 1
+
+
+def test_json_escaped_base64_is_scanned_in_linear_time() -> None:
+    encoded = base64.b64encode(random.Random(1).randbytes(225_000)).decode()
+    text = _wrapped(encoded, 60, "\\n")[:297_000]
+
+    started = time.perf_counter()
+    evaluate(text, ("SECRET",))
+
+    assert time.perf_counter() - started < 1
+
+
+def test_a_diff_that_adds_a_long_base64_file_is_scanned_quickly() -> None:
+    encoded = base64.b64encode(random.Random(3).randbytes(72_000)).decode()
+    lines = [f"+{encoded[start : start + 64]}" for start in range(0, len(encoded), 64)]
+    text = "@@ -0,0 +1,1500 @@\n" + "\n".join(lines) + "\n"
+
+    started = time.perf_counter()
+    evaluate(text, ("SECRET",))
+
+    assert time.perf_counter() - started < 1
+
+
+@pytest.mark.parametrize("prefix", ("data: ", "data:  ", "data:   ", "data:    "))
+def test_a_long_base64_block_across_a_cut_is_masked_whole(prefix: str) -> None:
+    env = "".join(
+        f"SERVICE_{n:05d}_PASSWORD=Synthetic-pass-{n:05d}\n" for n in range(2_500)
+    )
+    block = base64.b64encode(env.encode()).decode()
+
+    decision = evaluate(f"{prefix}{block}\n")
+
+    assert len(decision.redacted_text) == len(prefix) + len("<SECRET_1>\n")
+    assert decision.redacted_text == f"{prefix}<SECRET_1>\n"
