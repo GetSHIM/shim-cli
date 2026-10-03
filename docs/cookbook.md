@@ -9,6 +9,7 @@ Everything here runs locally. Nothing in this document sends anything anywhere.
 - [Before you install: what did my agent already send?](#before-you-install-what-did-my-agent-already-send)
 - [Start here: make it visible](#start-here-make-it-visible)
 - [Stop a secret before it leaves](#stop-a-secret-before-it-leaves)
+- [Let the agent see the names, not the values](#let-the-agent-see-the-names-not-the-values)
 - [Teach it your project's own secrets](#teach-it-your-projects-own-secrets)
 - [Quieten a noisy tool](#quieten-a-noisy-tool)
 - [Keep the last four digits](#keep-the-last-four-digits)
@@ -108,6 +109,33 @@ and explain the variables"): a tool result is masked before the model sees it.
 The three modes are `observe` (count it, say nothing), `warn` (say it, change
 nothing) and `enforce` (mask or refuse). They apply per direction, per event or
 per tool, most specific first.
+
+## Let the agent see the names, not the values
+
+Most of the time an agent opens a `.env`, it wants to know which variables
+exist and whether they are set, not what they hold. `shim keys` answers exactly
+that:
+
+```console
+shim keys .env
+```
+
+Tell the agent once, in the project's `CLAUDE.md`:
+
+```markdown
+To see which variables a `.env` file defines, run `shim keys <file>`: it lists
+the names and never the values. Do not open `.env` files.
+```
+
+and let it run the command without asking, in `.claude/settings.json`:
+
+```json
+{ "permissions": { "allow": ["Bash(shim keys:*)"] } }
+```
+
+With that line alone, and `Read` also allowed, Claude Code 2.1.286 answered
+"which services have keys in .env?" by running `shim keys .env`, named AWS,
+Slack, Stripe, the ledger API and the database, and said it had seen no value.
 
 ## Teach it your project's own secrets
 

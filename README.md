@@ -336,6 +336,11 @@ printf '%s' 'Contact me at alice@example.com' | shim redact
 Both commands read standard input. Do not pass real prompts as command-line
 arguments, where they may be recorded in shell history or process listings.
 
+`shim keys .env` lists the variables a `.env` or INI file defines, whether each
+is set and what shim would call its value, and never the value; the
+[cookbook](https://github.com/GetSHIM/shim-cli/blob/main/docs/cookbook.md#let-the-agent-see-the-names-not-the-values)
+shows how to point an agent at it instead of `cat`.
+
 > [!IMPORTANT]
 > **With the default configuration, shim-cli does not prevent a secret you
 > type into a prompt from reaching the model. It tells you afterwards.**
