@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[3]
 COMMAND = (sys.executable, "-I", "-B", "-m", "shim_cli.hook", "claude")
 GENERIC_BLOCK = (
@@ -108,6 +110,22 @@ def test_claude_code_runner_blocks_with_a_private_redaction(tmp_path: Path) -> N
 def test_claude_code_runner_fails_closed_on_invalid_input(tmp_path: Path) -> None:
     result = _run(b'{"hook_event_name":"UserPromptSubmit"}', tmp_path)
     assert (result.returncode, result.stdout, result.stderr) == (0, GENERIC_BLOCK, b"")
+
+
+def test_a_long_prompt_inspected_only_in_part_is_withheld(tmp_path: Path) -> None:
+    prompt = "\ufdfa" * 12_000 + "x" * 88_100 + "\nDB_PASSWORD=Synthetic-pass-0000"
+
+    result = _run(_payload(prompt), tmp_path)
+
+    assert (result.returncode, result.stdout, result.stderr) == (0, GENERIC_BLOCK, b"")
+
+
+def test_a_long_korean_prompt_is_read_not_withheld(tmp_path: Path) -> None:
+    sentence = "한국어 문장을 길게 붙여 넣습니다. 각 줄은 평범한 설명입니다.\n"
+
+    result = _run(_payload((sentence * 3_000)[:110_000]), tmp_path)
+
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"", b"")
 
 
 def test_claude_code_runner_does_not_block_a_truncated_tool_event(
@@ -322,3 +340,252 @@ def test_a_failed_command_whose_error_is_not_text_is_reported_uninspected(
         b'{"systemMessage":"shim: this tool event could not be inspected and was '
         b'not modified."}'
     )
+
+
+ATTACHED = (
+    "Attached files reach the model unmasked; to have them masked, ask the "
+    "agent to read the file instead."
+)
+FIXTURE_ENV = "API_TOKEN=0123456789abcdef-synthetic\nSUPPORT_EMAIL=ops@example.com\n"
+
+
+def _attaching(prompt: str, cwd: Path) -> bytes:
+    return json.dumps(
+        {
+            "session_id": "attachments",
+            "cwd": str(cwd),
+            "permission_mode": "default",
+            "hook_event_name": "UserPromptSubmit",
+            "prompt": prompt,
+        },
+        separators=(",", ":"),
+    ).encode()
+
+
+def _workspace(tmp_path: Path, files: dict) -> Path:
+    work = tmp_path / "work"
+    work.mkdir()
+    for name, content in files.items():
+        (work / name).write_text(content, encoding="utf-8")
+    return work
+
+
+def _mode(tmp_path: Path, mode: str) -> dict:
+    settings = tmp_path / f"{mode}.toml"
+    settings.write_text(f'[mode]\nuser-prompt = "{mode}"\n', encoding="utf-8")
+    return {"SHIM_CONFIG": str(settings)}
+
+
+def test_an_attached_file_with_findings_is_reported_before_it_is_sent(
+    tmp_path: Path,
+) -> None:
+    work = _workspace(tmp_path, {"fixture.env": FIXTURE_ENV})
+
+    result = _run(
+        _attaching("@fixture.env explain", work), tmp_path, _isolated(tmp_path)
+    )
+
+    assert (result.returncode, result.stderr) == (0, b"")
+    assert json.loads(result.stdout) == {
+        "systemMessage": (f"shim: @fixture.env holds SECRET (1), EMAIL (1). {ATTACHED}")
+    }
+
+
+def test_the_prompt_sentence_comes_before_the_attachment_sentence(
+    tmp_path: Path,
+) -> None:
+    work = _workspace(tmp_path, {"fixture.env": FIXTURE_ENV})
+
+    result = _run(
+        _attaching("mail alice@example.com about @fixture.env", work),
+        tmp_path,
+        _isolated(tmp_path),
+    )
+
+    assert json.loads(result.stdout)["systemMessage"] == (
+        "shim: found EMAIL (1) in your prompt. Not modified. "
+        f"shim: @fixture.env holds SECRET (1), EMAIL (1). {ATTACHED}"
+    )
+
+
+def test_enforce_stops_a_prompt_whose_attachment_holds_findings(
+    tmp_path: Path,
+) -> None:
+    work = _workspace(tmp_path, {"fixture.env": FIXTURE_ENV})
+
+    result = _run(
+        _attaching("@fixture.env explain", work), tmp_path, _mode(tmp_path, "enforce")
+    )
+
+    assert json.loads(result.stdout) == {
+        "decision": "block",
+        "reason": (
+            "shim blocked this prompt: @fixture.env holds SECRET (1), EMAIL (1). "
+            f"{ATTACHED}"
+        ),
+        "suppressOriginalPrompt": True,
+    }
+    assert not list(tmp_path.glob("shim-redacted-*"))
+
+
+def test_enforce_with_findings_in_both_writes_the_redacted_prompt(
+    tmp_path: Path,
+) -> None:
+    work = _workspace(tmp_path, {"fixture.env": FIXTURE_ENV})
+
+    result = _run(
+        _attaching("mail alice@example.com about @fixture.env", work),
+        tmp_path,
+        _mode(tmp_path, "enforce"),
+    )
+    reason = json.loads(result.stdout)["reason"]
+    path = Path(reason.split(READ_INSTRUCTION, 1)[1].split("\n", 1)[0])
+
+    assert reason.startswith("shim blocked this prompt: EMAIL (1).\n")
+    assert reason.endswith(f"\n@fixture.env holds SECRET (1), EMAIL (1). {ATTACHED}")
+    assert path.read_text() == "mail <EMAIL_1> about @fixture.env"
+
+
+@pytest.mark.parametrize("mode", ("warn", "observe"))
+def test_a_clean_or_observed_attachment_says_nothing(mode: str, tmp_path: Path) -> None:
+    files = {"clean.txt": "nothing here\n", "fixture.env": FIXTURE_ENV}
+    work = _workspace(tmp_path, files)
+    prompt = "@clean.txt" if mode == "warn" else "@fixture.env"
+
+    result = _run(_attaching(prompt, work), tmp_path, _mode(tmp_path, mode))
+
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"", b"")
+
+
+def test_past_three_files_the_sentence_counts_the_rest(tmp_path: Path) -> None:
+    token = "API_TOKEN=0123456789abcdef-synthetic\n"
+    work = _workspace(tmp_path, {f"{name}.env": token for name in "abcd"})
+
+    result = _run(
+        _attaching("@a.env @b.env @c.env @d.env", work), tmp_path, _isolated(tmp_path)
+    )
+
+    assert json.loads(result.stdout)["systemMessage"] == (
+        "shim: @a.env holds SECRET (1); @b.env holds SECRET (1); "
+        f"@c.env holds SECRET (1), and 1 more. {ATTACHED}"
+    )
+
+
+def _not_inspected(name: str) -> dict:
+    return {
+        "systemMessage": (
+            f"shim: @{name} was not inspected. It reaches the model as it is."
+        )
+    }
+
+
+@pytest.mark.parametrize("mode", ("warn", "enforce"))
+def test_an_attachment_past_the_limits_is_reported_not_blocked(
+    mode: str, tmp_path: Path
+) -> None:
+    work = _workspace(tmp_path, {f"f{index}.txt": "clean\n" for index in range(9)})
+    prompt = " ".join(f"@f{index}.txt" for index in range(9))
+
+    result = _run(_attaching(prompt, work), tmp_path, _mode(tmp_path, mode))
+
+    assert json.loads(result.stdout) == _not_inspected("f8.txt")
+
+
+@pytest.mark.parametrize("mode", ("warn", "enforce"))
+def test_a_file_the_client_does_not_attach_says_nothing(
+    mode: str, tmp_path: Path
+) -> None:
+    work = _workspace(tmp_path, {"big.log": FIXTURE_ENV + "a" * 262_144})
+
+    result = _run(_attaching("@big.log", work), tmp_path, _mode(tmp_path, mode))
+
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"", b"")
+
+
+@pytest.mark.parametrize("mode", ("warn", "observe", "enforce"))
+def test_an_attachment_the_detector_cannot_analyse_is_reported_not_withheld(
+    mode: str, tmp_path: Path
+) -> None:
+    query = "SELECT * FROM users WHERE name LIKE '%admin%';\n"
+    work = _workspace(tmp_path, {"q.sql": query})
+
+    result = _run(_attaching("@q.sql explain", work), tmp_path, _mode(tmp_path, mode))
+
+    assert (result.returncode, result.stderr) == (0, b"")
+    if mode == "observe":
+        assert result.stdout == b""
+    else:
+        assert json.loads(result.stdout) == _not_inspected("q.sql")
+
+
+def test_an_attachment_scanned_only_in_part_is_reported_as_not_inspected(
+    tmp_path: Path,
+) -> None:
+    dump = "WHERE name LIKE '%admin%'\n" + ("x" * 99 + "\n") * 1_500
+    work = _workspace(tmp_path, {"dump.sql": dump})
+
+    result = _run(_attaching("@dump.sql", work), tmp_path, _isolated(tmp_path))
+
+    assert result.stdout.startswith(b"{")
+    assert json.loads(result.stdout) == _not_inspected("dump.sql")
+
+
+def test_findings_in_the_scanned_part_of_an_attachment_are_still_reported(
+    tmp_path: Path,
+) -> None:
+    dump = "WHERE name LIKE '%admin%'\n" + ("x" * 99 + "\n") * 1_500 + FIXTURE_ENV
+    work = _workspace(tmp_path, {"dump.sql": dump})
+
+    result = _run(_attaching("@dump.sql", work), tmp_path, _isolated(tmp_path))
+
+    assert json.loads(result.stdout) == {
+        "systemMessage": f"shim: @dump.sql holds SECRET (1), EMAIL (1). {ATTACHED}"
+    }
+
+
+def test_attachments_past_the_time_budget_are_reported_not_scanned(
+    tmp_path: Path,
+) -> None:
+    work = _workspace(tmp_path, {"fixture.env": FIXTURE_ENV})
+    code = (
+        "import sys\n"
+        "from shim_cli import hook as runner\n"
+        "sys.argv.append('claude')\n"
+        "runner.ATTACHMENT_SECONDS = 0\n"
+        "runner.main()\n"
+    )
+    environment = {**os.environ, "TMPDIR": str(tmp_path), **_isolated(tmp_path)}
+
+    result = subprocess.run(
+        (sys.executable, "-I", "-B", "-c", code),
+        input=_attaching("@fixture.env", work),
+        capture_output=True,
+        cwd=ROOT,
+        env=environment,
+        check=False,
+        timeout=60,
+    )
+
+    assert (result.returncode, result.stderr) == (0, b"")
+    assert json.loads(result.stdout) == _not_inspected("fixture.env")
+
+
+def test_an_attachment_is_recorded_by_name_without_its_values(
+    tmp_path: Path,
+) -> None:
+    work = _workspace(tmp_path, {"fixture.env": FIXTURE_ENV})
+
+    _run(_attaching("@fixture.env explain", work), tmp_path, _isolated(tmp_path))
+    lines = [
+        json.loads(line)
+        for path in tmp_path.rglob("*.jsonl")
+        for line in path.read_text().splitlines()
+    ]
+    spooled = "\n".join(path.read_text() for path in tmp_path.rglob("*.jsonl"))
+
+    attachment = [line for line in lines if line["target"] == "@fixture.env"]
+    assert [(line["action"], line["entities"]) for line in attachment] == [
+        ("report", {"EMAIL": 1, "SECRET": 1})
+    ]
+    assert "0123456789abcdef" not in spooled
+    assert "ops@example.com" not in spooled

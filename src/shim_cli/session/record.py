@@ -4,6 +4,8 @@ from dataclasses import dataclass
 
 NOT_INSPECTED = "not inspected"
 MAX_DISPLAY_LABEL_CHARS = 120
+MAX_TARGET_CHARS = 120
+MAX_TARGET_SCAN_CHARS = 512
 UNKNOWN_TOOL_LABEL = "unknown tool"
 UNSUPPORTED_EVENT_LABEL = "unsupported tool event"
 
@@ -16,6 +18,18 @@ def display_label(text: str, fallback: str) -> str:
     ):
         return fallback
     return text
+
+
+def scrubbed_target(value: str, evaluate) -> str:
+    if not value:
+        return ""
+    scanned = value[-MAX_TARGET_SCAN_CHARS:]
+    decision = evaluate(scanned)
+    shown = decision.redacted_text if decision.counts else scanned
+    text = "".join(character for character in shown if character.isprintable())
+    if len(text) <= MAX_TARGET_CHARS:
+        return text
+    return "…" + text[-MAX_TARGET_CHARS:]
 
 
 @dataclass(frozen=True)

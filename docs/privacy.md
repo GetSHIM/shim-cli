@@ -25,7 +25,9 @@ Three things follow, and all three are limits rather than features:
 - `Bash` commands and `Write`/`Edit` content are **never rewritten**. Editing a
   command changes what runs, and editing a write payload puts a placeholder
   into a real file. Both are detected and can be warned about or denied.
-- Files referenced with `@` bypass hooks entirely, so nothing here sees them.
+- Files attached with `@` are inlined by Claude Code after the prompt hook
+  runs, so they cannot be masked. The prompt hook reads them first and warns
+  before they are sent, or stops the prompt under `enforce`.
 
 A formatted phone number (`+90 532 123 45 67`, `(555) 123-4567`,
 `0212 555 12 34`) is masked. A bare run of digits is a phone number only when it
@@ -217,6 +219,24 @@ as with a built-in type, and the placeholder is `<CUSTOM_n>` so the name does
 not reach the model either. Names are bounded to 32 characters and there are at
 most 32 of them.
 
+### Files you attach with `@`
+
+In Claude Code, `@path` in a prompt attaches that file. The client inlines it
+while it builds the request, after the prompt hook has run, so no hook can
+change it. The prompt hook therefore reads the files a prompt names itself, on
+this machine and the way Claude Code resolves them: relative to the session's
+folder, with `~` expanded, `@"a name with spaces"` quoted, and `#L10-20`
+meaning only those lines. It reads regular text files only: a folder, a device
+or a binary file is skipped, and so is a file over 256 KiB, which Claude Code
+2.1.286 does not attach. Text that is not valid UTF-8 is read as the client
+reads it, with the invalid bytes replaced. At most 8 files and 1 MB in total are
+read per prompt. A file past that, a file still unread 15 seconds into the hook,
+or one the detector cannot analyse is reported as not inspected, and it never
+withholds the prompt. What it keeps is
+what it keeps for a prompt: entity names, counts and the scrubbed name of the
+file. The file's text is scanned in memory and stored nowhere, and shim still
+never reads the session transcript (`transcript_path`).
+
 ### What the model wrote back
 
 At `Stop`, Claude Code hands the hook the final assistant text of the turn.
@@ -227,7 +247,9 @@ observe, and a settings file that asks it to warn or enforce is refused. Text
 beyond the detector's 100,000-character limit is not scanned and the record
 says `truncated` rather than reporting a short count as a whole one. Only the
 turn's last text block reaches the hook, so anything the model said before a
-tool call in the same turn is not counted.
+tool call in the same turn is not counted. The summary's `model` line calls
+these values written by the model, not invented: it may repeat a value it was
+given, from a file you attached for example.
 
 ### When shim cannot inspect something
 
@@ -237,7 +259,10 @@ asymmetry is deliberate.
 
 On a **prompt**, shim fails closed. The prompt is withheld and the message
 names `shim doctor`, because the usual cause is a settings file that will not
-parse, and that blocks every prompt of the session until it is fixed.
+parse, and that blocks every prompt of the session until it is fixed. A
+prompt longer than 100,000 characters is scanned in pieces, and one piece that
+cannot be scanned withholds the whole prompt. A file attached with `@` is the
+exception: it is reported as not inspected, and the prompt goes through.
 
 On a **tool event**, uninspectable content passes through unchanged. Validated
 redactions in independently rewritable sibling fields are preserved according
@@ -263,11 +288,17 @@ never the output or the command.
 The detector works on at most 100,000 characters at a time. A longer field is
 cut at the last newline before each boundary and each piece scanned separately,
 with placeholder numbering continuing across them, so a 400 KB file read comes
-back masked rather than passing through whole. The pieces do not overlap, so a
-value written across a line break — a PEM block, a wrapped key — can fall in a
-seam and go unreported. Values that live on one line, which is every type shim
-detects, are unaffected. If one piece fails, the others are still masked and
-the summary counts the event as partially inspected.
+back masked rather than passing through whole. A single line longer than the
+limit is cut where it must be, and the next piece starts 4,096 characters
+earlier, so a value on one line up to that length is read whole wherever the
+cut falls. A value written across a line break — a PEM block, a wrapped key —
+can still fall in a seam and go unreported. A piece that grows past the
+detector's limit when it is normalized, as Korean text does, is cut in half and
+scanned again, down to pieces of 25,000 characters. If one piece fails, the
+others are still masked and the summary counts the event as partially
+inspected. When the hook's own 25-second deadline runs out in the middle of a
+field, that field and every later one pass through unmasked, and the summary
+says the event was only partly inspected.
 
 A field so large that the whole event exceeds shim's 1 MB input bound is not
 scanned at all. It passes through unchanged and is now counted in the session
@@ -332,6 +363,10 @@ The host client receives the raw prompt. Matching hooks can start concurrently,
 so shim cannot stop another matching hook from receiving it. Clients,
 operating-system tools, plugins, and providers can retain logs, transcripts,
 telemetry, caches, or history independently of shim.
+
+Under `enforce`, Claude Code 2.1.286 still wrote a blocked prompt's text to its
+own transcript and gave the session a title derived from it; the content of a
+file attached to that prompt was not written.
 
 Copilot's `userPromptTransformed` replacement changes what is sent to the model
 and stored in session history, but the original prompt can remain visible in

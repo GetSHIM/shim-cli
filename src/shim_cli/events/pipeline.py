@@ -18,6 +18,7 @@ from shim_cli.session.record import (
     UNKNOWN_TOOL_LABEL,
     Record,
     display_label,
+    scrubbed_target,
 )
 
 from .payload import inspect
@@ -88,23 +89,6 @@ def _summary(counts) -> str:
 INCOMPLETE_MESSAGE = (
     "shim: inspection incomplete; uninspected content was not modified."
 )
-MAX_TARGET_CHARS = 120
-MAX_TARGET_SCAN_CHARS = 512
-
-
-def _target(value: str, evaluate) -> str:
-    if not value:
-        return ""
-    scanned = value[-MAX_TARGET_SCAN_CHARS:]
-    decision = evaluate(scanned)
-    text = _printable(decision.redacted_text if decision.counts else scanned)
-    if len(text) <= MAX_TARGET_CHARS:
-        return text
-    return "…" + text[-MAX_TARGET_CHARS:]
-
-
-def _printable(text: str) -> str:
-    return "".join(character for character in text if character.isprintable())
 
 
 def _size(value) -> int:
@@ -149,7 +133,7 @@ def process(
 
     direction = direction_for(entry.event, tool)
     mode = mode_for(direction, tool)
-    target = _target(event.target, evaluate)
+    target = scrubbed_target(event.target, evaluate)
     tool_label = display_label(tool, UNKNOWN_TOOL_LABEL)
     if tool_label != UNKNOWN_TOOL_LABEL:
         decision = evaluate(tool_label)

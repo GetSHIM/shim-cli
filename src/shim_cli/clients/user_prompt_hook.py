@@ -15,6 +15,11 @@ _ERROR_REASON = (
     "shim could not inspect this prompt, so it was withheld. "
     "Run `shim doctor {client}` for the reason."
 )
+_ATTACHED = (
+    "Attached files reach the model unmasked; to have them masked, ask the "
+    "agent to read the file instead."
+)
+_SHOWN_FILES = 3
 
 
 def _object(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -76,7 +81,32 @@ def _json_block(reason: str, suppress_original_prompt: bool) -> bytes:
     return output
 
 
-def block_reason(decision: GuardDecision, suggestion_path: str | None) -> str:
+def _listed(counts) -> str:
+    return ", ".join(f"{category} ({count})" for category, count in counts)
+
+
+def held_sentence(held: list[tuple[str, tuple]]) -> str:
+    shown = "; ".join(
+        f"@{name} holds {_listed(counts)}" for name, counts in held[:_SHOWN_FILES]
+    )
+    more = len(held) - _SHOWN_FILES
+    return f"{shown}{f', and {more} more' if more > 0 else ''}. {_ATTACHED}"
+
+
+def unread_sentence(names: list[str]) -> str:
+    shown = ", ".join(f"@{name}" for name in names[:_SHOWN_FILES])
+    if len(names) > _SHOWN_FILES:
+        shown += f" and {len(names) - _SHOWN_FILES} more"
+    if len(names) == 1:
+        return f"shim: {shown} was not inspected. It reaches the model as it is."
+    return f"shim: {shown} were not inspected. They reach the model as they are."
+
+
+def block_reason(
+    decision: GuardDecision, suggestion_path: str | None, held: tuple = ()
+) -> str:
+    if not decision.blocked:
+        return f"shim blocked this prompt: {held_sentence(list(held))}"
     if not isinstance(suggestion_path, str) or not suggestion_path:
         raise ValueError("suggestion path is invalid")
     path = Path(suggestion_path)
@@ -86,12 +116,12 @@ def block_reason(decision: GuardDecision, suggestion_path: str | None) -> str:
         or not suggestion_path.isprintable()
     ):
         raise ValueError("suggestion path is invalid")
-    counts = ", ".join(f"{category} ({count})" for category, count in decision.counts)
-    return (
-        f"shim blocked this prompt: {counts}.\n"
+    reason = (
+        f"shim blocked this prompt: {_listed(decision.counts)}.\n"
         "Copy and paste this as your next prompt:\n"
         f"Read this file and use its contents as my prompt: {suggestion_path}"
     )
+    return f"{reason}\n{held_sentence(list(held))}" if held else reason
 
 
 def block_output(
@@ -99,19 +129,28 @@ def block_output(
     suggestion_path: str | None,
     *,
     suppress_original_prompt: bool = False,
+    held: tuple = (),
 ) -> bytes:
-    if not decision.blocked:
+    if not decision.blocked and not held:
         return b""
     return _json_block(
-        block_reason(decision, suggestion_path), suppress_original_prompt
+        block_reason(decision, suggestion_path, held), suppress_original_prompt
     )
 
 
-def warn_output(decision: GuardDecision) -> bytes:
-    if not decision.blocked:
+def warn_output(decision: GuardDecision, held: tuple = (), unread: tuple = ()) -> bytes:
+    parts = []
+    if decision.blocked:
+        parts.append(
+            f"shim: found {_listed(decision.counts)} in your prompt. Not modified."
+        )
+    if held:
+        parts.append(f"shim: {held_sentence(list(held))}")
+    if unread:
+        parts.append(unread_sentence(list(unread)))
+    if not parts:
         return b""
-    counts = ", ".join(f"{category} ({count})" for category, count in decision.counts)
-    document = {"systemMessage": f"shim: found {counts} in your prompt. Not modified."}
+    document = {"systemMessage": " ".join(parts)}
     output = json.dumps(document, ensure_ascii=False, separators=(",", ":")).encode()
     if len(output) > MAX_OUTPUT_BYTES:
         raise ValueError("warn output exceeds 4,096 bytes")

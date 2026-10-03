@@ -10,7 +10,7 @@ SECTION_WORDS = {
 }
 BESIDES = ("system", "tools", OTHER)
 KIND_WORDS = {"text": "model text", "thinking": "thinking"}
-NOT_LEAKS = "model-generated content is counted here, not leaks"
+NOT_LEAKS = "written by the model; it may repeat values it was given"
 
 PRICES = (
     ("claude-opus-4", (15.0, 75.0, 18.75, 1.5)),

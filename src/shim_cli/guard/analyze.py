@@ -4,7 +4,6 @@ import bisect
 import contextlib
 import signal
 import threading
-import time
 from collections.abc import Iterable, Iterator
 
 from .entities import ENTITY_TYPES, normalize_entities
@@ -29,33 +28,34 @@ _PRIORITY = {
 }
 
 
+class _AnalysisTimeout(TimeoutError):
+    pass
+
+
 @contextlib.contextmanager
 def _deadline() -> Iterator[None]:
     if threading.current_thread() is not threading.main_thread():
         yield
         return
+    previous_delay, previous_interval = signal.getitimer(signal.ITIMER_REAL)
+    outer = 0 < previous_delay <= ANALYSIS_DEADLINE_SECONDS
+    delay = previous_delay if outer else ANALYSIS_DEADLINE_SECONDS
 
     def expire(_signal_number: int, _frame: object) -> None:
-        raise TimeoutError("shim analysis deadline exceeded")
+        if outer:
+            raise TimeoutError("shim deadline exceeded")
+        raise _AnalysisTimeout("shim analysis deadline exceeded")
 
     previous_handler = signal.signal(signal.SIGALRM, expire)
-    previous_delay, previous_interval = signal.getitimer(signal.ITIMER_REAL)
-    delay = (
-        min(ANALYSIS_DEADLINE_SECONDS, previous_delay)
-        if previous_delay > 0
-        else ANALYSIS_DEADLINE_SECONDS
-    )
-    started = time.monotonic()
     signal.setitimer(signal.ITIMER_REAL, delay)
     try:
         yield
     finally:
-        signal.setitimer(signal.ITIMER_REAL, 0)
+        left = signal.setitimer(signal.ITIMER_REAL, 0)[0]
         signal.signal(signal.SIGALRM, previous_handler)
-        if previous_delay > 0:
-            remaining = previous_delay - (time.monotonic() - started)
-            if remaining > 0:
-                signal.setitimer(signal.ITIMER_REAL, remaining, previous_interval)
+        remaining = previous_delay - delay + left
+        if remaining > 0:
+            signal.setitimer(signal.ITIMER_REAL, remaining, previous_interval)
 
 
 def _validated(items: Iterable[Match], text_length: int) -> list[Finding]:
@@ -198,9 +198,9 @@ def analyze_counting(
         normalized_findings = _resolve_overlaps(
             _validated(claimed, len(normalized.text))
         )
-    except TimeoutError as error:
+    except _AnalysisTimeout as error:
         raise ValueError("Guard analysis exceeded its runtime limit.") from error
-    except ValueError:
+    except (TimeoutError, ValueError):
         raise
     except Exception as error:
         raise ValueError("Guard analysis failed safely.") from error

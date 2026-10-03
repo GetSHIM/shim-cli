@@ -162,7 +162,7 @@ def test_the_model_s_own_reply_is_counted_at_stop() -> None:
 
     message = document["systemMessage"]
     assert "model     1 EMAIL, 1 IBAN in its replies" in message
-    assert "(model-generated content, not leaks)" in message
+    assert "(written by the model; it may repeat values it was given)" in message
     assert "TR330006100519786457841326" not in message
     assert "alice@example.com" not in message
 
