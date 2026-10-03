@@ -85,9 +85,7 @@ def pre_tool_use(
     if action == REPORT:
         return _dump({"systemMessage": message})
     if action == MASK:
-        output = _specific(
-            "PreToolUse", permissionDecision="allow", updatedInput=payload
-        )
+        output = _specific("PreToolUse", updatedInput=payload)
         if message.endswith(INCOMPLETE_MESSAGE):
             output["systemMessage"] = message
         return _dump(output)
