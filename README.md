@@ -737,9 +737,10 @@ leaves
 reinstalling later finds your entity choices and custom patterns still there.
 
 A few files can outlast the package. `shim ledger purge` leaves the empty
-ledger folder, `~/.local/state/shim` (or `$XDG_STATE_HOME/shim`). Codex and
-GitHub Copilot CLI send no session-end event, so their session records and any
-copies of withheld prompts stay in your temporary folder until the operating
+ledger folder, `~/.local/state/shim` (or `$XDG_STATE_HOME/shim`). Codex,
+GitHub Copilot CLI and VS Code send no session-end event, so their session
+records and any copies of withheld prompts stay in your temporary folder until
+the operating
 system clears it. To remove them now:
 
 ```console
@@ -757,6 +758,7 @@ In a script, `shim ledger purge --yes` skips the question.
 - [Architecture](https://github.com/GetSHIM/shim-cli/blob/main/docs/architecture.md)
 - [Compatibility](https://github.com/GetSHIM/shim-cli/blob/main/docs/compatibility.md)
 - [Privacy](https://github.com/GetSHIM/shim-cli/blob/main/docs/privacy.md)
+- [1.1.1 release notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/1.1.1.md)
 - [1.1.0 release notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/1.1.0.md)
 - [1.0.3 release notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/1.0.3.md)
 - [1.0.2 release notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/1.0.2.md)

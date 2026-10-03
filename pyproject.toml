@@ -1,6 +1,6 @@
 [project]
 name = "shim"
-version = "1.1.0"
+version = "1.1.1"
 description = "Local traffic visibility and privacy controls for coding agents."
 readme = "README.md"
 requires-python = ">=3.10"

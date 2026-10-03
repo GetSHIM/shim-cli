@@ -467,7 +467,8 @@ shim ledger purge
 Revert removes only shim's own hook groups and keeps every other key and hook,
 including hooks you added, but it rewrites the file as 2-space JSON: a
 hand-formatted file comes back reformatted, one already in Claude Code's own
-2-space format comes back byte-identical, and a settings file shim itself
+2-space format, ending in a newline, comes back byte-identical, and a settings
+file shim itself
 created is left as `{}`. `shim ledger purge` asks before it deletes; `--yes`
 skips the question.
 

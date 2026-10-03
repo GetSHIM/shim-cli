@@ -23,8 +23,8 @@ Four things follow, and all four are limits rather than features:
 - Masking an outbound tool argument is **egress control**, not model
   protection. The model produced that argument, so it has already seen the
   value; masking stops it leaving the machine. It does not approve the call:
-  Claude Code's permission rules still decide whether it runs, and a
-  permission prompt shows the masked arguments.
+  Claude Code's permission rules still decide whether it runs, and they see
+  the masked arguments.
 - `Bash` commands and `Write`/`Edit` content are **never rewritten**. Editing a
   command changes what runs, and editing a write payload puts a placeholder
   into a real file. Both are detected and can be warned about or denied.

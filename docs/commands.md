@@ -29,8 +29,9 @@ a file (`install`, `revert`, `config`, `ledger purge`). Without it they ask
 first, and a `no`, or no terminal to answer from, changes nothing and exits `1`.
 `config` shows the new settings before it asks; `install` asks without showing
 the change, so run `shim install <client> --dry-run` first to see the target
-file and the exact fragment. With `--json` nothing is asked: `config` and
-`ledger purge` refuse with exit `2` unless you pass `--yes`. `audit --purge`
+file and the exact fragment. With `--json` nothing is asked: `config`, and
+`ledger purge` when something is retained, refuse with exit `2` unless you pass
+`--yes`. `audit --purge`
 has no `--yes`: it always asks you to type `delete N`.
 
 **`--help`** works on every command, and `shim help` is the same as
@@ -189,9 +190,11 @@ fully:
   another user`, and no command. The fix is `chmod 700 ~/.config/shim && chmod
   600 ~/.config/shim/config.toml`; `shim config --reset --yes` does not repair
   permissions.
-- `FAIL Codex hook support is not enabled.` means Codex's own `config.toml`
-  (in `~/.codex`, or `$CODEX_HOME`) turns hooks off. Set `hooks = true` under
-  `[features]`, or delete that line: hooks are on by default.
+- `FAIL Codex hook support is not enabled.` comes from `codex features list`,
+  and usually means Codex's own `config.toml` (in `~/.codex`, or
+  `$CODEX_HOME`) turns hooks off. Set `hooks = true` under `[features]`, or
+  delete that line: hooks are on by default. The same line appears when
+  `codex features list` itself fails.
 - A client settings file that does not parse, such as a `settings.json` with a
   trailing comma, gives `FAIL Claude Code hook configuration needs manual
   review.` and names neither the file nor the error. Fix the JSON by hand;
@@ -207,8 +210,9 @@ file, which belongs to shim alone.
 shim revert claude --yes
 ```
 
-The file is written back as 2-space JSON: one already in Claude Code's own
-2-space format comes back byte for byte, a hand-formatted one comes back with
+The file is written back as 2-space JSON ending in a newline: one already in
+Claude Code's own format, which ends that way, comes back byte for byte, a
+hand-formatted one comes back with
 the same content in that layout, and a settings file shim itself created is
 left as `{}`.
 
@@ -281,7 +285,8 @@ timestamps — never the values that were found.
 ### `shim ledger purge`
 
 Deletes the retained records. They also age out on their own after 30 days.
-It asks first; `--yes` skips the question, and `--json` needs it.
+It asks first; `--yes` skips the question, and `--json` needs it when
+something is retained.
 
 ### `shim watch -- <client>`
 
@@ -749,7 +754,7 @@ results, which VS Code lets shim report but not change, so `inbound =
 | --- | --- |
 | Settings | `~/.config/shim/config.toml` |
 | Ledger, when enabled | `~/.local/state/shim/ledger-YYYY-MM.jsonl`, or under `$XDG_STATE_HOME/shim` |
-| Session records | a private directory under your temp dir, `$TMPDIR/shim-session-<uid>`. Claude Code's `SessionEnd` deletes a session's record; Codex and GitHub Copilot CLI send no session-end event, so theirs stay until the operating system clears the temp dir |
+| Session records | a private directory under your temp dir, `$TMPDIR/shim-session-<uid>`. Claude Code's `SessionEnd` deletes a session's record; Codex, GitHub Copilot CLI and VS Code send no session-end event, so theirs stay until the operating system clears the temp dir |
 | Withheld prompts | a private file under your temp dir, `$TMPDIR/shim-redacted-*.txt`, named in the message. Claude Code's `SessionEnd` deletes those older than 24 hours |
 
 Session records and the ledger hold entity **names and counts**, tool names and
