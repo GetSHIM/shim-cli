@@ -139,8 +139,9 @@ plugin hook at all; Codex users install the hook with `shim install codex`.
 persisted trust record per hook and silently skips any hook it does not have
 one for: no warning, no line in the transcript, and prompts reach the model
 uninspected. Writing the fragment is therefore only half of `shim install
-codex` — review and trust it in Codex, which is why `shim doctor codex` ends
-on `Codex hook activation is client UI state; verify shim with /hooks`. shim
+codex` — review and trust it in Codex, which is why `shim install codex` ends
+by sending you to `/hooks` and `shim doctor codex` ends on `Codex hook
+activation is client UI state; verify shim with /hooks`. shim
 cannot read that record and does not write it; a diagnosis that claimed to
 would be guessing. `codex exec --dangerously-bypass-hook-trust` runs enabled
 hooks without it, which is useful to confirm an install and wrong as a habit.
@@ -168,6 +169,17 @@ was answered with `shim blocked this prompt: SECRET (1).`
 The README therefore sends Codex users to `shim install codex`.
 
 ## Claude Code history, as `shim audit` reads it
+
+Each session is one file, `~/.claude/projects/<folder>/<session id>.jsonl` (or
+under `$CLAUDE_CONFIG_DIR/projects`), where the folder is the session's working
+directory with every character other than a letter or digit replaced by `-`:
+`/Users/you/my_app` becomes `-Users-you-my-app`. Each line is one JSON record.
+`shim audit` takes a record's project from its `cwd` and its date from its
+`timestamp`. A typed prompt, trimmed to the keys it reads:
+
+```json
+{"type":"user","cwd":"/Users/you/my_app","timestamp":"2026-10-01T09:30:00.000Z","message":{"role":"user","content":"deploy with AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE"}}
+```
 
 Read from transcripts Claude Code 2.1.270 to 2.1.286 wrote on 1 October 2026
 (key names only), and from the field-test transcripts of 2.1.284:
