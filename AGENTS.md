@@ -20,7 +20,9 @@ Apply the `ponytail:ponytail` and `code-writing-guidelines` skills to every impl
   command. `shim watch` keeps sizes and counts only; no request or response body
   reaches disk.
 - Safe hook input must produce exactly empty stdout and stderr.
-- Handled prompt errors must block with a generic native response. A verified
+- Handled prompt errors must block with a generic native response. On Windows
+  the hook stands down with one line and inspects nothing: that is the absence
+  of the inspector, not a handled error, so it does not block. A verified
   tool event that cannot be inspected must pass through unchanged and report
   the failure without denying already-created work.
 - Entity settings default to all public types; malformed or unsafe settings fail

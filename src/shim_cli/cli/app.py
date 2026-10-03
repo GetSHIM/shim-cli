@@ -5,6 +5,7 @@ from typing import Annotated
 
 import typer
 
+import shim_cli
 from shim_cli import __version__
 from shim_cli.guard import ENTITY_TYPES
 
@@ -43,6 +44,16 @@ def root(
     if version:
         typer.echo(f"shim {__version__}")
         raise typer.Exit
+    if shim_cli.WINDOWS and context.invoked_subcommand not in (None, "help", "update"):
+        from shim_cli.cli.output import emit
+
+        emit(
+            "FAIL",
+            "shim-cli does not support Windows yet. Run it inside WSL, or on macOS "
+            "or Linux.",
+            error=True,
+        )
+        raise typer.Exit(2)
     if context.invoked_subcommand is None:
         typer.echo(
             "shim — local traffic visibility and privacy controls for coding agents. Try: shim help"

@@ -1593,3 +1593,56 @@ def test_scan_and_redact_fail_when_part_of_the_input_cannot_be_read() -> None:
     assert (scan.exit_code, redact.exit_code) == (1, 1)
     assert "Unable to process stdin" in scan.output
     assert "Synthetic-pass" not in redact.output
+
+
+WINDOWS_REFUSAL = (
+    "FAIL shim-cli does not support Windows yet. Run it inside WSL, or on macOS or "
+    "Linux."
+)
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    (
+        ["install", "claude", "--yes"],
+        ["revert", "claude", "--yes"],
+        ["doctor", "claude"],
+        ["status", "claude"],
+        ["report"],
+        ["ledger", "show"],
+        ["ledger", "purge", "--yes"],
+        ["watch", "--", "claude"],
+        ["config", "--only", "EMAIL", "--yes"],
+        ["scan"],
+        ["redact"],
+        ["demo", "claude"],
+    ),
+)
+def test_on_windows_every_command_refuses_before_touching_a_file(
+    arguments: list, monkeypatch, tmp_path: Path
+) -> None:
+    import shim_cli
+
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setattr(shim_cli, "WINDOWS", True)
+    before = set(tmp_path.rglob("*"))
+
+    result = runner.invoke(app, arguments, input="Contact alice@example.com")
+
+    assert result.exit_code == 2
+    assert WINDOWS_REFUSAL in " ".join(unstyle(result.stderr).split())
+    assert set(tmp_path.rglob("*")) == before
+
+
+@pytest.mark.parametrize("arguments", (["help"], ["--version"], []))
+def test_on_windows_help_and_version_still_answer(arguments: list, monkeypatch) -> None:
+    import shim_cli
+
+    monkeypatch.setattr(shim_cli, "WINDOWS", True)
+
+    result = runner.invoke(app, arguments)
+
+    assert result.exit_code == 0
+    assert "Windows" not in result.output

@@ -161,8 +161,10 @@ telemetry, or prompt history.
 
 ## Install
 
-The `shim` package supports CPython 3.10 or newer on macOS and Linux. The
-plugin's bundled hook also runs on 3.9, which is what a stock macOS provides.
+shim-cli runs on macOS and Linux. It does not support Windows yet; inside WSL it
+runs as it does on Linux (not yet verified). The `shim` package needs CPython
+3.10 or newer, and the plugin's bundled hook also runs on 3.9, which is what a
+stock macOS provides.
 Choose one package manager:
 
 ```console
