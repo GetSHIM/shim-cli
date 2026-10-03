@@ -351,6 +351,22 @@ def test_install_status_and_revert(monkeypatch, tmp_path: Path) -> None:
     assert target.read_bytes() == b"{}\n"
 
 
+def test_codex_install_says_where_the_hook_is_trusted(
+    monkeypatch, tmp_path: Path
+) -> None:
+    _codex_home(monkeypatch, tmp_path)
+
+    installed = runner.invoke(app, ["install", "codex", "--yes"])
+    said = " ".join(unstyle(installed.output).split())
+
+    assert installed.exit_code == 0
+    assert (
+        "WARN Codex skips a hook you have not trusted, without warning: "
+        "open /hooks in Codex, review the shim entry and enable it." in said
+    )
+    assert "when asked" not in said
+
+
 def test_claude_install_status_doctor_and_revert(monkeypatch, tmp_path: Path) -> None:
     from shim_cli.clients.claude.settings import hook_group
 
@@ -418,11 +434,38 @@ def test_copilot_install_status_doctor_and_revert(monkeypatch, tmp_path: Path) -
     assert missing.exit_code == 1
     assert json.loads(missing.output)["state"] == "not_installed"
     assert json.loads(current.output)["state"] == "installed"
-    assert json.loads(doctor.output)["status"] == "warning"
+    assert json.loads(doctor.output)["status"] == "ok"
     # The file is shim's own, so revert deletes it rather than leaving an
     # empty `{"version": 1, "hooks": {}}` shell behind.
     assert not target.exists()
     assert json.loads(preview.output[preview.output.index("{") :]) == hook_document()
+
+
+def test_copilot_doctor_names_no_trust_step_and_no_double_inspection(
+    monkeypatch, tmp_path: Path
+) -> None:
+    _copilot_home(monkeypatch, tmp_path)
+    _copilot(monkeypatch, tmp_path)
+    runner.invoke(app, ["install", "copilot", "--yes"])
+
+    said = " ".join(unstyle(runner.invoke(app, ["doctor", "copilot"]).output).split())
+    checks = {
+        item["name"]: item["status"]
+        for item in json.loads(
+            runner.invoke(app, ["doctor", "copilot", "--json"]).output
+        )["checks"]
+    }
+
+    assert (
+        "PASS GitHub Copilot CLI has no trust step; the hook runs from the next session."
+        in said
+    )
+    assert (
+        "PASS The shim plugin stands down in GitHub Copilot CLI, so nothing is inspected twice."
+        in said
+    )
+    assert "/hooks" not in said
+    assert checks["hook_activation"] == checks["duplicate_hooks"] == "PASS"
 
 
 def test_confirmation_and_doctor(monkeypatch, tmp_path: Path) -> None:
