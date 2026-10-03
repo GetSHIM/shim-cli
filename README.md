@@ -161,7 +161,7 @@ telemetry, or prompt history.
 
 ## Install
 
-The `shim` package supports CPython 3.10 through 3.13 on macOS and Linux. The
+The `shim` package supports CPython 3.10 or newer on macOS and Linux. The
 plugin's bundled hook also runs on 3.9, which is what a stock macOS provides.
 Choose one package manager:
 

@@ -92,3 +92,10 @@ def test_the_pypi_summary_is_the_readme_tagline() -> None:
 
     assert tagline
     assert project["project"]["description"] == tagline.group(1)
+
+
+def test_requires_python_has_no_upper_bound() -> None:
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+
+    assert "<" not in project["project"]["requires-python"]
+    assert "Programming Language :: Python :: 3.14" in project["project"]["classifiers"]
