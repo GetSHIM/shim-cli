@@ -129,14 +129,11 @@ def test_a_report_and_an_incomplete_mask_still_speak_to_the_user() -> None:
     }
 
 
-def test_a_masked_argument_output_is_unchanged() -> None:
+def test_a_masked_argument_carries_no_permission_decision() -> None:
     assert (
         pre_tool_use(MASK, {}, MASKED, "EMAIL (1)", "Read")
         == pre_tool_use(MASK, {}, "", "", "Read")
-        == (
-            b'{"hookSpecificOutput":{"hookEventName":"PreToolUse",'
-            b'"permissionDecision":"allow","updatedInput":{}}}'
-        )
+        == b'{"hookSpecificOutput":{"hookEventName":"PreToolUse","updatedInput":{}}}'
     )
 
 

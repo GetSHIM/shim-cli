@@ -117,7 +117,9 @@ def test_an_mcp_argument_object_is_masked_in_place() -> None:
 
     assert outcome.record.direction == OUTBOUND
     assert updated == {"customer_email": "<EMAIL_1>", "note": "ping"}
-    assert document["hookSpecificOutput"]["permissionDecision"] == "allow"
+    assert "permissionDecision" not in document["hookSpecificOutput"], (
+        "allow would skip the permission prompt Claude Code shows for this call"
+    )
     assert "systemMessage" not in document
     assert "additionalContext" not in document["hookSpecificOutput"]
 

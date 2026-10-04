@@ -139,8 +139,9 @@ plugin hook at all; Codex users install the hook with `shim install codex`.
 persisted trust record per hook and silently skips any hook it does not have
 one for: no warning, no line in the transcript, and prompts reach the model
 uninspected. Writing the fragment is therefore only half of `shim install
-codex` — review and trust it in Codex, which is why `shim doctor codex` ends
-on `Codex hook activation is client UI state; verify shim with /hooks`. shim
+codex` — review and trust it in Codex, which is why `shim install codex` ends
+by sending you to `/hooks` and `shim doctor codex` ends on `Codex hook
+activation is client UI state; verify shim with /hooks`. shim
 cannot read that record and does not write it; a diagnosis that claimed to
 would be guessing. `codex exec --dangerously-bypass-hook-trust` runs enabled
 hooks without it, which is useful to confirm an install and wrong as a habit.
@@ -169,6 +170,17 @@ The README therefore sends Codex users to `shim install codex`.
 
 ## Claude Code history, as `shim audit` reads it
 
+Each session is one file, `~/.claude/projects/<folder>/<session id>.jsonl` (or
+under `$CLAUDE_CONFIG_DIR/projects`), where the folder is the session's working
+directory with every character other than a letter or digit replaced by `-`:
+`/Users/you/my_app` becomes `-Users-you-my-app`. Each line is one JSON record.
+`shim audit` takes a record's project from its `cwd` and its date from its
+`timestamp`. A typed prompt, trimmed to the keys it reads:
+
+```json
+{"type":"user","cwd":"/Users/you/my_app","timestamp":"2026-10-01T09:30:00.000Z","message":{"role":"user","content":"deploy with AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE"}}
+```
+
 Read from transcripts Claude Code 2.1.270 to 2.1.286 wrote on 1 October 2026
 (key names only), and from the field-test transcripts of 2.1.284:
 
@@ -189,6 +201,23 @@ other attachment type (hook context, prompt snapshots, environment, skill and
 tool listings). `history.jsonl`, beside `projects/`, holds one line per
 interactive prompt with the keys `display`, `pastedContents`, `project`,
 `sessionId` and `timestamp`; `sessionId` is the transcript's file name.
+
+## 1.1.1 release evidence
+
+Recorded 3 October 2026 on macOS 26.4 arm64, CPython 3.13.5, uv 0.12.5, on the
+1.1.1 candidate with the rebuilt `bin/shim.pyz`. One hook change, Claude Code's
+masked tool input, and two lines of CLI output; the rest is documentation.
+
+| Evidence | Recorded result |
+| --- | --- |
+| Local gate | `python scripts/check.py` green: 2,557 tests, lint, format, types, build. |
+| Claude Code | tested: 2.1.286. The candidate wheel installed with pipx on CPython 3.14.3, `shim install claude` written to a scratch settings file and loaded with `--settings`, no other settings. `claude -p` asked to WebFetch `https://example.com/?ref=docs`: refused, nothing had approved it. The same fetch with `?email=ops@example.com`: refused as well, the denial showing `?email=<EMAIL_1>`; under 1.1.0 this fetch ran. With `--allowedTools 'WebFetch(domain:httpbin.org)'`, a fetch of `https://httpbin.org/get?email=ops@example.com` ran and httpbin echoed `args.email` as `<EMAIL_1>`. The plugin loaded with `--plugin-dir plugins/shim-cli`, no `shim-hook` on `PATH`, so the archive ran: the email fetch was refused with `<EMAIL_1>` in the denial. |
+| Codex CLI | tested: 0.159.0. `shim install codex` into a scratch `CODEX_HOME` ends `WARN Codex skips a hook you have not trusted, without warning: open /hooks in Codex, review the shim entry and enable it.` The hook is unchanged and was not re-run. |
+| GitHub Copilot CLI | tested: 1.0.83, run on 1.0.85. `shim install copilot` and `shim doctor copilot` against a scratch `COPILOT_HOME`: `PASS The shim plugin stands down in GitHub Copilot CLI, so nothing is inspected twice.`, `PASS GitHub Copilot CLI has no trust step; the hook runs from the next session.`, and one warning, `GitHub Copilot CLI 1.0.85 is newer than tested 1.0.83.`; exit 0. The hook is unchanged and was not re-run. |
+| VS Code | tested: 1.137.0. Not re-run: 1.1.1 changes no VS Code hook. |
+| Python 3.14 | The full suite on CPython 3.14.3: 2,557 passed. `pipx install --python python3.14` of the built 1.1.1 wheel: `shim --version` answered `shim 1.1.1`. `pipx install --python python3.12 --fetch-missing-python` of the same wheel on a machine with no Python 3.12 fetched CPython 3.12.15 and installed it. |
+| Documentation | Three simulated first-time users followed the 1.1.0 docs from zero in sandboxed homes, on Claude Code, on Codex, GitHub Copilot CLI and VS Code, and through every recipe; what stopped or misled them is fixed, each changed claim checked against the code or by running it. The cookbook's CI step was run in a throwaway repository under `bash -eo pipefail`: a clean text change exits 0, an added `AKIAIOSFODNN7EXAMPLE` 1, an added PNG and a deleted file 0, no change 0, and a missing `origin/main` fails. |
+| Windows | Unchanged: every command still refuses with exit 2 before touching a file (`test_on_windows_every_command_refuses_before_touching_a_file`). |
 
 ## 1.1.0 release evidence
 
@@ -311,6 +340,7 @@ must not be copied into its release record without a fresh run.
 | Claude auth header shape | Claude Code subscription sign-in on 8 September 2026 sends `authorization` and no `x-api-key`, with `anthropic-beta` and `anthropic-version`; upstream 200 through the same harness. |
 | Codex live prompt hook | Codex CLI 0.151.0 on 8 September 2026, ChatGPT sign-in, macOS 26.4.0 arm64. With the hook trusted, a prompt carrying a synthetic address reported `hook: UserPromptSubmit Completed` under `observe` and `hook: UserPromptSubmit Blocked` under `enforce`, the blocked prompt never reaching the model. The same prompt with the hook untrusted produced no hook line at all and was sent unchanged. |
 | `PostToolUseFailure` channel | Claude Code 2.1.286 on 30 September 2026, a capture hook answering with shim's report object for `cat .env && cat missing-file`: the input carries `tool_name`, `tool_input`, `error` (a string that starts `Exit code 1`), `is_interrupt` and `duration_ms`, and no `tool_response`. The `systemMessage` was shown (`PostToolUseFailure:Bash says: shim: found …`), and the model answered that a hook had told it not to repeat the values and repeated none. A returned `updatedToolOutput` was ignored on 2.1.278 and 2.1.284: the model quoted the unmodified output. |
+| `PreToolUse` masked input and permission | Claude Code 2.1.286 on 3 October 2026, `claude -p` with shim's hook loaded through `--settings` and no other settings. `updatedInput` beside `permissionDecision: "allow"` approved the call: a WebFetch with no allow rule ran once its URL held a masked email, while the same fetch without one was refused for want of approval. `updatedInput` alone was applied and left the decision to the permission rules: refused under `-p` with `?email=<EMAIL_1>` in the denial, and, with WebFetch allowed for httpbin.org, run with the masked value (httpbin echoed `args.email` as `<EMAIL_1>`). `permissionDecision: "ask"` with the same input was refused under `-p` ("A PreToolUse hook asked for confirmation"). Under 1.1.0's `allow`, a deny rule for `WebFetch(domain:example.com)` still refused the masked call, and an ask rule for it still required approval (refused under `-p`). |
 | `Stop` scan cost | 66 KB final assistant text, hook end to end: 41 ms median, 50 ms p95 on macOS 26.5.2 arm64, CPython 3.13.5. Text beyond the detector's 100,000-character limit is not scanned and the record says `truncated`. |
 
 The native Claude capture and the decisions made from it are preserved in the

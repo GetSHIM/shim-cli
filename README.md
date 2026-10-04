@@ -163,7 +163,7 @@ own, after `cleanupPeriodDays` in its settings (30 by default).
 
 | Client | Your typed prompt | Tool input and results |
 | --- | --- | --- |
-| [Claude Code](https://github.com/anthropics/claude-code) | Reports what it found and lets it through; blocks under `enforce` | Eligible structured arguments and inbound results are masked; commands and local writes are report-or-deny only; the output of a failed call is reported, not masked |
+| [Claude Code](https://github.com/anthropics/claude-code) | Reports what it found and lets it through; blocks under `enforce` | Eligible structured arguments and inbound results are masked, and a call with masked arguments still goes through your permission rules; commands and local writes are report-or-deny only; the output of a failed call is reported, not masked |
 | [Codex CLI](https://github.com/openai/codex) | Reports what it found and lets it through; blocks under `enforce` | Not installed — no verified native tool-event adapter |
 | [GitHub Copilot CLI](https://github.com/github/copilot-cli) | Replaces the model-facing prompt with the redacted text | Not installed — no verified native tool-event adapter |
 | [VS Code](https://code.visualstudio.com/docs/agent-customization/agent-plugins) | Reports what it found and lets it through; stops the prompt before it is sent under `enforce` | A call is reported, and denied under `enforce`, before it runs. A **result** can only be reported: by then the model has it, and nothing takes it back. Never masked |
@@ -172,14 +172,28 @@ Tool coverage is verified against a running client, not derived from
 documentation. `shim doctor <client>` prints exactly which events are installed
 and what shim can and cannot change at each one.
 
-shim-cli detects email addresses, phone numbers, credit cards, IBANs, IP and
-MAC addresses, US SSNs, Turkish national and tax IDs, secrets, and database
-URIs. Secrets include named keys such as `DB_PASSWORD` and
-`AWS_SECRET_ACCESS_KEY`, and vendor tokens: Slack, Google, GitHub, GitLab, npm,
-Hugging Face, Azure storage `AccountKey` values and
-HTTP `Authorization: Basic` and `Bearer` headers. Checksums
-are verified where they exist, so a mistyped IBAN or national ID is not
-reported.
+What shim-cli detects, and masks wherever the client allows it:
+
+- **Personal data:** email addresses, phone numbers, payment cards that pass
+  the Luhn check, IBANs, IP and MAC addresses, US SSNs, and Turkish national
+  and tax IDs.
+- **Keys and tokens:** Anthropic, OpenAI, Stripe and SendGrid keys; Slack
+  tokens, and Slack and Discord webhook URLs; AWS access key IDs; GitHub,
+  GitLab, npm, Hugging Face and Google API tokens; JWTs; private keys in PEM
+  form; Azure storage `AccountKey` values; HTTP `Authorization: Basic` and
+  `Bearer` headers.
+- **Credentials by context:** the value of a named key such as `DB_PASSWORD`
+  or `AWS_SECRET_ACCESS_KEY`, a `--password` argument, the user and password in
+  a connection string or URL, Docker and npm registry logins, and a base64
+  block that decodes to one of these.
+
+What it does not detect: person names, postal addresses, a password with no key
+name or known prefix (`the login is Synthetic-pass-0000`), and an email address
+at an internal domain such as `ops@acme.internal`. [Your own
+patterns](https://github.com/GetSHIM/shim-cli/blob/main/README.md#your-own-patterns) cover what your project has that these do not.
+
+Checksums are verified where they exist, so a mistyped IBAN or national ID is
+not reported.
 
 It deliberately stays quiet on values that name nobody: loopback and
 unspecified addresses (`127.0.0.1`, `0.0.0.0`, `::1`) and connection strings
@@ -209,11 +223,14 @@ Choose one package manager:
 ```console
 uv tool install --python 3.12 --compile-bytecode shim
 # or
-pipx install --python python3.12 shim
+pipx install --python python3.12 --fetch-missing-python shim
 ```
 
 `--python` matters on a machine whose only Python is the system 3.9:
 without it `uv` quietly installs the last release that ran there, 0.2.0.
+Neither line needs Python 3.12 installed first: `uv` fetches it itself, and
+`--fetch-missing-python` makes `pipx` do the same. When `python3 --version`
+already says 3.10 or newer, `pipx install shim` is enough.
 
 Preview and install the hook for your client:
 
@@ -224,7 +241,8 @@ shim doctor codex
 ```
 
 Replace `codex` with `claude` or `copilot` as needed. Run `shim help` for all
-commands.
+commands. `--dry-run` shows the target file and the exact fragment; without it,
+`shim install` asks before writing but does not show the change.
 
 One more step in Codex: **a hook does not run until you trust it.** Codex keeps
 a trust record per hook and skips any hook without one — no warning, and your
@@ -232,15 +250,63 @@ prompts reach the model uninspected. Open `/hooks` in Codex, review the shim
 entry, and enable it. `shim doctor codex` ends by reminding you, because that
 record lives in Codex and shim cannot read it.
 
+**Check that it works.** Start a new session of your client after installing,
+then:
+
+- **Claude Code:** run `/hooks` and find shim under `UserPromptSubmit`,
+  `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `Stop` and `SessionEnd`.
+  Then, in a scratch folder, put `AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE` in a
+  `.env` and ask Claude to read it. The model gets
+  `AWS_ACCESS_KEY_ID=<SECRET_1>`, and the turn ends with shim's summary:
+
+  ```text
+  shim — this session
+    masked    1 SECRET  (Read .env)
+    overhead  58 ms median, 58 ms p95
+  ```
+
+- **Codex:** once the hook is trusted in `/hooks`, a prompt holding
+  `ops@example.com` shows `shim: found EMAIL (1) in your prompt. Not modified.`
+  Codex lets shim report a prompt, not change it.
+- **GitHub Copilot CLI:** there is no trust step. Ask the model to repeat a
+  prompt holding `ops@example.com` word for word; it answers with `<EMAIL_1>`.
+
+`shim doctor claude` and `shim doctor codex` warn that hook activation is
+client UI state and tell you to verify shim with `/hooks`: that is the check
+above, and doctor still exits `0`. GitHub Copilot CLI has no trust step; its
+hook runs from the next session. If the check shows nothing, start with
+`shim doctor <client>`. VS Code is checked with a test prompt, under
+[VS Code](https://github.com/GetSHIM/shim-cli/blob/main/README.md#vs-code) below.
+
 ### VS Code
 
-VS Code is reached through the plugin only; there is no `shim install vscode`.
-Point VS Code at the plugin folder, or install it from a plugin marketplace
-that carries this repository:
+VS Code is reached through the plugin only; there is no `shim install vscode`,
+and the `shim` package does not carry the plugin folder. Clone the newest
+release tag to a folder you keep:
+
+```console
+git clone --depth 1 --branch v1.1.1 https://github.com/GetSHIM/shim-cli ~/.local/share/shim-cli
+```
+
+Then add the plugin folder to your user `settings.json` (Command Palette,
+"Preferences: Open User Settings (JSON)"), by the absolute path that
+`echo ~/.local/share/shim-cli/plugins/shim-cli` prints. Workspace settings do
+not apply to this key:
 
 ```json
-"chat.pluginLocations": { "/path/to/shim-cli/plugins/shim-cli": true }
+"chat.pluginLocations": { "/Users/you/.local/share/shim-cli/plugins/shim-cli": true }
 ```
+
+To update, fetch and check out the next tag in that folder:
+`git -C ~/.local/share/shim-cli fetch --depth 1 origin tag <tag>`, then
+`git -C ~/.local/share/shim-cli checkout <tag>`. To remove it, delete the
+setting and the folder.
+
+To check it, type a prompt holding `ops@example.com` into Copilot Chat and
+expect `shim: found EMAIL (1) in your prompt. Not modified.` No shim line at
+all means the plugin is not running. `shim doctor` has no VS Code target, and
+VS Code releases newer than 1.137.0 are untested, so run this check after a
+VS Code update too.
 
 **In VS Code shim reports, and refuses only where refusing works.** This was
 measured against VS Code 1.137.0 rather than read out of its documentation:
@@ -252,18 +318,23 @@ measured against VS Code 1.137.0 rather than read out of its documentation:
 | After a tool has run | **Report only.** A `block` there was read straight through by the model, and so was `continue: false`. |
 
 Nothing is ever masked: no VS Code hook output replaces a prompt, a tool input
-or a tool result. And a `read_file` result reaches the hook as an empty
-`tool_response`, so a file read is protected by its path before the read, not
-by its contents afterwards. A terminal result does arrive in full and is
-inspected.
+or a tool result. And a `read_file` result reaches the hook empty, so file
+contents are never inspected: an agent reading `.env` is neither masked nor
+reported. Only values in the path text itself are caught, before the read. A
+terminal result does arrive in full and is inspected.
 
 Because a refusal is the only enforcement available, tool events report by
 default there, and refusing waits until you ask for it:
 
 ```toml
 [mode]
-inbound = "enforce"
+outbound = "enforce"
 ```
+
+That refuses a call carrying a finding, such as a `run_in_terminal` command,
+before it runs. `inbound` covers results, which VS Code lets shim report but
+not change, so `inbound = "enforce"`, already the default, refuses nothing
+there.
 
 The same plugin file is read by GitHub Copilot CLI and the Copilot app, where
 `shim install copilot` is the supported route. The hook stands down in those
@@ -278,10 +349,12 @@ Claude Code users can install the repository's marketplace plugin:
 /plugin install shim-cli@shim-cli
 ```
 
-The marketplace plugin and `shim install` are alternative hook-registration
-methods. Do not use both; `shim doctor` fails when it finds two. The plugin
-carries the hook archive, `bin/shim.pyz`, on `main` and on every tag; it needs
-Python 3.9 or newer and nothing else installed.
+The marketplace plugin and `shim install claude` register the same hook two
+ways: use one, not both; `shim doctor claude` fails when it finds two. You need
+the package either way for `shim audit`, `shim keys`, `shim report` and
+`shim config`, which it alone carries. The plugin carries the hook archive,
+`bin/shim.pyz`, on `main` and on every tag; it needs Python 3.9 or newer and
+nothing else installed.
 
 **Codex: use `shim install codex`, not the plugin.** Current Codex installs the
 plugin and lists it as enabled, but does not load its hook: `/hooks` shows
@@ -351,6 +424,12 @@ shows how to point an agent at it instead of `cat`.
 > `userPromptTransformed` event does support a model-facing replacement. Claude
 > tool results are masked at the verified installed events.
 
+The modes are `observe`, `warn` and `enforce`. Any other value, `block`
+included, makes shim withhold every prompt until it is fixed, and `shim config`
+does not show `[mode]`, so the
+[cookbook](https://github.com/GetSHIM/shim-cli/blob/main/docs/cookbook.md#stop-a-secret-before-it-leaves)
+walks through creating the settings file and checking that blocking is on.
+
 Under `enforce`, the prompt is withheld and you are handed a redacted copy to
 resend:
 
@@ -387,8 +466,9 @@ model.
 
 More lines appear when they have something to say. `unmasked` counts what a
 failed command printed, which Claude Code does not let shim mask; a session with
-your own patterns names which one matched; and a scanned model reply is counted
-apart from everything else, because the model wrote it:
+your own patterns names which one matched; and a scanned model reply gets a
+line of its own, because the model wrote it (the daily totals of
+`shim ledger show` include it):
 
 ```text
   unmasked  5 SECRET  (failed Bash)
@@ -399,7 +479,12 @@ apart from everything else, because the model wrote it:
 
 `shim report` prints the same summary on demand, and `--json` makes it
 scriptable. It reads the newest temporary spool first; if none remains, it
-falls back to the retained ledger, if you turned that on.
+falls back to the retained ledger, if you turned that on. Claude Code deletes
+the spool when the session ends, so run `shim report` in a second terminal
+while the session is still open, or turn the ledger on first with
+`shim config --ledger --yes`. `WARN No session on record.` means there is
+nothing to read, not that nothing was found. The report shows the most recent
+session from any client and does not name the client.
 
 ## Shrink tool results
 
@@ -470,7 +555,10 @@ shim config --no-diet       # stop shrinking tool results
 
 `shim config` with no arguments prints the entity table plus the current
 ledger and diet state, so what shim keeps and what it rewrites is answerable
-without opening the file.
+without opening the file. It does not show `[mode]` or per-tool `[entities]`,
+which live only in the file; the
+[command reference](https://github.com/GetSHIM/shim-cli/blob/main/docs/commands.md#the-settings-file)
+says how to check them.
 
 Detection can also be narrowed for one tool at a time, which the CLI has no
 flag for — scan commands for secrets without scanning every file read for
@@ -479,8 +567,12 @@ phone numbers:
 ```toml
 [entities]
 Bash = ["SECRET", "DB_URI"]
-Read = ["SECRET"]
+Read = ["SECRET", "DB_URI", "CREDIT_CARD"]
 ```
+
+A tool's list replaces the full set for that tool: a type left out is neither
+masked nor reported in its events and reaches the model unchanged, so with the
+`Read` line above an email address in a file goes through as it is.
 
 Every key in the file is optional. A file holding only `[mode]` or only
 `[entities]` is valid and everything else keeps its shipped default.
@@ -627,16 +719,35 @@ In this order, because each step needs the one before it:
 ```console
 shim revert claude          # once per client you installed
 shim ledger purge           # only if you turned the ledger on (shim ledger show reads it)
-uv tool uninstall shim      # or: /plugin uninstall shim-cli@shim-cli
+uv tool uninstall shim      # or: pipx uninstall shim
 rm -r ~/.config/shim        # your settings, if you want them gone too
 ```
 
+If you also used the Claude Code plugin, remove it with
+`/plugin uninstall shim-cli@shim-cli`; for VS Code, delete the
+`chat.pluginLocations` entry and the folder you cloned.
+
 `shim revert` removes only shim's own hook group and leaves every other hook in
-the file untouched; for Copilot it also deletes the hook file, which is shim's
-alone. `shim ledger purge` deletes the retained records — skip it and they age
-out after 30 days on their own. Uninstalling the package leaves
+the file in place, though it writes the file back as 2-space JSON and leaves a
+settings file it created itself as `{}`; for Copilot it also deletes the hook
+file, which is shim's alone. `shim ledger purge` deletes the retained records —
+skip it and they age out after 30 days on their own. Uninstalling the package
+leaves
 `~/.config/shim/config.toml` in place, which is why the last line is separate:
 reinstalling later finds your entity choices and custom patterns still there.
+
+A few files can outlast the package. `shim ledger purge` leaves the empty
+ledger folder, `~/.local/state/shim` (or `$XDG_STATE_HOME/shim`). Codex,
+GitHub Copilot CLI and VS Code send no session-end event, so their session
+records and any copies of withheld prompts stay in your temporary folder until
+the operating
+system clears it. To remove them now:
+
+```console
+rm -rf ~/.local/state/shim "${TMPDIR:-/tmp}"/shim-session-* "${TMPDIR:-/tmp}"/shim-redacted-*
+```
+
+In a script, `shim ledger purge --yes` skips the question.
 
 `shim watch` needs no uninstall: it edits nothing, so there is nothing to undo.
 
@@ -647,6 +758,7 @@ reinstalling later finds your entity choices and custom patterns still there.
 - [Architecture](https://github.com/GetSHIM/shim-cli/blob/main/docs/architecture.md)
 - [Compatibility](https://github.com/GetSHIM/shim-cli/blob/main/docs/compatibility.md)
 - [Privacy](https://github.com/GetSHIM/shim-cli/blob/main/docs/privacy.md)
+- [1.1.1 release notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/1.1.1.md)
 - [1.1.0 release notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/1.1.0.md)
 - [1.0.3 release notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/1.0.3.md)
 - [1.0.2 release notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/1.0.2.md)

@@ -396,6 +396,13 @@ def _resolution_check(client: str, installed: frozenset) -> Check:
 
 
 def _duplicate_check(client: str, installed: frozenset) -> Check:
+    if client == "copilot":
+        return Check(
+            "duplicate_hooks",
+            "PASS",
+            "The shim plugin stands down in GitHub Copilot CLI, so nothing is "
+            "inspected twice.",
+        )
     if client != "claude":
         return Check(
             "duplicate_hooks",
@@ -507,6 +514,13 @@ def _coverage_check(client: str, rows: list) -> Check:
 
 
 def _activation_check(client: str) -> Check:
+    if client == "copilot":
+        return Check(
+            "hook_activation",
+            "PASS",
+            "GitHub Copilot CLI has no trust step; the hook runs from the next "
+            "session.",
+        )
     return Check(
         "hook_activation",
         "WARN",

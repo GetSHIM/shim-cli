@@ -24,43 +24,57 @@ client's traffic to the provider your client was already going to talk to.
 stdout instead of the human table. Use it in scripts; the text layout is not a
 stable interface and the JSON is.
 
-**`--yes`** skips the confirmation prompt on the commands that change a file
-(`install`, `revert`, `config`). Without it you are shown what will happen and
-asked. `audit --purge` has no `--yes`: it always asks you to type `delete N`.
+**`--yes`** skips the confirmation prompt on the commands that change or delete
+a file (`install`, `revert`, `config`, `ledger purge`). Without it they ask
+first, and a `no`, or no terminal to answer from, changes nothing and exits `1`.
+`config` shows the new settings before it asks; `install` asks without showing
+the change, so run `shim install <client> --dry-run` first to see the target
+file and the exact fragment. With `--json` nothing is asked: `config`, and
+`ledger purge` when something is retained, refuse with exit `2` unless you pass
+`--yes`. `audit --purge`
+has no `--yes`: it always asks you to type `delete N`.
 
 **`--help`** works on every command, and `shim help` is the same as
 `shim --help`. Each command's help repeats its own options, so this document is
 the thing to read when you want the whole surface at once.
 
-**Exit codes** are the same everywhere:
+**Exit codes** are the same everywhere except `shim watch`, which exits with
+your client's own code:
 
 | Code | Meaning |
 | --- | --- |
-| `0` | Fine. For `doctor`, this includes warnings — a healthy install prints two. |
-| `1` | Nothing to show, or a finding. `report` with no session, `status` when no hook is installed, `scan` when it found something. |
+| `0` | Fine. For `doctor`, this includes warnings: a healthy install prints one for Claude Code, two for Codex and none for GitHub Copilot CLI, each plus one when your client is newer than the tested version. |
+| `1` | Nothing to show, a finding, or a question you answered no. `report` with no session (its `--json` exits `0`), `status` when no hook is installed, `scan` when it found something. |
 | `2` | Refused. Bad input, an unsafe or unreadable file, a client shim cannot support. |
 
 `scan` exits `1` when it found something and `0` when it found nothing, the
 reverse of grep, so `shim scan < file && echo "clean"` works in CI. `redact`
 exits `0`, because its answer is the rewritten text, unless stdin cannot be read
 or scanned in full: then both print `Unable to process stdin.` and exit `1`.
+They print the same when shim's settings file is refused or invalid, whatever
+stdin holds; `shim config` prints the reason.
 
 ## Setting up
 
 ### `shim install <client>`
 
 Writes shim's hook into the client's own settings file. Clients are `claude`,
-`codex`, `copilot`.
+`codex`, `copilot`, and `status`, `doctor`, `revert` and `demo` take the same
+three. VS Code has no target in any of them: it runs the plugin, and you check
+it with a test prompt (see [`shim doctor`](#shim-doctor-client)).
 
 ```console
-shim install claude              # shows the change, asks, then writes
+shim install claude              # asks, then writes; it does not show the change
 shim install claude --yes        # writes without asking
-shim install claude --dry-run    # shows the change and exits
+shim install claude --dry-run    # shows the target file and the change, and exits
 ```
 
-`--dry-run` prints a sentence and then the exact JSON fragment:
+`--dry-run` names the file, sums the change up in a sentence and then prints
+the exact JSON fragment:
 
 ```
+WARN Would create Claude Code hooks at /home/you/.claude/settings.json with
+this fragment:
 WARN Would add 6 hook entries (UserPromptSubmit, PostToolUse,
 PostToolUseFailure, PreToolUse, SessionEnd, Stop), each running
 /usr/bin/python3 -m shim_cli.hook claude. Nothing else in the file changes.
@@ -68,17 +82,34 @@ PostToolUseFailure, PreToolUse, SessionEnd, Stop), each running
 
 Installing is additive and surgical: your other hooks stay, and shim appends
 itself last. If a 0.2.0-shaped fragment is present it is replaced rather than
-duplicated, and the output says so.
+duplicated, and the output says so. The file is written back as 2-space JSON,
+so a file you formatted by hand keeps its content but not its layout.
+
+A client settings file that does not parse, such as a `settings.json` with a
+trailing comma, is left alone: install exits `2` with `FAIL Claude Code hook
+configuration cannot be changed safely.`, naming neither the file nor the
+error, and runs once you have fixed the JSON by hand.
 
 **Codex needs one extra step.** From 0.151.0 Codex will not run a hook until
-you trust it, and it does so silently — no warning, no transcript line. After
-installing, open Codex and accept the shim hook. `shim install codex` reminds
-you; `shim doctor codex` cannot verify it, because that record lives in the
-client where shim cannot read it.
+you trust it, and it skips an untrusted one silently — no warning, no
+transcript line. It does not ask, either. After installing, open `/hooks` in
+Codex, review the shim entry and enable it. `shim install codex` ends with
+that reminder:
 
-If you installed the marketplace plugin instead, you do not need this command
-at all. Running both puts two hook paths on disk and `shim doctor` will
-say so.
+```
+WARN Codex skips a hook you have not trusted, without warning: open /hooks in
+Codex, review the shim entry and enable it.
+```
+
+`shim doctor codex` cannot verify it, because that record lives in the client
+where shim cannot read it.
+
+For Claude Code, register the hook one way, `shim install claude` or the
+marketplace plugin, not both: `shim doctor claude` fails when it finds two.
+You need the package either way for `shim audit`, `shim keys`, `shim report`
+and `shim config`. The VS Code plugin together with `shim install copilot` is
+the intended pairing: the plugin stands down in GitHub Copilot CLI, so nothing
+is inspected twice.
 
 ### `shim status <client>`
 
@@ -101,10 +132,39 @@ and which events are covered.
 shim doctor claude
 ```
 
-A healthy install ends with a coverage table and a warning that hook activation
-is client UI state shim cannot read, plus a second one when your client is newer
-than the version shim was tested against. **Both are normal and doctor exits
-`0`.** A `FAIL` exits `2`.
+A healthy install ends with a coverage table. **The warnings above it are
+normal and doctor exits `0`:**
+
+- Claude Code: `WARN Claude Code hook activation is client UI state; verify
+  shim with /hooks.`
+- Codex: the same activation warning, and ``WARN Plugin installs are not
+  discoverable for this client; if you installed both the plugin and `shim
+  install`, remove one.``
+- GitHub Copilot CLI: none. It prints `PASS GitHub Copilot CLI has no trust
+  step; the hook runs from the next session.` and `PASS The shim plugin stands
+  down in GitHub Copilot CLI, so nothing is inspected twice.`
+
+Each client adds one more, such as `WARN Codex 0.160.0 is newer than tested
+0.159.0.`, when yours is newer than the version shim was tested against. A
+`FAIL` exits `2`.
+
+Doctor cannot see whether the client runs the hook. To see it run:
+
+- Claude Code: start a new session after installing, run `/hooks` and find
+  shim under `UserPromptSubmit`, `PreToolUse`, `PostToolUse`,
+  `PostToolUseFailure`, `Stop` and `SessionEnd`. Then, in a scratch folder, put
+  `AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE` in a `.env` and ask Claude to read
+  it: the model gets `<SECRET_1>`, and the turn ends with `shim — this
+  session` and `masked 1 SECRET (Read .env)`.
+- Codex: once the hook is trusted in `/hooks`, a prompt holding
+  `ops@example.com` shows `shim: found EMAIL (1) in your prompt. Not
+  modified.` Codex lets shim report a prompt, not change it.
+- GitHub Copilot CLI: there is no trust step. Ask the model to repeat a prompt
+  holding `ops@example.com` word for word; it answers with `<EMAIL_1>`.
+- VS Code has no doctor target. Type a prompt holding `ops@example.com` into
+  Copilot Chat and expect `shim: found EMAIL (1) in your prompt. Not
+  modified.`, as measured on VS Code 1.137.0; no shim line at all means the
+  plugin is not running.
 
 The coverage line counts the events whose hook is in the client's settings
 file, and the table's `Installed` column reads the same file:
@@ -116,9 +176,29 @@ hook still in the 0.2.0 shape does not count, because 1.0 does not run it:
 doctor reports it as `FAIL` with `run shim install <client>`. The coverage
 `WARN` on its own exits `0`.
 
-Every `FAIL` names the command that fixes it. A malformed settings file, for
-example, gives you the path, the parser's message with its line number, and
-`shim config --reset`.
+Most `FAIL` lines name the command that fixes them. These do not, or not
+fully:
+
+- A shim settings file that does not parse gives the path, the parser's
+  message with its line number, and `shim config --reset`. Fixing that line by
+  hand is often better: `--reset` discards everything, including custom
+  patterns and hand-written `[mode]` and `[entities]`.
+- An invalid value, such as `user-prompt = "block"`, gives `are invalid: they
+  are not readable as settings` and names neither the key nor the line. Check
+  the values against [the settings file](#the-settings-file).
+- A refused settings file gives the reason, such as `target is writable by
+  another user`, and no command. The fix is `chmod 700 ~/.config/shim && chmod
+  600 ~/.config/shim/config.toml`; `shim config --reset --yes` does not repair
+  permissions.
+- `FAIL Codex hook support is not enabled.` comes from `codex features list`,
+  and usually means Codex's own `config.toml` (in `~/.codex`, or
+  `$CODEX_HOME`) turns hooks off. Set `hooks = true` under `[features]`, or
+  delete that line: hooks are on by default. The same line appears when
+  `codex features list` itself fails.
+- A client settings file that does not parse, such as a `settings.json` with a
+  trailing comma, gives `FAIL Claude Code hook configuration needs manual
+  review.` and names neither the file nor the error. Fix the JSON by hand;
+  `shim install` will not change the file until it parses.
 
 ### `shim revert <client>`
 
@@ -129,6 +209,12 @@ file, which belongs to shim alone.
 ```console
 shim revert claude --yes
 ```
+
+The file is written back as 2-space JSON ending in a newline: one already in
+Claude Code's own format, which ends that way, comes back byte for byte, a
+hand-formatted one comes back with
+the same content in that layout, and a settings file shim itself created is
+left as `{}`.
 
 This does not remove your settings (`~/.config/shim/config.toml`) or the
 ledger. See the README's Uninstall section for the full sequence.
@@ -166,7 +252,17 @@ A file attached with `@` is counted under `warned` with its name, as `(@.env)`.
 `skipped` counts what shim could not inspect and let through, such as an
 attached file past the limits.
 
-Exits `1` when there is no session to show.
+It reads the live session record, which Claude Code's `SessionEnd` deletes.
+Run `shim report` in a second terminal while the session is still open, or
+turn the ledger on first with `shim config --ledger --yes`: then it reads the
+retained copy after the session ends and says so (`WARN From the retained
+ledger; the live session has ended.`). It shows the most recent session from
+any client and does not name the client. `WARN No session on record.` means
+there is nothing to read, not that nothing was found.
+
+Exits `1` when there is no session to show. `--json` exits `0` even then, with
+`"source": "none"`, so a script must check that field: it is `"session"` for a
+live record and `"ledger"` for a retained one.
 
 ### `shim ledger show`
 
@@ -189,6 +285,8 @@ timestamps — never the values that were found.
 ### `shim ledger purge`
 
 Deletes the retained records. They also age out on their own after 30 days.
+It asks first; `--yes` skips the question, and `--json` needs it when
+something is retained.
 
 ### `shim watch -- <client>`
 
@@ -204,7 +302,10 @@ shim watch -- claude -p "explain this repo"
 client's own traffic to the provider it was already using. Nothing is modified
 and no request body is written to disk — the report says so on its last line.
 
-The report prints when the client exits:
+The report prints when the client exits. When no request went through the
+proxy, text mode prints no report at all: you see `PASS Watching claude on
+http://127.0.0.1:…`, the client's own output and nothing after it. `--json`
+still writes one, with `"requests": 0`. A report looks like this:
 
 ```
 shim watch — 2m 34s, 3 requests
@@ -234,8 +335,9 @@ on an API key, not a bill, and the line says so. When some requests arrived
 while both inspection slots were busy, the section header adds `2 of 4 requests
 measured` and the response line gives the same reason as the inspection line.
 
-`--json` writes the same report as one object. Three of its fields say what a
-figure covers:
+`--json` writes the same report as one object, on one line of stdout after
+the client exits, so it follows whatever the client printed there itself: read
+the last line. Three of its fields say what a figure covers:
 
 | Field | Where | Values |
 | --- | --- | --- |
@@ -250,6 +352,10 @@ because a custom endpoint there removes GitHub authentication.
 
 Refuses to start if `ANTHROPIC_BASE_URL` is already set, and tells you the two
 ways forward.
+
+`shim watch` exits with the client's own exit code, which `--json` also
+records as `exit_code`, and with `2` when it refuses or cannot start the
+client.
 
 ### `shim audit`
 
@@ -299,7 +405,9 @@ are counted as skipped and said so. It looks for the types your settings enable
 and your custom patterns; a per-tool `[entities]` rule does not apply.
 
 Exits `0` when nothing reached the model, `1` when something did, `2` when the
-history is missing or unreadable.
+history is missing or unreadable. `--json` uses the same codes; for a missing
+or unreadable history it writes an object with `"status": "error"` and the
+reason in `error`.
 
 `--json` carries `sessions`, `projects`, `first`, `last`, `reached` (per
 entity: `total`, `sessions`, `doors`), `by_project` (`counts`, `last`),
@@ -364,7 +472,9 @@ shim config --remove-custom PROJECT_CODENAME --yes
 `--custom` takes a regular expression, `--custom-literal` takes text to match
 exactly — use the literal form when the value contains regex characters. Names
 are `UPPER_CASE` letters, digits and underscores, up to 32 characters. Adding
-a pattern turns on `CUSTOM` unless the same command disables it.
+a pattern turns on `CUSTOM` unless the same command disables it. A name you
+already use is replaced, pattern or literal, without a warning; the preview
+lists names only.
 
 A pattern that backtracks badly is refused before it is saved:
 
@@ -393,8 +503,15 @@ shim config --ledger --yes      # keep records past the session; off by default
 shim config --no-ledger --yes
 shim config --diet --yes        # shrink tool results losslessly; on by default
 shim config --no-diet --yes
-shim config --reset --yes       # back to defaults; the fix for a broken file
+shim config --reset --yes       # back to defaults; the fix for a malformed file
 ```
+
+`--reset` discards everything in the file, including custom patterns,
+`[reveal]` and hand-written `[mode]` and `[entities]`. It fixes a file that
+does not parse, not one that is refused: shim will not write over a refused
+file either, so that needs the `chmod` under [The settings
+file](#the-settings-file). Every change `shim config` saves rewrites
+`config.toml` without its comments; your `[mode]` and `[entities]` stay.
 
 ## Checking text directly
 
@@ -424,7 +541,7 @@ shim scan < config.env && echo "clean"
 
 If part of stdin cannot be scanned, `scan` and `redact` print
 `Unable to process stdin.` and exit `1`, as they do for input that cannot be
-read at all.
+read at all and while shim's settings file is refused or invalid.
 
 ### `shim redact`
 
@@ -435,8 +552,12 @@ $ printf 'key AKIAIOSFODNN7EXAMPLE' | shim redact
 key <SECRET_1>
 ```
 
+shim adds one newline to the end of the output, whatever the input ended with,
+so a file that already ends with one comes back from `shim redact < file` with
+a blank line at the end.
+
 Exits `0`, or `1` with `Unable to process stdin.` when stdin cannot be read or
-scanned in full.
+scanned in full, or the settings file is refused or invalid.
 
 ### `shim keys <file>…`
 
@@ -465,7 +586,8 @@ assigns to the value, read with its key, so `DB_PASSWORD=Synthetic-pass-0000`
 is a `SECRET` and `REDIS_URL` without credentials is nothing. A value made only
 of digits under such a key stays blank, as the detector leaves it. `not
 inspected` means the detector could not read that value, for example because
-shim's own settings cannot be read.
+shim's own settings file is refused or invalid, which turns every value into
+`not inspected`; `shim config` prints the reason.
 
 Values are read the way dotenv loaders read them, so that no part of one can
 show up as a name: `KEY=value`, `export KEY=value`, spaces around `=`; double,
@@ -504,9 +626,14 @@ one sentence and nothing about its contents. Nothing is written.
 
 ### `shim demo <client>`
 
-Runs a synthetic detector check for that client and prints what a hook would
-do. Nothing is installed and nothing is read from your machine — the input is
-fabricated. Use it to see the shape of the output before installing.
+Runs the detector on a synthetic sentence and shows what it finds and how it
+would be masked. The output is the same for every client: it does not show
+what your client's hook does with a finding — Codex only reports a prompt, and
+a Claude Code prompt is reported, not changed, by default. It installs
+nothing, touches no hook and records nothing, so it never appears in `shim
+report`. Nothing is read from your machine, your settings included: the input
+is fabricated. `<client>` is `claude`, `codex` or `copilot`; VS Code has no
+target.
 
 ```console
 $ shim demo claude
@@ -519,6 +646,11 @@ Send the synthetic report to <EMAIL_1> using token=<SECRET_1>
 `~/.config/shim/config.toml`, or `$XDG_CONFIG_HOME/shim/config.toml`. Every key
 is optional. `shim config` writes this file for you; edit it by hand when you
 want per-tool rules, which the flags do not cover.
+
+The file does not exist until something writes it, though `shim config` prints
+its path either way. If it does not exist yet, create it with `shim config
+--reset --yes`, which makes the folder `0700` and the file `0600` whatever your
+umask, then edit it.
 
 **shim checks the file before reading it**, and refuses it if it is a symlink,
 a hard link, not a regular file, owned by someone else, writable by another
@@ -534,6 +666,14 @@ For the ownership and writability cases it also says why: anything that can
 rewrite your settings can turn detection off. `shim config` creates the
 directory `0700` and the file `0600`. If you point `SHIM_CONFIG` at a shared
 location — `/tmp`, a group-writable mount — shim will refuse it.
+
+On Linux, an editor running under umask `002` creates a group-writable file or
+folder, which shim refuses in the same way. The fix is `chmod 700
+~/.config/shim && chmod 600 ~/.config/shim/config.toml`; `shim config --reset
+--yes` does not repair permissions. While the file is refused or invalid, every
+prompt is withheld, `shim scan` and `shim redact` print
+`Unable to process stdin.`, and `shim keys` shows `not inspected`; `shim config`
+prints the reason.
 
 ```toml
 # Which types to look for. Default: all of them.
@@ -570,13 +710,33 @@ Bash = ["SECRET", "DB_URI"]
 ```
 
 **Modes** are `observe` (count it), `warn` (say so, change nothing) and
-`enforce` (mask or block). **Directions** are `user-prompt`, `inbound`,
-`outbound`, `local-write`, `executable-text` and `model-output`.
+`enforce` (mask or block); `model-output` accepts only `observe`.
+**Directions** are `user-prompt`, `inbound`, `outbound`, `local-write`,
+`executable-text` and `model-output`. Keys use a hyphen: `user-prompt`, not
+`user_prompt`.
+
+Neither `shim config` nor `shim doctor` shows `[mode]` or per-tool
+`[entities]`, and a `[mode]` key that names no direction, event or tool, such
+as a misspelled one, is ignored without a warning. So check an edit by testing
+it: with `user-prompt = "enforce"`, a prompt holding `ops@example.com` must come
+back `shim blocked this prompt: EMAIL (1).` in Claude Code, Codex or VS Code. (GitHub Copilot CLI
+rewrites the prompt under `warn` and `enforce` alike.) An invalid value such as
+`"block"` makes shim withhold every prompt (`shim could not inspect this
+prompt, so it was withheld.`) until it is fixed.
+
+A per-tool `[entities]` list replaces the full set for that tool: types left
+out are neither masked nor reported in that tool's events and reach the model
+unchanged.
 
 The defaults are deliberate: your prompt is `warn`, because shim reports what
 you typed rather than rewriting it under you; tool results are `enforce`,
 because that is content you did not write and did not read; what the model
 wrote back is `observe`, because the client has already shown it.
+
+In VS Code, which cannot mask, refusing a tool call before it runs is
+`outbound = "enforce"`, and it stays off until you set it. `inbound` covers
+results, which VS Code lets shim report but not change, so `inbound =
+"enforce"`, already the default, refuses nothing there.
 
 ## Environment variables
 
@@ -593,9 +753,9 @@ wrote back is `observe`, because the client has already shown it.
 | What | Where |
 | --- | --- |
 | Settings | `~/.config/shim/config.toml` |
-| Ledger, when enabled | `~/.local/state/shim/ledger-YYYY-MM.jsonl` |
-| Session records | a private directory under your temp dir, cleared on reboot |
-| Withheld prompts | a private file under your temp dir, named in the message |
+| Ledger, when enabled | `~/.local/state/shim/ledger-YYYY-MM.jsonl`, or under `$XDG_STATE_HOME/shim` |
+| Session records | a private directory under your temp dir, `$TMPDIR/shim-session-<uid>`. Claude Code's `SessionEnd` deletes a session's record; Codex, GitHub Copilot CLI and VS Code send no session-end event, so theirs stay until the operating system clears the temp dir |
+| Withheld prompts | a private file under your temp dir, `$TMPDIR/shim-redacted-*.txt`, named in the message. Claude Code's `SessionEnd` deletes those older than 24 hours |
 
 Session records and the ledger hold entity **names and counts**, tool names and
 timestamps. They never hold the values that were found. What is recorded, and

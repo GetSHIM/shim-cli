@@ -22,7 +22,9 @@ Four things follow, and all four are limits rather than features:
 
 - Masking an outbound tool argument is **egress control**, not model
   protection. The model produced that argument, so it has already seen the
-  value; masking stops it leaving the machine.
+  value; masking stops it leaving the machine. It does not approve the call:
+  Claude Code's permission rules still decide whether it runs, and they see
+  the masked arguments.
 - `Bash` commands and `Write`/`Edit` content are **never rewritten**. Editing a
   command changes what runs, and editing a write payload puts a placeholder
   into a real file. Both are detected and can be warned about or denied.
@@ -45,6 +47,11 @@ summary's `warned` line. Bare numbers in other national
 formats without a cue are not detected, for example a CSV column of US numbers
 whose header is on another line. A [custom pattern](commands.md#shim-config)
 covers that case.
+
+Person names and postal addresses are not detected at all:
+`Alice Johnson lives at 221B Baker Street, London NW1 6XE` passes through as it
+is. Neither is an email address at an internal domain such as
+`ops@acme.internal`. A custom pattern covers a shape your project knows.
 
 ## Data flow
 
@@ -391,7 +398,9 @@ file attached to that prompt was not written.
 
 Copilot's `userPromptTransformed` replacement changes what is sent to the model
 and stored in session history, but the original prompt can remain visible in
-Copilot's timeline.
+Copilot's timeline. Copilot shows no message when it happens, and the model is
+not told that the placeholders stand for real values; `shim report` shows what
+was replaced.
 
 Some clients require review and trust for non-managed hooks. A hook can be
 disabled, untrusted after a change, missing, unable to start, crash, or time
@@ -399,7 +408,10 @@ out; those outcomes are client-controlled and may fail open. shim does not
 promise detection of every value, inspection of automatic context, or secure
 erasure of Python process memory. Only events listed by `shim doctor <client>`
 are inspected; anything reaching the model by another route is outside that
-list.
+list. VS Code, which has no doctor target, hands shim the prompt, a tool call
+before it runs and the tool's result, but a `read_file` result arrives empty:
+an agent reading `.env` in VS Code is neither masked nor reported, and only
+values in the file's path are caught, before the read.
 
 Installer checks detect unsafe paths and observed drift, but they are not an
 isolation boundary against a malicious process already running as the same OS

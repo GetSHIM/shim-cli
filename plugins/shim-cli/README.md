@@ -4,9 +4,10 @@ This plugin registers shim's local hooks. Claude Code gets the prompt,
 verified `PreToolUse` and `PostToolUse`, `PostToolUseFailure` (report only),
 `Stop`, and `SessionEnd` events. Codex
 gets the prompt event only. VS Code gets the prompt, `PreToolUse`,
-`PostToolUse` and `Stop`. There shim never masks, stops a prompt or denies a
-call under `enforce`, and only reports on a result: measured against VS Code
-1.137.0, a block after a tool is read straight through by the model.
+`PostToolUse` and `Stop`. There shim never masks; under `enforce` it stops a
+prompt, or refuses a call before it runs, and after a tool it only reports:
+measured against VS Code 1.137.0, a block after a tool is read straight through
+by the model.
 
 Three manifests sit side by side, one per format: `.claude-plugin/plugin.json`,
 `.codex-plugin/plugin.json`, and `plugin.json`, the Agent Plugins v1 manifest
@@ -57,8 +58,9 @@ stdout leaves the tool call and its result exactly as the client produced them.
 `shim doctor <client>` prints a coverage table of what shim sees and can change
 at each event, reports which of the three launchers is live, warns when the
 bundled archive and the installed package disagree about their version, and
-fails when both this plugin and a `shim install` hook are active for the same
-client — that combination inspects every prompt and every tool event twice.
+fails when both this plugin and a `shim install claude` hook are active in
+Claude Code — that combination inspects every prompt and every tool event
+twice.
 
 ## Choosing an installation method
 
@@ -70,11 +72,14 @@ the plugin launcher switches to the package hook.
 ```console
 uv tool install --python 3.12 --compile-bytecode shim
 # or
-pipx install --python python3.12 shim
+pipx install --python python3.12 --fetch-missing-python shim
 ```
 
 `--python` matters on a machine whose only Python is the system 3.9:
 without it `uv` quietly installs the last release that ran there, 0.2.0.
+Neither line needs Python 3.12 installed first: `uv` fetches it itself, and
+`--fetch-missing-python` makes `pipx` do the same. When `python3 --version`
+already says 3.10 or newer, `pipx install shim` is enough.
 
 `bin/shim.pyz` is built by `scripts/build_zipapp.py` and committed on `main` and
 on every tag. A fork or partial copy without it falls back to `PATH` or to

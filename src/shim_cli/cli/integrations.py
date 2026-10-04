@@ -317,8 +317,8 @@ def install(*, client: str, dry_run: bool, yes: bool) -> None:
     if client == "codex":
         emit(
             "WARN",
-            "Codex runs a hook only after you trust it: open Codex and accept "
-            "the shim hook when asked.",
+            "Codex skips a hook you have not trusted, without warning: open "
+            "/hooks in Codex, review the shim entry and enable it.",
         )
 
 
