@@ -8,7 +8,7 @@
 | Operating systems | macOS and Linux. Windows is not supported: the hook stands down with one line on stderr and inspects nothing, so no prompt is withheld; the plugin launcher does the same under Git Bash; every CLI command except `help`, `--version` and `update` refuses with exit 2. This was simulated (platform patched, `fcntl` removed), not run on Windows. WSL runs as Linux, not yet verified |
 | Prompt hooks | Codex CLI, Claude Code, GitHub Copilot CLI, and VS Code |
 | Tool hooks | Claude Code `PreToolUse` and `PostToolUse`, masked, and `PostToolUseFailure`, reported only; VS Code `PreToolUse` reports and denies, `PostToolUse` reports only |
-| `shim audit` | Claude Code history only: transcripts written by 2.1.270 to 2.1.286 were read; the record shapes are below |
+| `shim audit` | Claude Code history only: transcripts written by 2.1.270 to 2.1.291 were read; the record shapes are below |
 | `shim watch` | Claude Code only. Codex is refused: it reads its endpoint from its own configuration, so the proxy is bypassed and the session measured as empty ([probe](probe-2026-09-codex-watch.md)). Copilot out of scope because a custom endpoint removes GitHub authentication |
 
 ## Install
@@ -201,6 +201,21 @@ other attachment type (hook context, prompt snapshots, environment, skill and
 tool listings). `history.jsonl`, beside `projects/`, holds one line per
 interactive prompt with the keys `display`, `pastedContents`, `project`,
 `sessionId` and `timestamp`; `sessionId` is the transcript's file name.
+
+## 1.1.2 release evidence
+
+Recorded 6 October 2026 on Linux 6.18 x86_64, CPython 3.13.16, uv 0.12.23, on
+the 1.1.2 candidate with the rebuilt `bin/shim.pyz`. Two detector fixes and the
+tested Claude Code version; no hook protocol change.
+
+| Evidence | Recorded result |
+| --- | --- |
+| Local gate | `python scripts/check.py` steps green: lint, format, types, build, `git diff --check`; 2,566 tests passed and 2 skipped as root. The other two, `tests/cli/test_audit_purge.py`'s read-only folder cases, cannot fail a write as root and passed as an unprivileged user. |
+| Claude Code | tested: 2.1.291. The candidate installed with `uv tool install --python 3.12 --compile-bytecode` (CPython 3.12.3) into a scratch home, `shim install claude`, then `claude -p` sessions on three models with `--output-format stream-json`; every hook event ran. A `Read` of a synthetic `.env` reached the model as `AWS_ACCESS_KEY_ID=<SECRET_1>`, `BILLING_IBAN=<IBAN_1>`, `OWNER_EMAIL=<EMAIL_1>`, `DB_PASSWORD=<SECRET_2>`, and Claude Code's own transcript held the placeholders, not the values. A `Read` of `app.py` reached it with `datetime.fromtimestamp(1759744800)` and `ipaddress.IPv4Address(3221225985)` unchanged and `"tel (<PHONE_1>)"`; asked to add an hour, the model's `Edit` matched and the file on disk changed by that one number (1.1.1 handed it `fromtimestamp<PHONE_1>)`). `cat config.yaml` through Bash: `postgresql://<DB_URI_1>@db-prod.kasa.internal:5432/kasa`, `0.0.0.0:8080` unchanged. Grep results were masked the same way. A prompt with `ops@example.com`: `UserPromptSubmit says: shim: found EMAIL (1) in your prompt. Not modified.`; under `user-prompt = "enforce"` it was blocked with the `0600` redacted copy, which, read back through `--resume`, gave the model `<EMAIL_1>`. A WebFetch of `https://httpbin.org/get?email=ops@example.com` with no allow rule was refused, the denial showing `<EMAIL_1>`. `cat .env; exit 3` reported `unmasked 2 SECRET, 1 EMAIL, 1 IBAN (failed Bash)`. A session's record was gone after its `SessionEnd`. `shim audit` over those transcripts counted the two prompts and the failed Bash, not the blocked prompt, and, after the placeholder fix, no secret in model output where the code before this fix counted one (`` `DB_PASSWORD=<SECRET_2>` ``). The plugin loaded with `--plugin-dir plugins/shim-cli` and no `shim-hook` on `PATH`, so the archive ran: the same `.env` and `app.py` reads, the same placeholders, the timestamp unchanged. |
+| Codex CLI | tested: 0.159.0. Not re-run: no Codex client on the recording machine. The detector fixes reach the Codex prompt hook through the same `evaluate`, covered by the suite. |
+| GitHub Copilot CLI | tested: 1.0.83. Not re-run, as Codex. |
+| VS Code | tested: 1.137.0. Not re-run, as Codex. |
+| Windows | Unchanged: every command still refuses with exit 2 before touching a file (`test_on_windows_every_command_refuses_before_touching_a_file`). |
 
 ## 1.1.1 release evidence
 

@@ -383,6 +383,10 @@ def _scan_phone(text: str) -> list[Match]:
     for candidate in candidates:
         start, end = candidate.start, candidate.end
         raw = text[start:end]
+        number = raw.lstrip("([" + string.whitespace)
+        if number != raw and not {")", "]"} & set(number):
+            start, raw = end - len(number), number
+            candidate = candidate._replace(start=start)
         if (
             _DECIMAL_LITERAL.fullmatch(raw)
             or _DECIMAL_POINT.fullmatch(text, max(0, start - 2), start)
@@ -559,7 +563,7 @@ def _not_a_secret(
     shaped = len(value) <= _MAX_SHAPED_VALUE
     if shaped and (
         _REFERENCE.fullmatch(value)
-        or PLACEHOLDER.fullmatch(value)
+        or PLACEHOLDER.fullmatch(value.rstrip("`*.;:!?)"))
         or _TYPE_NAME.fullmatch(value)
     ):
         return True
