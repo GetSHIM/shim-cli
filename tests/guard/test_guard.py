@@ -573,6 +573,14 @@ PHONE_SPANS = (
     ("5321234567.25", []),
     ("x 0.05321234567", []),
     ("1757496600 0.0376118499 s", []),
+    ("datetime.fromtimestamp(1759744800)", []),
+    ("IPv4Address(3221225985)", []),
+    ("foo( 3221225985 )", []),
+    ("ids[1759744800]", []),
+    ("phone (5321234567)", [[7, 17]]),
+    ("tel (4155552671)", [[5, 15]]),
+    ("call (415) 555-2671", [[5, 19]]),
+    ("x = (0212 555 12 34)", [[5, 19]]),
 )
 
 
@@ -583,6 +591,14 @@ def test_a_bare_number_is_a_phone_only_when_shaped_or_cued(
     findings = evaluate(text).findings
 
     assert [[f.start, f.end] for f in findings if f.entity_type == "PHONE"] == spans
+
+
+def test_a_number_in_code_keeps_its_opening_bracket() -> None:
+    assert (
+        evaluate("EPOCH = datetime.fromtimestamp(1759744800)").redacted_text
+        == "EPOCH = datetime.fromtimestamp(1759744800)"
+    )
+    assert evaluate("phone (5321234567)").redacted_text == "phone (<PHONE_1>)"
 
 
 def test_bare_numbers_counts_the_ids_no_recogniser_claimed() -> None:
@@ -808,6 +824,22 @@ def test_a_placeholder_identity_token_is_left_alone(value: str) -> None:
     text = f'"identitytoken": "{value}"'
 
     assert evaluate(text).redacted_text == text
+
+
+@pytest.mark.parametrize(
+    "text",
+    (
+        "`DB_PASSWORD=<SECRET_2>`",
+        "**DB_PASSWORD=<SECRET_2>**",
+        "(DB_PASSWORD=<SECRET_2>).",
+    ),
+)
+def test_a_quoted_shim_placeholder_is_left_alone(text: str) -> None:
+    assert evaluate(text).redacted_text == text
+
+
+def test_a_placeholder_with_more_after_it_is_still_a_secret() -> None:
+    assert evaluate("DB_PASSWORD=<SECRET_2>xyz").counts == (("SECRET", 1),)
 
 
 def test_an_email_right_after_a_url_is_found_once_as_email() -> None:

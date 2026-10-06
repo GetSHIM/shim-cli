@@ -34,7 +34,7 @@ def test_claude_code_settings_use_shell_free_exec_form(tmp_path: Path) -> None:
     assert tool_hook_group(interpreter) == {"matcher": "*", "hooks": [handler]}
     assert HOOK_TIMEOUT_SECONDS == 30
     assert MINIMUM_CLAUDE_VERSION == "2.1.210"
-    assert TESTED_CLAUDE_VERSION == "2.1.286"
+    assert TESTED_CLAUDE_VERSION == "2.1.291"
 
 
 def test_claude_code_registers_the_prompt_tool_and_session_events(
