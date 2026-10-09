@@ -419,7 +419,9 @@ user. Such a process has equivalent authority over user-scoped client settings
 and can race POSIX pathname operations despite advisory locking.
 
 Review every temporary redaction before resubmission. The detector can miss
-sensitive content.
+sensitive content. Turkish licence plates are looked for only after `shim
+config --enable TR_LICENSE_PLATE`; with the defaults a plate reaches the model
+as typed.
 
 
 ## `shim watch`

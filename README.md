@@ -179,16 +179,21 @@ and what shim can and cannot change at each one.
 
 What shim-cli detects, and masks wherever the client allows it:
 
-- **Personal data:** email addresses, phone numbers, payment cards that pass
-  the Luhn check, IBANs, IP and MAC addresses, US SSNs, and Turkish national
-  and tax IDs.
+- **Personal data:** email addresses (also written `name[at]domain.tld`),
+  phone numbers, payment cards that pass the Luhn check (Troy and the
+  Mastercard 2-series included), IBANs (lowercase, spaced, or broken over a
+  line), IP and MAC addresses, US SSNs, and Turkish national IDs (also in
+  `100 000 001 46` groups) and tax IDs. Turkish licence plates are the one
+  opt-in type: `shim config --enable TR_LICENSE_PLATE`, because coding traffic
+  is full of plate-shaped strings such as `[12 GET 200]`.
 - **Keys and tokens:** Anthropic, OpenAI, Stripe and SendGrid keys; Slack
   tokens, and Slack and Discord webhook URLs; AWS access key IDs; GitHub,
   GitLab, npm, Hugging Face and Google API tokens; JWTs; private keys in PEM
   form; Azure storage `AccountKey` values; HTTP `Authorization: Basic` and
   `Bearer` headers.
-- **Credentials by context:** the value of a named key such as `DB_PASSWORD`
-  or `AWS_SECRET_ACCESS_KEY`, a `--password` argument, the user and password in
+- **Credentials by context:** the value of a named key such as `DB_PASSWORD`,
+  `AWS_SECRET_ACCESS_KEY` or, in Turkish, `şifre` and `parola` with `=` or `:`,
+  a `--password` argument, the user and password in
   a connection string or URL, Docker and npm registry logins, and a base64
   block that decodes to one of these.
 
@@ -212,7 +217,11 @@ so the agent can still tell production from staging. Once
 longer tell "listen on every interface" from "loopback only" — detection that
 fires where there is nothing to find is how people learn to ignore it. It also
 leaves bare timestamps, ids and decimals alone: a run of digits is a phone
-number only when it is Turkish-shaped or follows a cue such as `tel` or `phone`.
+number only when it is Turkish-shaped or follows a cue such as `tel`, `phone`
+or a `phone_number` key, and `order no` or `sipariş no` is not a cue. Dated
+model ids (`claude-sonnet-4-5-20250929`) and version strings (`version
+1.2.3.4`, `numpy==1.26.4.1`) reach the model unchanged, so an `Edit` on that
+line still applies.
 
 Detection runs locally without an account, API key, network request, daemon,
 telemetry, or prompt history.
@@ -546,8 +555,8 @@ Nothing is ever transmitted. See
 
 ## Configure detection
 
-All supported entity types are enabled by default. View or change the local
-policy with:
+Every built-in type except Turkish licence plates is enabled by default. View
+or change the local policy with:
 
 ```console
 shim config
@@ -587,7 +596,7 @@ and `redact` all use the same policy.
 
 ### Your own patterns
 
-The eleven built-in types do not know your project's code name, your internal
+The built-in types do not know your project's code name, your internal
 host format, or your customer id shape. Name a pattern and shim masks it like
 any other type, as `CUSTOM`:
 
@@ -683,7 +692,7 @@ Every figure here was measured on the released build, not estimated.
 | Tests | **2,300+**, one command: `python scripts/check.py` — lock, lint, format, types, suite, wheel, sdist |
 | Hook cost | **70 ms** median end to end, interpreter start included; **42 ms** for a session summary |
 | With 32 custom patterns | **+0.6 ms** median against the same prompt with none |
-| Detector corpus | **663 cases**, graded on exact redacted output rather than category presence |
+| Detector corpus | **727 cases**, graded on exact redacted output rather than category presence, and the gateway's own 140-case corpus, against which every difference is pinned with its reason |
 | Release evidence | SBOM, provenance and Sigstore bundles on the release page from 0.3.2, with the `gh attestation verify` command in [the compatibility record](https://github.com/GetSHIM/shim-cli/blob/main/docs/compatibility.md#100-release-evidence) |
 
 <p align="center">

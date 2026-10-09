@@ -300,3 +300,16 @@ def test_a_reveal_table_survives_a_settings_round_trip() -> None:
     rendered = render_settings(DEFAULT_ENTITIES, reveal=parsed["reveal"])
 
     assert parse_settings(rendered.decode())["reveal"] == {"IBAN": 4, "PHONE": 2}
+
+
+def test_the_plate_type_is_off_until_a_settings_file_names_it(tmp_path: Path) -> None:
+    target = tmp_path / "shim" / "config.toml"
+
+    assert "TR_LICENSE_PLATE" not in load_entities(target)
+
+    target.parent.mkdir()
+    target.write_bytes(render_entities(("EMAIL", "SECRET")))
+    assert "TR_LICENSE_PLATE" not in load_entities(target)
+
+    target.write_bytes(render_entities(("EMAIL", "TR_LICENSE_PLATE")))
+    assert load_entities(target) == ("EMAIL", "TR_LICENSE_PLATE")

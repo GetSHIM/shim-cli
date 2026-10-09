@@ -15,13 +15,17 @@ BUILT_IN_TYPES = (
     "US_SSN",
     "TR_NATIONAL_ID",
     "TR_VKN",
+    "TR_LICENSE_PLATE",
     "SECRET",
     "DB_URI",
 )
-# The twelfth type is whatever the user defined; it has no built-in corpus.
+# Coding traffic is full of plate-shaped strings (`[12 GET 200]`, `01 OCT 26`),
+# so a plate is looked for only where the user's settings name the type.
+OPT_IN_TYPES = ("TR_LICENSE_PLATE",)
+# One more type is whatever the user defined; it has no built-in corpus.
 CUSTOM = "CUSTOM"
 ENTITY_TYPES = (*BUILT_IN_TYPES, CUSTOM)
-DEFAULT_ENTITIES = ENTITY_TYPES
+DEFAULT_ENTITIES = tuple(name for name in ENTITY_TYPES if name not in OPT_IN_TYPES)
 
 # The three types where a trailing digit group answers "which one" without
 # giving the value back, as card issuers and banks already print them.
