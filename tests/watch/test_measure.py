@@ -711,3 +711,38 @@ def test_one_oversized_leaf_no_longer_voids_the_whole_request() -> None:
 
     assert exchange.measured is True
     assert exchange.entities_by_section["messages"]["EMAIL"] == 9_000
+
+
+@pytest.mark.parametrize(
+    ("split", "hour"),
+    [
+        ({"ephemeral_5m_input_tokens": 600, "ephemeral_1h_input_tokens": 400}, 400),
+        (None, 0),
+        ({"ephemeral_1h_input_tokens": 5_000}, 1_000),
+        ({"ephemeral_1h_input_tokens": "400"}, 0),
+    ],
+)
+def test_usage_reads_the_one_hour_part_of_the_cache_writes(split, hour) -> None:
+    block = {"input_tokens": 3, "cache_creation_input_tokens": 1_000}
+    if split is not None:
+        block["cache_creation"] = split
+
+    usage = measure.usage_from({"usage": block})
+
+    assert usage.cache_creation_input_tokens == 1_000
+    assert usage.cache_creation_1h_input_tokens == hour
+
+
+def test_merged_usage_keeps_the_split_with_its_total() -> None:
+    start = measure.Usage(
+        input_tokens=3,
+        cache_creation_input_tokens=1_000,
+        cache_creation_1h_input_tokens=400,
+    )
+    delta = measure.Usage(output_tokens=20)
+
+    merged = start.merge(delta)
+
+    assert merged.cache_creation_input_tokens == 1_000
+    assert merged.cache_creation_1h_input_tokens == 400
+    assert delta.merge(start).cache_creation_1h_input_tokens == 400

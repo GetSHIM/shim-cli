@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import datetime
+import re
+
 from . import measure
 from .measure import OTHER, RESPONSE_KINDS, SECTIONS, TRUNCATED, Usage
 
@@ -12,45 +15,94 @@ BESIDES = ("system", "tools", OTHER)
 KIND_WORDS = {"text": "model text", "thinking": "thinking"}
 NOT_LEAKS = "written by the model; it may repeat values it was given"
 
-PRICES = (
-    ("claude-opus-4", (15.0, 75.0, 18.75, 1.5)),
-    ("claude-opus-5", (15.0, 75.0, 18.75, 1.5)),
-    ("claude-sonnet-4", (3.0, 15.0, 3.75, 0.3)),
-    ("claude-sonnet-5", (3.0, 15.0, 3.75, 0.3)),
-    ("claude-haiku-4", (1.0, 5.0, 1.25, 0.1)),
-    ("claude-3-5-haiku", (0.8, 4.0, 1.0, 0.08)),
-)
-PRICED_ON = "2026-08-30"
+# USD per million tokens: input, 5-minute cache write, 1-hour cache write,
+# cache read, output. Read from the Claude pricing page on PRICED_ON; every id
+# was confirmed there or by GET /v1/models. An id not listed is unpriced: a
+# neighbouring row priced Opus 4.5 to 5.5 at Opus 4 rates, up to 7.5 times over.
+_FABLE_5_1 = (10.0, 12.5, 20.0, 0.25, 50.0)
+_FABLE_5 = (10.0, 12.5, 20.0, 1.0, 50.0)
+_OPUS_4_5 = (5.0, 6.25, 10.0, 0.5, 25.0)
+_OPUS_4 = (15.0, 18.75, 30.0, 1.5, 75.0)
+_SONNET_4 = (3.0, 3.75, 6.0, 0.3, 15.0)
+PRICES = {
+    "claude-fable-5-1": _FABLE_5_1,
+    "claude-mythos-5-1": _FABLE_5_1,
+    "claude-fable-5": _FABLE_5,
+    "claude-mythos-5": _FABLE_5,
+    "claude-opus-5-5": (4.0, 5.0, 8.0, 0.2, 20.0),
+    "claude-opus-5": _OPUS_4_5,
+    "claude-opus-4-8": _OPUS_4_5,
+    "claude-opus-4-7": _OPUS_4_5,
+    "claude-opus-4-6": _OPUS_4_5,
+    "claude-opus-4-5": _OPUS_4_5,
+    "claude-opus-4-1": _OPUS_4,
+    "claude-opus-4": _OPUS_4,
+    "claude-sonnet-5-5": (2.0, 2.5, 4.0, 0.1, 10.0),
+    "claude-sonnet-5": (2.0, 2.5, 4.0, 0.2, 10.0),
+    "claude-sonnet-4-6": _SONNET_4,
+    "claude-sonnet-4-5": _SONNET_4,
+    "claude-sonnet-4": _SONNET_4,
+    "claude-haiku-5-5": (0.1, 0.125, 0.2, 0.01, 0.5),
+    "claude-haiku-4-5": (1.0, 1.25, 2.0, 0.1, 5.0),
+    "claude-3-5-haiku": (0.8, 1.0, 1.6, 0.08, 4.0),
+}
+# A prompt (input, cache writes and cache reads together) above the threshold
+# pays the second row on every component of that request.
+LONG_PROMPT = {"claude-haiku-5-5": (100_000, (0.5, 0.625, 1.0, 0.05, 2.5))}
+PRICED_ON = "2026-10-09"
+STALE_AFTER_DAYS = 90
 _PER = 1_000_000
+_SNAPSHOT = re.compile(r"-\d{8}$")
 
 
-def _price(model: str):
-    for prefix, rates in PRICES:
-        if model.startswith(prefix):
-            return rates
-    return None
+def model_id(model: str) -> str:
+    """The table's key: one trailing `-latest` and one snapshot date dropped."""
+    return _SNAPSHOT.sub("", model.removesuffix("-latest"))
+
+
+def _price(model: str, prompt_tokens: int = 0):
+    key = model_id(model)
+    threshold, long_rates = LONG_PROMPT.get(key, (0, None))
+    if long_rates is not None and prompt_tokens > threshold:
+        return long_rates
+    return PRICES.get(key)
+
+
+def _today() -> datetime.date:
+    return datetime.date.today()
+
+
+def prices_stale() -> bool:
+    age = _today() - datetime.date.fromisoformat(PRICED_ON)
+    return age.days > STALE_AFTER_DAYS
+
+
+def exchange_spend(exchange) -> float | None:
+    usage = exchange.usage
+    rates = _price(exchange.model or "", usage.total_input)
+    if rates is None:
+        return None
+    fresh, five_minutes, one_hour, read, output = rates
+    hour_writes = usage.cache_creation_1h_input_tokens
+    return (
+        usage.input_tokens * fresh
+        + (usage.cache_creation_input_tokens - hour_writes) * five_minutes
+        + hour_writes * one_hour
+        + usage.cache_read_input_tokens * read
+        + usage.output_tokens * output
+    ) / _PER
 
 
 def spend(exchanges: list) -> tuple:
-    total = 0.0
-    priced = 0
-    unpriced = set()
-    for exchange in exchanges:
-        rates = _price(exchange.model or "")
-        if rates is None:
-            if exchange.model:
-                unpriced.add(exchange.model)
-            continue
-        fresh, output, write, read = rates
-        usage = exchange.usage
-        total += (
-            usage.input_tokens * fresh
-            + usage.output_tokens * output
-            + usage.cache_creation_input_tokens * write
-            + usage.cache_read_input_tokens * read
-        ) / _PER
-        priced += 1
-    return total, priced, sorted(unpriced)
+    """Session total, priced count, unpriced model names, and each exchange's cost."""
+    costs = [exchange_spend(exchange) for exchange in exchanges]
+    unpriced = {
+        exchange.model
+        for exchange, cost in zip(exchanges, costs, strict=True)
+        if cost is None and exchange.model
+    }
+    priced = [cost for cost in costs if cost is not None]
+    return sum(priced), len(priced), sorted(unpriced), costs
 
 
 def spend_basis(exchanges: list) -> str:
@@ -72,6 +124,10 @@ def totals(exchanges: list) -> Usage:
             ),
             cache_read_input_tokens=(
                 combined.cache_read_input_tokens + usage.cache_read_input_tokens
+            ),
+            cache_creation_1h_input_tokens=(
+                combined.cache_creation_1h_input_tokens
+                + usage.cache_creation_1h_input_tokens
             ),
         )
     return combined
@@ -362,7 +418,7 @@ def render(session, seconds: float) -> str:
     for index, line in enumerate(_compared(by_section, by_kind)):
         lines.append(f"  compare   {line}" if not index else f"            {line}")
 
-    dollars, priced, unpriced = spend(exchanges)
+    dollars, priced, unpriced, costs = spend(exchanges)
     if priced:
         basis = spend_basis(exchanges)
         if basis == "subscription":
@@ -376,8 +432,27 @@ def render(session, seconds: float) -> str:
                 if _price(e.model or "")
             )
             on = f"; {subscribed} of {priced} requests on a subscription"
+        stale = (
+            f", older than {STALE_AFTER_DAYS} days; newer models and price changes "
+            "are not reflected"
+            if prices_stale()
+            else ""
+        )
         lines.append(
-            f"  spend     ~${dollars:,.2f}  (approximate, {PRICED_ON} prices{on})"
+            f"  spend     ~${dollars:,.2f}  (approximate, {PRICED_ON} prices{stale}{on})"
+        )
+    if priced >= 2:
+        cost, costliest = max(
+            (
+                (cost, exchange)
+                for cost, exchange in zip(costs, exchanges, strict=True)
+                if cost is not None
+            ),
+            key=lambda pair: pair[0],
+        )
+        lines.append(
+            f"  costliest  one request ~${cost:,.2f} ({costliest.model}, "
+            f"{_thousands(costliest.usage.total_input)} input tokens)"
         )
     if unpriced:
         lines.append(f"  spend     not priced for {', '.join(unpriced)}")
@@ -404,7 +479,7 @@ def as_json(session, seconds: float) -> dict:
         if exchange.path.endswith(("messages", "responses", "completions"))
     ]
     combined = totals(exchanges)
-    dollars, priced, unpriced = spend(exchanges)
+    dollars, priced, unpriced, costs = spend(exchanges)
     count, size = at_file_totals(exchanges)
     return {
         "seconds": round(seconds, 1),
@@ -430,6 +505,7 @@ def as_json(session, seconds: float) -> dict:
             "tokens_by_section": section_totals(exchanges),
             "spend_usd": round(dollars, 4) if priced else None,
             "priced_on": PRICED_ON if priced else None,
+            "prices_stale": prices_stale(),
             "unpriced_models": unpriced,
         },
         "spend_basis": spend_basis(exchanges),
@@ -462,9 +538,14 @@ def as_json(session, seconds: float) -> dict:
                     "cache_creation_input_tokens": (
                         exchange.usage.cache_creation_input_tokens
                     ),
+                    "cache_creation_1h_input_tokens": (
+                        exchange.usage.cache_creation_1h_input_tokens
+                    ),
                 },
+                "spend_usd": None if cost is None else round(cost, 6),
+                "priced_as": None if cost is None else model_id(exchange.model),
             }
-            for exchange in exchanges
+            for exchange, cost in zip(exchanges, costs, strict=True)
         ],
     }
 
@@ -477,6 +558,9 @@ __all__ = [
     "custom_totals",
     "entity_section_totals",
     "entity_totals",
+    "exchange_spend",
+    "model_id",
+    "prices_stale",
     "response_scan",
     "response_scan_reason",
     "response_totals",
