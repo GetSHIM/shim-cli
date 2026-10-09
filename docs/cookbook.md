@@ -369,8 +369,17 @@ kubectl logs api-7f4 | shim redact | pbcopy
 That one is worth keeping in your shell history. Pasting logs into a chat is
 how most values escape, and this makes the safe version the easy version.
 
-Add `--json` to most commands when a script is reading the output. The text
-layout is not a stable interface; the JSON is.
+Add `--json` when a script is reading the output; every command but `help`
+and `update` takes it. The text layout is not a stable interface; the JSON is.
+An error comes back as `"status": "error"` with a stable `code` and a `fix`:
+branch on `code`, not on the wording of `error`.
+
+```console
+$ shim config --reveal SECRET=4 --yes --json
+{"code":"REVEAL_INVALID","command":"config","error":"that entity cannot reveal a tail","fix":"Use --reveal IBAN=N, CREDIT_CARD=N or PHONE=N with N from 1 to 4.","schema_version":1,"status":"error"}
+```
+
+Every code is in the [command reference](commands.md#error-codes).
 
 ## Know what your client can actually do
 

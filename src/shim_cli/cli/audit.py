@@ -12,11 +12,10 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from time import perf_counter
-from typing import NoReturn
 
 import typer
 
-from shim_cli.cli.output import emit_json
+from shim_cli.cli.output import emit_error, emit_json
 from shim_cli.guard.entities import PLACEHOLDER
 from shim_cli.session.record import UNKNOWN_TOOL_LABEL, display_label, scrubbed_target
 
@@ -427,17 +426,14 @@ def _report_lines(summary: dict) -> list[str]:
     return lines
 
 
-def _fail(as_json: bool, message: str) -> NoReturn:
-    if as_json:
-        emit_json("audit", "error", error=message)
-    else:
-        typer.echo(f"shim: {message}.", err=True)
-    raise typer.Exit(2)
-
-
 def _run_scan(
     *, since: str | None, project: Path | None, as_json: bool
 ) -> tuple[_Scan, dict]:
+    from shim_cli.cli.configuration import (
+        FIX_SETTINGS_INVALID,
+        FIX_SETTINGS_UNSAFE,
+        settings_refused,
+    )
     from shim_cli.config import describe_settings_error, load_policy
     from shim_cli.guard import evaluate as evaluate_guard
 
@@ -448,13 +444,44 @@ def _run_scan(
         try:
             start = datetime.strptime(since, "%Y-%m-%d").timestamp()
         except ValueError:
-            _fail(as_json, "--since takes a date as YYYY-MM-DD")
+            emit_error(
+                "audit",
+                "INVALID_DATE",
+                "--since takes a date as YYYY-MM-DD",
+                "Pass --since as YYYY-MM-DD.",
+                as_json=as_json,
+                plain=True,
+            )
     if not projects.is_dir():
-        _fail(as_json, f"no Claude Code history at {shown}")
+        emit_error(
+            "audit",
+            "HISTORY_NOT_FOUND",
+            f"no Claude Code history at {shown}",
+            None,
+            as_json=as_json,
+            plain=True,
+        )
     try:
         policy = load_policy()
     except ValueError as error:
-        _fail(as_json, describe_settings_error(error).rstrip("."))
+        problem = describe_settings_error(error).rstrip(".")
+        if settings_refused(error):
+            emit_error(
+                "audit",
+                "SETTINGS_REFUSED",
+                problem,
+                FIX_SETTINGS_UNSAFE,
+                as_json=as_json,
+                plain=True,
+            )
+        emit_error(
+            "audit",
+            "SETTINGS_INVALID",
+            problem,
+            FIX_SETTINGS_INVALID,
+            as_json=as_json,
+            plain=True,
+        )
     started = perf_counter()
     widths: list[int] = []
 
@@ -474,7 +501,14 @@ def _run_scan(
             progress,
         )
     except OSError:
-        _fail(as_json, f"the Claude Code history at {shown} could not be read")
+        emit_error(
+            "audit",
+            "HISTORY_UNREADABLE",
+            f"the Claude Code history at {shown} could not be read",
+            None,
+            as_json=as_json,
+            plain=True,
+        )
     if widths:
         sys.stderr.write("\r" + " " * max(widths) + "\r")
     return scan, _summary(scan, perf_counter() - started)
@@ -482,11 +516,6 @@ def _run_scan(
 
 def _terminal() -> bool:
     return sys.stdin.isatty()
-
-
-def _refuse(message: str) -> NoReturn:
-    typer.echo(f"shim: {message}; nothing was deleted.", err=True)
-    raise typer.Exit(2)
 
 
 def _status(path: Path) -> tuple[int, int] | None:
@@ -619,9 +648,22 @@ def audit(
     *, since: str | None, project: Path | None, as_json: bool, purge: bool = False
 ) -> None:
     if purge and as_json:
-        _refuse("--purge cannot be combined with --json")
+        emit_error(
+            "audit",
+            "OPTIONS_CONFLICT",
+            "--purge cannot be combined with --json; nothing was deleted",
+            "Run the command with one of them.",
+            as_json=True,
+        )
     if purge and not _terminal():
-        _refuse("--purge needs a terminal")
+        emit_error(
+            "audit",
+            "TERMINAL_REQUIRED",
+            "--purge needs a terminal; nothing was deleted",
+            "Run shim audit --purge in a terminal.",
+            as_json=False,
+            plain=True,
+        )
     scan, summary = _run_scan(since=since, project=project, as_json=as_json)
     found = bool(summary["reached"])
     if as_json:

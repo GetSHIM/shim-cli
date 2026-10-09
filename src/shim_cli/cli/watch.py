@@ -9,7 +9,7 @@ import time
 
 import typer
 
-from shim_cli.cli.output import emit, emit_json, terminal_text
+from shim_cli.cli.output import emit, emit_error, emit_json, terminal_text
 
 # Copilot proxying requires BYOK.
 BASE_URL_VARIABLES = {"claude": "ANTHROPIC_BASE_URL"}
@@ -31,26 +31,45 @@ REFUSED = {
 
 def watch(*, command: tuple, as_json: bool) -> None:
     if not command:
-        _fail(as_json, "Nothing to run. Try: shim watch -- claude")
+        emit_error(
+            "watch",
+            "NOTHING_TO_RUN",
+            "Nothing to run. Try: shim watch -- claude",
+            "shim watch -- claude",
+            as_json=as_json,
+        )
     client = os.path.basename(command[0])
-    if client in REFUSED:
-        _fail(as_json, REFUSED[client])
     variable = BASE_URL_VARIABLES.get(client, "")
     if not variable:
-        _fail(
-            as_json,
-            f"shim watch does not support {client}. Supported: "
+        emit_error(
+            "watch",
+            "CLIENT_UNSUPPORTED",
+            REFUSED.get(client)
+            or f"shim watch does not support {client}. Supported: "
             + ", ".join(sorted(BASE_URL_VARIABLES)),
+            f"shim install {client} installs the hook, which needs no proxy."
+            if client in ("codex", "copilot")
+            else "shim watch -- claude",
+            as_json=as_json,
         )
     if os.environ.get(variable):
-        _fail(
-            as_json,
+        emit_error(
+            "watch",
+            "BASE_URL_ALREADY_SET",
             f"{variable} is already configured; custom upstreams are unsupported. "
             f"Run shim watch with {variable} unset, or use the hook "
             f"(shim install {client}), which does not need the proxy.",
+            f"Unset {variable} for this command.",
+            as_json=as_json,
         )
     if shutil.which(command[0]) is None and not os.path.exists(command[0]):
-        _fail(as_json, f"{command[0]} was not found on PATH.")
+        emit_error(
+            "watch",
+            "EXECUTABLE_NOT_FOUND",
+            f"{command[0]} was not found on PATH.",
+            None,
+            as_json=as_json,
+        )
 
     from shim_cli.guard import evaluate
     from shim_cli.watch import proxy, report
@@ -58,7 +77,13 @@ def watch(*, command: tuple, as_json: bool) -> None:
     try:
         running = proxy.start(UPSTREAMS[client], evaluate)
     except OSError as error:
-        _fail(as_json, f"The proxy could not start ({error}); nothing was run.")
+        emit_error(
+            "watch",
+            "PROXY_FAILED",
+            f"The proxy could not start ({error}); nothing was run.",
+            None,
+            as_json=as_json,
+        )
 
     if not as_json:
         emit("PASS", f"Watching {client} on {running.base_url}. Nothing is modified.")
@@ -74,7 +99,13 @@ def watch(*, command: tuple, as_json: bool) -> None:
             process.send_signal(signal.SIGINT)
             code = process.wait()
     except OSError as error:
-        _fail(as_json, f"{command[0]} could not be started ({error}).")
+        emit_error(
+            "watch",
+            "CLIENT_START_FAILED",
+            f"{command[0]} could not be started ({error}).",
+            None,
+            as_json=as_json,
+        )
     finally:
         running.stop()
 
@@ -88,11 +119,3 @@ def watch(*, command: tuple, as_json: bool) -> None:
     if text:
         print(terminal_text(text, sys.stdout, "\n"))
     raise typer.Exit(code)
-
-
-def _fail(as_json: bool, message: str):
-    if as_json:
-        emit_json("watch", "error", error=message)
-    else:
-        emit("FAIL", message, error=True)
-    raise typer.Exit(2)

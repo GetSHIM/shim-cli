@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import NamedTuple, NoReturn
+from typing import NamedTuple
 
 import typer
 
-from shim_cli.cli.output import emit_json
+from shim_cli.cli.output import emit_error, emit_json
 
 MAX_FILE_BYTES = 1_000_000
 _LINE_END = re.compile(r"\r\n|\r|\n")
@@ -134,27 +134,47 @@ def parse(text: str) -> list[Entry]:
     return entries
 
 
-def _refuse(message: str, as_json: bool) -> NoReturn:
-    if as_json:
-        emit_json("keys", "error", error=message)
-    else:
-        typer.echo(f"shim: {message}.", err=True)
-    raise typer.Exit(2)
-
-
 def _read(path: Path, as_json: bool) -> str:
     if not path.exists():
-        _refuse(f"{path} does not exist", as_json)
+        emit_error(
+            "keys",
+            "FILE_NOT_FOUND",
+            f"{path} does not exist",
+            None,
+            as_json=as_json,
+            plain=True,
+        )
     if not path.is_file():
-        _refuse(f"{path} is not a regular file", as_json)
+        emit_error(
+            "keys",
+            "NOT_A_FILE",
+            f"{path} is not a regular file",
+            None,
+            as_json=as_json,
+            plain=True,
+        )
     with path.open("rb") as stream:
         data = stream.read(MAX_FILE_BYTES + 1)
     if len(data) > MAX_FILE_BYTES:
-        _refuse(f"{path} is larger than 1 MB", as_json)
+        emit_error(
+            "keys",
+            "FILE_TOO_LARGE",
+            f"{path} is larger than 1 MB",
+            None,
+            as_json=as_json,
+            plain=True,
+        )
     try:
         return data.decode("utf-8")
     except UnicodeDecodeError:
-        _refuse(f"{path} is not UTF-8 text", as_json)
+        emit_error(
+            "keys",
+            "NOT_UTF8",
+            f"{path} is not UTF-8 text",
+            None,
+            as_json=as_json,
+            plain=True,
+        )
 
 
 def _row(entry: Entry) -> dict:
