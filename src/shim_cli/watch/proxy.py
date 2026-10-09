@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import codecs
+import hashlib
 import http.client
 import http.server
 import socketserver
@@ -54,6 +55,9 @@ class Session:
     )
     _in_flight: int = 0
     _idle: threading.Event = field(default_factory=threading.Event)
+    # (path, body digest) of requests still waiting for or streaming their
+    # answer, counted; held in memory for the life of the exchange only.
+    _pending_bodies: dict = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self._idle.set()
@@ -71,6 +75,19 @@ class Session:
 
     def drain(self, timeout: float) -> bool:
         return self._idle.wait(timeout)
+
+    def entered(self, key: tuple) -> bool:
+        """True when an identical request is still in flight."""
+        with self._lock:
+            seen = self._pending_bodies.get(key, 0)
+            self._pending_bodies[key] = seen + 1
+            return seen > 0
+
+    def left(self, key: tuple) -> None:
+        with self._lock:
+            remaining = self._pending_bodies.pop(key, 1) - 1
+            if remaining:
+                self._pending_bodies[key] = remaining
 
     def record(self, exchange: Exchange) -> None:
         with self._lock:
@@ -124,8 +141,16 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         measuring = not oversized and self.session._measurement_slots.acquire(False)
         if not measuring:
             exchange.incomplete_reason = BODY_TOO_LARGE if oversized else SLOTS_BUSY
+        digest = (
+            hashlib.sha256()
+            if self.command == "POST"
+            and exchange.path.endswith(("messages", "responses", "completions"))
+            else None
+        )
+        pending: tuple = ()
 
         def body():
+            nonlocal pending
             deadline = time.monotonic() + DOWNSTREAM_TIMEOUT_SECONDS
             remaining = length
             while remaining:
@@ -139,7 +164,12 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 remaining -= len(chunk)
                 if measuring:
                     capture.extend(chunk)
+                if digest is not None:
+                    digest.update(chunk)
                 yield chunk
+            if digest is not None:
+                pending = (exchange.path, digest.hexdigest())
+                exchange.duplicate_in_flight = self.session.entered(pending)
 
         connection = None
         responded = False
@@ -181,6 +211,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 except OSError:
                     pass
         finally:
+            if pending:
+                self.session.left(pending)
             if connection is not None:
                 connection.close()
             if measuring:
@@ -199,6 +231,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         exchange.entities_by_section = measured.entities_by_section
         exchange.custom = measured.custom
         exchange.at_files = measured.at_files
+        exchange.image_count = measured.image_count
+        exchange.estimated_image_tokens = measured.estimated_image_tokens
+        exchange.images = measured.images
+        exchange.tool_results = measured.tool_results
         exchange.measured = measured.measured
         exchange.incomplete_reason = measured.incomplete_reason
 

@@ -426,11 +426,19 @@ shim watch — 2m 34s, 3 requests
   spend     ~$0.69  (approximate, 2026-10-09 prices)
   costliest  one request ~$0.41 (claude-opus-5-5, 54,212 input tokens)
   largest   one request was 112,384 bytes, system 61% of it
+  images    2 distinct, ~4,988 input tokens across 2 requests (estimated)
+  largest tool result  Bash, 40,960 bytes (~10,240 tokens), carried by 2 requests
+  cache     1 request rewrote a prefix the previous one had cached (~18,000 tokens written again, ~$0.09); request 3
+  duplicates  1 request was sent while an identical one was still in flight (~27,640 input tokens billed again)
   nothing was modified, and no request body was written to disk
 ```
 
 `(exact)` means the provider reported that number. `(approximate)` means shim
 attributed it by byte share, and the `~` is there to keep you honest about it.
+Images are the exception: their base64 bytes say nothing about their cost, so
+each request's estimated image tokens get an `images` row of their own (and an
+`images` key in `tokens_by_section`), and the rest is split by byte share. The
+rows still add up to the exact total.
 Each request is priced by its own model and token kinds, 1-hour cache writes
 at their own rate, from a table dated in the line; a model the table does not
 name exactly is listed as `not priced`, never priced as a neighbour. Once the
@@ -453,6 +461,11 @@ the last line. Three of its fields say what a figure covers:
 | `spend_usd` | each of `exchanges` | that request's approximate cost, or `null` when its model is not in the table |
 | `priced_as` | each of `exchanges` | the table row used (the model id without a snapshot date or `-latest`), or `null` |
 | `cache_creation_1h_input_tokens` | each of `exchanges`' `usage` | the part of `cache_creation_input_tokens` written to the 1-hour cache, priced at the 1-hour rate |
+| `images` | top level | `distinct`, `requests` that carried one, `estimated_tokens` (scaled to the model's tier, 28 px patches) and `unknown_size` (a header shim could not read) |
+| `largest_tool_result` | top level | `tool`, `bytes` and the `requests` that carried it, or `null` |
+| `cache_rewrites` | top level | `count`, `tokens` written again, `spend_usd` (or `null`) and the 1-based `requests` |
+| `duplicates_in_flight` | top level | `count` and the `input_tokens` billed again |
+| `image_count`, `estimated_image_tokens`, `cache_rewrite`, `duplicate_in_flight` | each of `exchanges` | the same, per request |
 | `auth_route` | each of `exchanges` | `"api-key"` (an `x-api-key` header), `"subscription"` (`authorization` and no `x-api-key`), `""` (neither) |
 | `response_scan_reason` | each of `exchanges` | `""` when the response was scanned; the request's `incomplete_reason` (`"slots busy"`, `"body too large"`, `"not JSON"`, `"too many fields"`) when it was not measured; otherwise `"unavailable"` or `"partial"` |
 

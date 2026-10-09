@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import datetime
-import re
 
 from . import measure
-from .measure import OTHER, RESPONSE_KINDS, SECTIONS, TRUNCATED, Usage
+from .measure import OTHER, RESPONSE_KINDS, SECTIONS, TRUNCATED, Usage, model_id
 
 SECTION_WORDS = {
     "system": "system prompt",
@@ -52,12 +51,6 @@ LONG_PROMPT = {"claude-haiku-5-5": (100_000, (0.5, 0.625, 1.0, 0.05, 2.5))}
 PRICED_ON = "2026-10-09"
 STALE_AFTER_DAYS = 90
 _PER = 1_000_000
-_SNAPSHOT = re.compile(r"-\d{8}$")
-
-
-def model_id(model: str) -> str:
-    """The table's key: one trailing `-latest` and one snapshot date dropped."""
-    return _SNAPSHOT.sub("", model.removesuffix("-latest"))
 
 
 def _price(model: str, prompt_tokens: int = 0):
@@ -103,6 +96,95 @@ def spend(exchanges: list) -> tuple:
     }
     priced = [cost for cost in costs if cost is not None]
     return sum(priced), len(priced), sorted(unpriced), costs
+
+
+def image_totals(exchanges: list) -> dict:
+    distinct: dict = {}
+    for exchange in exchanges:
+        distinct.update(exchange.images)
+    return {
+        "distinct": len(distinct),
+        "requests": sum(bool(exchange.image_count) for exchange in exchanges),
+        "estimated_tokens": sum(e.estimated_image_tokens for e in exchanges),
+        "unknown_size": sum(not known for known in distinct.values()),
+    }
+
+
+def largest_tool_result(exchanges: list) -> dict | None:
+    """A result replayed in a later request's history is the same result."""
+    largest = None
+    for exchange in exchanges:
+        for key, (tool, size) in exchange.tool_results.items():
+            if largest is None or size > largest[0]:
+                largest = (size, tool, key)
+    if largest is None:
+        return None
+    size, tool, key = largest
+    carried = sum(key in exchange.tool_results for exchange in exchanges)
+    return {"tool": tool, "bytes": size, "requests": carried}
+
+
+def cache_rewrites(exchanges: list) -> list:
+    """Requests that wrote again a prefix the one before them had cached.
+
+    Per model, in session order. A request smaller than the one before it
+    starts a new chain (Claude Code's closing side call shares only the system
+    prompt and tools), and a chain's leading requests that read no cache are a
+    cold start. After that, a read below 90 percent of the previous request's
+    whole input, with something written, is a rewrite.
+    """
+    found = []
+    chains: dict = {}
+    for index, exchange in enumerate(exchanges):
+        usage = exchange.usage
+        previous, warm = chains.get(model_id(exchange.model or ""), (None, False))
+        if previous is not None and exchange.request_bytes < previous.request_bytes:
+            previous, warm = None, False
+        if (
+            warm
+            and previous is not None
+            and usage.cache_read_input_tokens < 0.9 * previous.usage.total_input
+            and usage.cache_creation_input_tokens
+        ):
+            found.append(index)
+        reads = usage.cache_read_input_tokens > 0
+        chains[model_id(exchange.model or "")] = (exchange, warm or reads)
+    return found
+
+
+def _write_cost(exchange) -> float | None:
+    usage = exchange.usage
+    rates = _price(exchange.model or "", usage.total_input)
+    if rates is None:
+        return None
+    hour = usage.cache_creation_1h_input_tokens
+    five = usage.cache_creation_input_tokens - hour
+    return (five * rates[1] + hour * rates[2]) / _PER
+
+
+def cache_rewrite_totals(exchanges: list, rewrites: list) -> dict:
+    costs = [_write_cost(exchanges[index]) for index in rewrites]
+    priced = [cost for cost in costs if cost is not None]
+    return {
+        "count": len(rewrites),
+        "tokens": sum(
+            exchanges[index].usage.cache_creation_input_tokens for index in rewrites
+        ),
+        "spend_usd": round(sum(priced), 6) if priced else None,
+        "requests": [index + 1 for index in rewrites],
+    }
+
+
+def duplicate_totals(exchanges: list) -> dict:
+    duplicates = [exchange for exchange in exchanges if exchange.duplicate_in_flight]
+    return {
+        "count": len(duplicates),
+        "input_tokens": sum(exchange.usage.total_input for exchange in duplicates),
+    }
+
+
+def _plural(count: int, word: str) -> str:
+    return f"{count} {word}" + ("" if count == 1 else "s")
 
 
 def spend_basis(exchanges: list) -> str:
@@ -466,6 +548,42 @@ def render(session, seconds: float) -> str:
                 f"bytes, {largest[0]} {round(100 * largest[1] / biggest.request_bytes)}% of it"
             )
 
+    images = image_totals(exchanges)
+    if images["requests"]:
+        lines.append(
+            f"  images    {images['distinct']} distinct, "
+            f"~{_thousands(images['estimated_tokens'])} input tokens across "
+            f"{_plural(images['requests'], 'request')} (estimated)"
+        )
+    result = largest_tool_result(exchanges)
+    if result and result["bytes"]:
+        lines.append(
+            f"  largest tool result  {result['tool']}, "
+            f"{_thousands(result['bytes'])} bytes "
+            f"(~{_thousands(result['bytes'] // 4)} tokens), carried by "
+            f"{_plural(result['requests'], 'request')}"
+        )
+    rewrites = cache_rewrite_totals(exchanges, cache_rewrites(exchanges))
+    if rewrites["count"]:
+        cost = rewrites["spend_usd"]
+        priced = f", ~${cost:,.2f}" if cost is not None else ""
+        shown = ", ".join(map(str, rewrites["requests"][:3]))
+        which = "request" if rewrites["count"] == 1 else "requests"
+        lines.append(
+            f"  cache     {_plural(rewrites['count'], 'request')} rewrote a prefix "
+            "the previous one had cached "
+            f"(~{_thousands(rewrites['tokens'])} tokens written again{priced}); "
+            f"{which} {shown}"
+        )
+    duplicates = duplicate_totals(exchanges)
+    if duplicates["count"]:
+        lines.append(
+            f"  duplicates  {_plural(duplicates['count'], 'request')} "
+            f"{'was' if duplicates['count'] == 1 else 'were'} sent while an "
+            "identical one was still in flight "
+            f"(~{_thousands(duplicates['input_tokens'])} input tokens billed again)"
+        )
+
     if session.errors:
         lines.append(f"  errors    {session.errors} request(s) could not be forwarded")
     lines.append("  nothing was modified, and no request body was written to disk")
@@ -481,6 +599,7 @@ def as_json(session, seconds: float) -> dict:
     combined = totals(exchanges)
     dollars, priced, unpriced, costs = spend(exchanges)
     count, size = at_file_totals(exchanges)
+    rewrites = cache_rewrites(exchanges)
     return {
         "seconds": round(seconds, 1),
         "requests": len(exchanges),
@@ -516,6 +635,10 @@ def as_json(session, seconds: float) -> dict:
         "response_entities": response_totals(exchanges),
         "response_scan": response_scan(exchanges),
         "custom": custom_totals(exchanges),
+        "images": image_totals(exchanges),
+        "largest_tool_result": largest_tool_result(exchanges),
+        "cache_rewrites": cache_rewrite_totals(exchanges, rewrites),
+        "duplicates_in_flight": duplicate_totals(exchanges),
         "exchanges": [
             {
                 "entities_by_section": exchange.entities_by_section,
@@ -544,8 +667,12 @@ def as_json(session, seconds: float) -> dict:
                 },
                 "spend_usd": None if cost is None else round(cost, 6),
                 "priced_as": None if cost is None else model_id(exchange.model),
+                "image_count": exchange.image_count,
+                "estimated_image_tokens": exchange.estimated_image_tokens,
+                "cache_rewrite": index in rewrites,
+                "duplicate_in_flight": exchange.duplicate_in_flight,
             }
-            for exchange, cost in zip(exchanges, costs, strict=True)
+            for index, (exchange, cost) in enumerate(zip(exchanges, costs, strict=True))
         ],
     }
 
@@ -558,7 +685,12 @@ __all__ = [
     "custom_totals",
     "entity_section_totals",
     "entity_totals",
+    "cache_rewrite_totals",
+    "cache_rewrites",
+    "duplicate_totals",
     "exchange_spend",
+    "image_totals",
+    "largest_tool_result",
     "model_id",
     "prices_stale",
     "response_scan",

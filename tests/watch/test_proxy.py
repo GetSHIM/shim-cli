@@ -31,10 +31,17 @@ MESSAGE_DELTA = (
 
 
 class _Upstream:
-    def __init__(self, *, gzip_body: bool = True, delay: float = 0.0) -> None:
+    def __init__(
+        self,
+        *,
+        gzip_body: bool = True,
+        delay: float = 0.0,
+        hold: threading.Barrier | None = None,
+    ) -> None:
         self.seen: list = []
         self.gzip_body = gzip_body
         self.delay = delay
+        self.hold = hold
         outer = self
 
         class Handler(http.server.BaseHTTPRequestHandler):
@@ -53,6 +60,8 @@ class _Upstream:
                         "body": body,
                     }
                 )
+                if outer.hold is not None:
+                    outer.hold.wait(timeout=20)
                 parts = [MESSAGE_START, MESSAGE_DELTA]
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
@@ -974,3 +983,84 @@ def test_the_auth_route_is_read_from_header_names_only(watched, sign_in, route) 
     assert exchange.auth_route == route
     kept = set(_strings(vars(exchange)))
     assert not kept & {"sk-ant-api-fake", "Bearer sk-ant-oat-fake", "sk-ant-oat-fake"}
+
+
+def _held(monkeypatch, parties: int = 2):
+    held = _Upstream(hold=threading.Barrier(parties))
+    port = held.port
+
+    class Plain(http.client.HTTPConnection):
+        def __init__(self, host, timeout=None, context=None):
+            super().__init__("127.0.0.1", port, timeout=timeout or 30)
+
+    monkeypatch.setattr(http.client, "HTTPSConnection", Plain)
+    return held, proxy.start("api.anthropic.com")
+
+
+def _together(running, bodies: list) -> list:
+    results: list = [None] * len(bodies)
+
+    def send(index: int) -> None:
+        results[index] = _post(running, bodies[index], HEADERS)[0]
+
+    threads = [threading.Thread(target=send, args=(i,)) for i in range(len(bodies))]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=60)
+    return results
+
+
+def test_two_identical_requests_in_flight_are_both_forwarded_and_one_counted(
+    monkeypatch,
+) -> None:
+    held, running = _held(monkeypatch)
+    try:
+        statuses = _together(running, [BODY, BODY])
+    finally:
+        running.stop()
+        held.stop()
+
+    assert statuses == [200, 200]
+    assert [seen["body"] for seen in held.seen] == [BODY, BODY]
+    marked = [e.duplicate_in_flight for e in running.session.exchanges]
+    assert sorted(marked) == [False, True]
+    assert running.session._pending_bodies == {}
+
+
+def test_different_bodies_in_flight_are_not_duplicates(monkeypatch) -> None:
+    other = BODY.replace(b"hello", b"world")
+    held, running = _held(monkeypatch)
+    try:
+        assert _together(running, [BODY, other]) == [200, 200]
+    finally:
+        running.stop()
+        held.stop()
+
+    assert [e.duplicate_in_flight for e in running.session.exchanges] == [False] * 2
+
+
+def test_the_same_request_sent_twice_in_turn_is_not_a_duplicate(watched) -> None:
+    running, _upstream = watched
+
+    _post(running, BODY, HEADERS)
+    _post(running, BODY, HEADERS)
+
+    assert [e.duplicate_in_flight for e in running.session.exchanges] == [False] * 2
+
+
+def test_a_request_without_a_measurement_slot_is_still_hashed(monkeypatch) -> None:
+    held, running = _held(monkeypatch)
+    slots = running.session._measurement_slots
+    assert slots.acquire(False) and slots.acquire(False)
+    try:
+        assert _together(running, [BODY, BODY]) == [200, 200]
+    finally:
+        slots.release()
+        slots.release()
+        running.stop()
+        held.stop()
+
+    exchanges = running.session.exchanges
+    assert not any(exchange.measured for exchange in exchanges)
+    assert sorted(e.duplicate_in_flight for e in exchanges) == [False, True]

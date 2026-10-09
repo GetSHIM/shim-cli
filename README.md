@@ -83,6 +83,13 @@ two sides next to each other: three account numbers went in through a tool
 result and the same three came back, which is the round trip made visible. A
 response that stopped at the provider's output limit adds a `cut off` line.
 
+Four more lines name the waste when there is some: `images` (distinct images
+and their estimated input tokens, every time history replays them), `largest
+tool result` (which tool, how many bytes, carried by how many requests),
+`cache` (requests that wrote again a prefix the previous one had cached) and
+`duplicates` (identical requests sent while one was still in flight, both
+forwarded). They report; watch never resends, merges or reorders anything.
+
 Token counts come from the provider's own `usage` block and are exact. How
 they divide between sections has no ground truth on the wire, so it is
 inferred from byte share, marked `~`, and always sums to the exact total of the

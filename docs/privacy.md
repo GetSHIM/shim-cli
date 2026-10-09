@@ -456,6 +456,15 @@ section and the entity counts it produced, at most sixteen of them, oldest
 evicted first. The remembered value is a hash and a tally; the text that
 produced it is not kept.
 
+Four waste lines need a little more, all of it in memory for the length of the
+run and none of it in the report, the JSON or on disk: the SHA-256 of each
+base64 image, so a screenshot replayed in every later request counts once; the
+size of each tool result and the `tool_use` id and tool name it answers, so the
+largest result can be named with how many requests carried it; and, for each
+request still in flight, the SHA-256 of its body, dropped when its answer ends,
+so two identical requests sent at once are counted. Image dimensions come from
+the first 65,536 base64 characters of the header; no pixel is decoded.
+
 The response is scanned too, and on the same terms. Its text and `thinking`
 blocks are held in memory for the length of one response, up to 1 MB, scanned
 only after the last byte has been relayed to the client, and discarded before

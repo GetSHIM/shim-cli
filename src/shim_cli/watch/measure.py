@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import json
+import math
+import re
+import struct
 import threading
 from dataclasses import dataclass, field
 
@@ -34,6 +39,30 @@ UNKNOWN_MODEL = "unknown"
 MAX_RESPONSE_CHARACTERS = 1_000_000
 RESPONSE_KINDS = ("text", "thinking")
 _DELTA_KINDS = {"text_delta": "text", "thinking_delta": "thinking"}
+
+_SNAPSHOT = re.compile(r"-\d{8}$")
+
+# The vision page, read 8 October 2026: an image is scaled so its long edge
+# fits the model's tier, then billed one token per 28 x 28 patch, up to a cap.
+# Claude 4.7 and later read at the high-resolution tier.
+IMAGE_HEADER_CHARACTERS = 65_536
+_HIGH_RESOLUTION = frozenset(
+    {
+        "claude-opus-4-7",
+        "claude-opus-4-8",
+        "claude-opus-5",
+        "claude-opus-5-5",
+        "claude-sonnet-5",
+        "claude-sonnet-5-5",
+        "claude-haiku-5-5",
+        "claude-fable-5",
+        "claude-fable-5-1",
+        "claude-mythos-5",
+        "claude-mythos-5-1",
+    }
+)
+_TIERS = {True: (2_576, 4_784), False: (1_568, 1_568)}
+UNKNOWN_TOOL = "unknown tool"
 
 MAX_STOP_REASON_CHARS = 40
 UNKNOWN_REASON = "unknown"
@@ -283,6 +312,113 @@ class UsageReader:
         )
 
 
+def model_id(model: str) -> str:
+    """The price table's key: one trailing `-latest` and one snapshot date dropped."""
+    return _SNAPSHOT.sub("", model.removesuffix("-latest"))
+
+
+def _dimensions(raw: bytes) -> tuple[int, int] | None:
+    if raw[:8] == b"\x89PNG\r\n\x1a\n" and raw[12:16] == b"IHDR":
+        return struct.unpack(">II", raw[16:24])
+    if raw[:6] in (b"GIF87a", b"GIF89a"):
+        return struct.unpack("<HH", raw[6:10])
+    if raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+        chunk = raw[12:16]
+        if chunk == b"VP8 " and raw[23:26] == b"\x9d\x01\x2a":
+            width, height = struct.unpack("<HH", raw[26:30])
+            return width & 0x3FFF, height & 0x3FFF
+        if chunk == b"VP8L" and raw[20:21] == b"\x2f":
+            bits = int.from_bytes(raw[21:25], "little")
+            return (bits & 0x3FFF) + 1, ((bits >> 14) & 0x3FFF) + 1
+        if chunk == b"VP8X":
+            width = int.from_bytes(raw[24:27], "little") + 1
+            return width, int.from_bytes(raw[27:30], "little") + 1
+        return None
+    if raw[:2] != b"\xff\xd8":
+        return None
+    position = 2
+    while position + 4 <= len(raw):
+        if raw[position] != 0xFF:
+            return None
+        marker = raw[position + 1]
+        if marker == 0xFF:
+            position += 1
+            continue
+        if marker == 0x01 or 0xD0 <= marker <= 0xD8:
+            position += 2
+            continue
+        if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
+            height, width = struct.unpack(">HH", raw[position + 5 : position + 9])
+            return width, height
+        position += 2 + struct.unpack(">H", raw[position + 2 : position + 4])[0]
+    return None
+
+
+def image_size(data: str) -> tuple[int, int] | None:
+    """Width and height from the header alone; None when it cannot be read."""
+    head = data[:IMAGE_HEADER_CHARACTERS]
+    try:
+        raw = base64.b64decode(head[: len(head) - len(head) % 4], validate=True)
+        size = _dimensions(raw)
+    except (binascii.Error, ValueError, struct.error):
+        return None
+    return size if size and size[0] > 0 and size[1] > 0 else None
+
+
+def image_tokens(size: tuple[int, int] | None, model: str) -> int:
+    if size is None:
+        return 0
+    edge, cap = _TIERS[model_id(model) in _HIGH_RESOLUTION]
+    scale = min(1.0, edge / max(size))
+    width, height = (max(1, int(side * scale)) for side in size)
+    return min(cap, math.ceil(width / 28) * math.ceil(height / 28))
+
+
+def _base64_image(block: dict) -> str | None:
+    source = block.get("source")
+    if block.get("type") != "image" or not isinstance(source, dict):
+        return None
+    data = source.get("data")
+    return data if source.get("type") == "base64" and isinstance(data, str) else None
+
+
+def _label(name: object) -> str:
+    printable = isinstance(name, str) and name and name.isprintable()
+    return name if printable and len(name) <= MAX_MODEL_CHARS else UNKNOWN_TOOL
+
+
+def images_and_results(document: dict) -> tuple[list[str], dict]:
+    """Every base64 image, top level or inside a tool result, and each tool
+    result's text size by its id, named after the tool_use that asked for it."""
+    images: list[str] = []
+    sizes: dict[str, int] = {}
+    names: dict[str, str] = {}
+    for message in document.get("messages") or ():
+        content = message.get("content") if isinstance(message, dict) else None
+        for block in content if isinstance(content, list) else ():
+            if not isinstance(block, dict):
+                continue
+            if (data := _base64_image(block)) is not None:
+                images.append(data)
+            elif block.get("type") == "tool_use" and isinstance(block.get("id"), str):
+                names[block["id"]] = _label(block.get("name"))
+            elif block.get("type") == "tool_result":
+                inner = block.get("content")
+                size = len(inner.encode()) if isinstance(inner, str) else 0
+                for part in inner if isinstance(inner, list) else ():
+                    if not isinstance(part, dict):
+                        continue
+                    if (data := _base64_image(part)) is not None:
+                        images.append(data)
+                    elif isinstance(part.get("text"), str):
+                        size += len(part["text"].encode())
+                if isinstance(block.get("tool_use_id"), str):
+                    sizes[block["tool_use_id"]] = size
+    return images, {
+        key: (names.get(key, UNKNOWN_TOOL), size) for key, size in sizes.items()
+    }
+
+
 def _bytes(value: object) -> bytes:
     try:
         return json.dumps(value, ensure_ascii=False).encode()
@@ -466,13 +602,23 @@ class Exchange:
     incomplete_reason: str = ""
     auth_route: str = ""
     usage_status: str = "unavailable"
+    image_count: int = 0
+    estimated_image_tokens: int = 0
+    # In memory only, never written or reported: a digest per distinct image
+    # (True when its size was read) and tool-result sizes by tool_use id.
+    images: dict = field(default_factory=dict)
+    tool_results: dict = field(default_factory=dict)
+    duplicate_in_flight: bool = False
 
     def __post_init__(self) -> None:
         if self.entities_by_section and not self.entities:
             self.entities = _flatten(self.entities_by_section)
 
     def tokens_by_section(self) -> dict:
-        return attribute(self.sections, self.usage.total_input)
+        total = self.usage.total_input
+        images = min(self.estimated_image_tokens, total)
+        shares = attribute(self.sections, total - images)
+        return {**shares, "images": images} if images else shares
 
 
 def inspect_request(body: bytes | bytearray, evaluate=None, memo=None) -> Exchange:
@@ -496,6 +642,23 @@ def inspect_request(body: bytes | bytearray, evaluate=None, memo=None) -> Exchan
         )
     exchange.sections = sections(document)
     exchange.at_files = at_files(document)
+    if isinstance(document, dict):
+        try:
+            images, exchange.tool_results = images_and_results(document)
+            image_bytes = sum(len(data) for data in images)
+            if image_bytes and "messages" in exchange.sections:
+                exchange.sections["messages"] -= image_bytes
+            for data in images:
+                size = image_size(data)
+                exchange.estimated_image_tokens += image_tokens(size, exchange.model)
+                digest = hashlib.sha256(data.encode()).hexdigest()
+                exchange.images[digest] = size is not None
+            exchange.image_count = len(images)
+        except Exception:
+            # The image and tool-result lines are unknown for this request; the
+            # request itself is still measured.
+            exchange.image_count = exchange.estimated_image_tokens = 0
+            exchange.images, exchange.tool_results = {}, {}
     if evaluate is not None and isinstance(document, dict):
         try:
             leaves = walk(
@@ -554,7 +717,11 @@ __all__ = [
     "UsageReader",
     "at_files",
     "attribute",
+    "image_size",
+    "image_tokens",
+    "images_and_results",
     "inspect_request",
+    "model_id",
     "scan_response",
     "sections",
     "stop_reason_from",
