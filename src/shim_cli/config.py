@@ -67,6 +67,7 @@ def render_settings(
     diet: tuple | None = None,
     custom: list | None = None,
     reveal: dict | None = None,
+    markers: str = "report",
 ) -> bytes:
     import tomli_w
 
@@ -93,6 +94,8 @@ def render_settings(
         document["custom"] = [dict(entry) for entry in custom]
     if reveal:
         document["reveal"] = entity_catalog.normalize_reveal(reveal)
+    if markers == "note":
+        document["markers"] = markers
     return tomli_w.dumps(document).encode()
 
 
@@ -108,6 +111,7 @@ _TOP_LEVEL = {
     "diet",
     "custom",
     "reveal",
+    "markers",
 }
 
 
@@ -183,6 +187,9 @@ def parse_settings(text: str) -> dict:
     ledger = document.get("ledger", False)
     if not isinstance(ledger, bool):
         raise ValueError("shim settings are invalid")
+    markers = document.get("markers", "report")
+    if markers not in ("report", "note"):
+        raise ValueError("shim settings are invalid")
     return {
         "enabled_entities": list(enabled),
         "mode": _modes(document),
@@ -191,6 +198,7 @@ def parse_settings(text: str) -> dict:
         "diet": _diet(document),
         "custom": _custom(document),
         "reveal": _reveal(document),
+        "markers": markers,
     }
 
 
@@ -240,6 +248,7 @@ def policy_from_state(state: FileState) -> policy.Policy:
             document["diet"],
             entity_catalog.compile_custom(document["custom"]),
             document["reveal"],
+            document["markers"],
         )
     except ValueError as error:
         raise ValueError("shim settings are invalid") from error

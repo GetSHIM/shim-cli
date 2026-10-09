@@ -2567,3 +2567,20 @@ def test_the_plate_type_is_listed_off_and_can_be_turned_on(
     assert "TR_LICENSE_PLATE" in json.loads(enabled.stdout)["enabled_entities"]
     assert "TR_LICENSE_PLATE" in target.read_text()
     assert json.loads(found.stdout)["counts"] == {"TR_LICENSE_PLATE": 1}
+
+
+def test_config_shows_and_keeps_the_marker_note(monkeypatch, tmp_path: Path) -> None:
+    target = _guard_config(monkeypatch, tmp_path)
+    target.parent.mkdir()
+    target.write_text('enabled_entities = ["EMAIL"]\nmarkers = "note"\n')
+
+    shown = runner.invoke(app, ["config"])
+    changed = runner.invoke(app, ["config", "--enable", "PHONE", "--yes", "--json"])
+    absent = tmp_path / "other.toml"
+    monkeypatch.setenv("SHIM_CONFIG", str(absent))
+    default = json.loads(runner.invoke(app, ["config", "--json"]).stdout)
+
+    assert "Markers: note" in shown.output
+    assert json.loads(changed.stdout)["markers"] == "note"
+    assert 'markers = "note"' in target.read_text()
+    assert default["markers"] == "report"
