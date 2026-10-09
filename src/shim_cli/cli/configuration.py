@@ -86,6 +86,7 @@ def _show(
     diet: tuple[str, ...],
     custom: list | None = None,
     reveal: dict | None = None,
+    markers: str = "report",
 ) -> None:
     selected = set(enabled)
     output = console()
@@ -115,7 +116,8 @@ def _show(
     output.print(
         Text(
             f"Ledger: {'on' if ledger else 'off'}    "
-            f"Diet: {', '.join(diet) if diet else 'off'}",
+            f"Diet: {', '.join(diet) if diet else 'off'}"
+            + ("    Markers: note" if markers == "note" else ""),
             style="dim",
         )
     )
@@ -264,6 +266,7 @@ def configure(
             keep_ledger, keep_diet = False, DEFAULT_TRANSFORMS
             keep_custom: list = []
             keep_reveal: dict = {}
+            keep_markers = "report"
         else:
             assert policy is not None or only
             modes = policy.modes if policy else {}
@@ -272,6 +275,7 @@ def configure(
             if ledger is not None:
                 keep_ledger = ledger
             keep_diet = policy.diet if policy else DEFAULT_TRANSFORMS
+            keep_markers = policy.markers if policy else "report"
             if diet is not None:
                 keep_diet = DEFAULT_TRANSFORMS if diet else ()
             try:
@@ -333,6 +337,7 @@ def configure(
                 diet=list(keep_diet),
                 custom=keep_custom,
                 reveal=keep_reveal,
+                markers=keep_markers,
             )
             return
         _show(
@@ -342,6 +347,7 @@ def configure(
             keep_diet,
             keep_custom,
             keep_reveal,
+            keep_markers,
         )
         emit("PASS", f"File: {target}")
         return
@@ -357,6 +363,7 @@ def configure(
             keep_diet,
             keep_custom,
             keep_reveal,
+            keep_markers,
         ),
     )
     if as_json and not yes:
@@ -375,6 +382,7 @@ def configure(
             keep_diet,
             keep_custom,
             keep_reveal,
+            keep_markers,
         )
         emit("WARN", f"File: {target}")
         if not yes and not typer.confirm("Save these settings?", default=False):
@@ -400,6 +408,7 @@ def configure(
             diet=list(keep_diet),
             custom=keep_custom,
             reveal=keep_reveal,
+            markers=keep_markers,
         )
     else:
         emit(

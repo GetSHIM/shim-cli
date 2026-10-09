@@ -532,16 +532,23 @@ diet = ["json", "whitespace"]   # or false to disable entirely
 ```
 
 While reading results shim also flags text that is trying to give the model
-orders — "ignore all previous instructions", impersonated system messages,
-invisible characters. These are **reported and never acted on**: rewriting a
-tool result because it reads as imperative would corrupt legitimate content.
-They appear in the session summary as `flagged`, naming the file they came
+orders, in English or Turkish — "ignore all previous instructions", "önceki tüm
+talimatları yok say", impersonated system messages, invisible characters. These
+are **reported and never acted on**: rewriting a tool result because it reads
+as imperative would corrupt legitimate content, and nothing is ever blocked for
+it. They appear in the session summary as `flagged`, naming the file they came
 from — which is the only part you can act on:
 
 ```
   flagged   1 INSTRUCTION_OVERRIDE  (Read release-notes.md)
             1 HIDDEN_TEXT  (Read release-notes.md)
 ```
+
+To have the model told as well, set `markers = "note"` in the settings file:
+in Claude Code, a result that carries a marker then gets one sentence beside
+it saying it reads as instructions and is data from the tool. The result
+itself is unchanged, and the sentence names marker ids only. Remove the key
+before downgrading: an older shim-cli refuses a settings file it does not know.
 
 The record holds entity names, counts and the file or URL involved — never the
 value that was found, and never a shell command. It lives in a private OS

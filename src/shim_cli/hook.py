@@ -496,6 +496,14 @@ def _tool_output(
 
     outcome = process(entry, raw, mode_for, scan, policy.diet, entities_for)
     remember(session_id, outcome.record, _elapsed_ms(), policy.ledger)
+    if (
+        policy.markers == "note"
+        and outcome.record.markers
+        and (entry.client, entry.event) == ("claude", "PostToolUse")
+    ):
+        from shim_cli.clients.claude.tool_events import with_marker_note
+
+        return with_marker_note(outcome.output, outcome.record.markers)
     return outcome.output
 
 

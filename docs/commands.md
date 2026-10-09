@@ -808,6 +808,10 @@ ledger = false
 # true, false, or a list naming individual transforms: "json", "whitespace".
 diet = true
 
+# Tell the model when a Claude Code tool result reads as instructions.
+# "report" (the default) only counts them for the session summary.
+markers = "note"
+
 # Keep the last N digits. IBAN, CREDIT_CARD and PHONE only, at most 4.
 [reveal]
 IBAN = 4
