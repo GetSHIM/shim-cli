@@ -21,6 +21,8 @@ from shim_cli.cli.output import terminal_text
 from shim_cli.config import load_policy
 from shim_cli.events.diet import DEFAULT_TRANSFORMS
 from shim_cli.guard import DEFAULT_ENTITIES
+from shim_cli.session.ledger import LedgerError
+from shim_cli.session.spool import SpoolError
 
 runner = CliRunner()
 
@@ -1495,8 +1497,7 @@ def test_a_failed_removal_is_not_reported_as_a_removal(monkeypatch, tmp_path) ->
         integrations, "emit", lambda level, text, **kw: printed.append(text)
     )
 
-    integrations._remove_legacy_copilot_file()
-
+    assert integrations._remove_legacy_copilot_file(False) is False
     assert printed == [], "nothing was removed, so nothing may say it was"
 
 
@@ -1692,3 +1693,860 @@ def test_on_windows_help_and_version_still_answer(arguments: list, monkeypatch) 
 
     assert result.exit_code == 0
     assert "Windows" not in result.output
+
+
+# Every error code a command emits, driven through the command (R3 of the
+# error-code change). `human` is the stderr each case printed before codes
+# existed, kept byte for byte; None where the human path asks instead.
+
+
+def _valid_settings(monkeypatch, tmp_path: Path) -> dict:
+    target = _guard_config(monkeypatch, tmp_path)
+    target.parent.mkdir(mode=0o700)
+    target.write_text('enabled_entities = ["EMAIL"]\n')
+    target.chmod(0o600)
+    return {"path": str(target)}
+
+
+def _broken_settings(monkeypatch, tmp_path: Path) -> dict:
+    from shim_cli.config import tomllib
+
+    found = _valid_settings(monkeypatch, tmp_path)
+    Path(found["path"]).write_bytes(b"not toml")
+    try:
+        tomllib.loads("not toml")
+    except tomllib.TOMLDecodeError as error:
+        return {**found, "parser": str(error)}
+    raise AssertionError("the fixture must not parse")
+
+
+def _shared_settings(monkeypatch, tmp_path: Path) -> dict:
+    found = _valid_settings(monkeypatch, tmp_path)
+    Path(found["path"]).parent.chmod(0o777)
+    return found
+
+
+def _relative_settings(monkeypatch, tmp_path: Path) -> dict:
+    monkeypatch.setenv("SHIM_CONFIG", "relative/config.toml")
+    return {}
+
+
+def _fails(target: str, error: type[BaseException] = OSError):
+    def setup(monkeypatch, tmp_path: Path) -> dict:
+        found = _valid_settings(monkeypatch, tmp_path)
+        home = _claude_home(monkeypatch, tmp_path)
+
+        def fail(*_args, **_kwargs):
+            raise error("synthetic")
+
+        monkeypatch.setattr(target, fail)
+        return {**found, "settings": str(home / ".claude" / "settings.json")}
+
+    return setup
+
+
+def _claude_settings(content: bytes | None, link: bool = False):
+    def setup(monkeypatch, tmp_path: Path) -> dict:
+        _valid_settings(monkeypatch, tmp_path)
+        home = _claude_home(monkeypatch, tmp_path)
+        target = home / ".claude" / "settings.json"
+        if link:
+            real = tmp_path / "real-settings.json"
+            real.write_text("{}")
+            target.symlink_to(real)
+        elif content is not None:
+            target.write_bytes(content)
+        return {"settings": str(target)}
+
+    return setup
+
+
+def _history(monkeypatch, tmp_path: Path) -> dict:
+    _valid_settings(monkeypatch, tmp_path)
+    root = tmp_path / "claude-config"
+    (root / "projects").mkdir(parents=True)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(root))
+    return {"history": str(root / "projects")}
+
+
+def _missing_history(monkeypatch, tmp_path: Path) -> dict:
+    _valid_settings(monkeypatch, tmp_path)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "missing"))
+    return {"history": str(tmp_path / "missing" / "projects")}
+
+
+def _unreadable_history(monkeypatch, tmp_path: Path) -> dict:
+    from shim_cli.cli import audit
+
+    found = _history(monkeypatch, tmp_path)
+
+    def fail(*_args, **_kwargs):
+        raise OSError("synthetic")
+
+    monkeypatch.setattr(audit, "_scan", fail)
+    return found
+
+
+def _no_terminal(monkeypatch, tmp_path: Path) -> dict:
+    from shim_cli.cli import audit
+
+    monkeypatch.setattr(audit, "_terminal", lambda: False)
+    return {}
+
+
+def _keys_file(content: bytes | None, directory: bool = False):
+    def setup(monkeypatch, tmp_path: Path) -> dict:
+        _valid_settings(monkeypatch, tmp_path)
+        target = tmp_path / "keys.env"
+        if directory:
+            target.mkdir()
+        elif content is not None:
+            target.write_bytes(content)
+        return {"file": str(target)}
+
+    return setup
+
+
+def _watch(*, claude: bool = True, base_url: bool = False, proxy: str = ""):
+    def setup(monkeypatch, tmp_path: Path) -> dict:
+        from shim_cli.cli import watch
+        from shim_cli.watch import proxy as watch_proxy
+
+        _valid_settings(monkeypatch, tmp_path)
+        monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        monkeypatch.setenv("PATH", str(bin_dir))
+        if claude:
+            executable = bin_dir / "claude"
+            executable.write_text("#!/bin/sh\nexit 0\n")
+            executable.chmod(0o700)
+        if base_url:
+            monkeypatch.setenv("ANTHROPIC_BASE_URL", "http://127.0.0.1:9")
+
+        def refuse(*_args, **_kwargs):
+            raise OSError("synthetic")
+
+        if proxy == "fails":
+            monkeypatch.setattr(watch_proxy, "start", refuse)
+        if proxy == "client fails":
+            running = SimpleNamespace(
+                base_url="http://127.0.0.1:9", stop=lambda: None, session=None
+            )
+            monkeypatch.setattr(watch_proxy, "start", lambda *_args: running)
+            monkeypatch.setattr(watch.subprocess, "Popen", refuse)
+        return {}
+
+    return setup
+
+
+_FIX_SETTINGS = (
+    "Fix the line the error names, or run shim config --reset --yes "
+    "(it discards every setting)."
+)
+_FIX_CHMOD = "chmod 700 ~/.config/shim && chmod 600 ~/.config/shim/config.toml"
+_REFUSED_SETTINGS = (
+    "Settings at {path} were refused: target parent is writable by another user. "
+    "shim will not read settings anything else can rewrite, because whatever can "
+    "rewrite them can turn detection off."
+)
+_INVALID_SETTINGS = (
+    "Settings at {path} are invalid: {parser}. "
+    "Run shim config --reset to start over, or edit the line above."
+)
+
+# code: (argv, setup, exit code, error, fix, extra JSON keys, human stderr)
+_ERROR_CASES: dict[str, tuple] = {
+    "CONFIRMATION_REQUIRED": (
+        ["config", "--enable", "PHONE"],
+        _valid_settings,
+        2,
+        "--yes is required with --json",
+        "Add --yes to apply without a question.",
+        {},
+        None,
+    ),
+    "OPTIONS_CONFLICT": (
+        ["config", "--enable", "EMAIL", "--disable", "EMAIL"],
+        _valid_settings,
+        2,
+        "The same entity cannot be enabled and disabled.",
+        "Run the command with one of them.",
+        {},
+        "FAIL The same entity cannot be enabled and disabled.\n",
+    ),
+    "TERMINAL_REQUIRED": (
+        ["audit", "--purge"],
+        _no_terminal,
+        2,
+        None,
+        None,
+        {},
+        "shim: --purge needs a terminal; nothing was deleted.\n",
+    ),
+    "SETTINGS_PATH_INVALID": (
+        ["config"],
+        _relative_settings,
+        2,
+        "Entity settings path is invalid.",
+        "Unset SHIM_CONFIG or set it to an absolute path.",
+        {},
+        "FAIL Entity settings path is invalid.\n",
+    ),
+    "SETTINGS_PATH_UNSAFE": (
+        ["config", "--enable", "PHONE", "--yes"],
+        _shared_settings,
+        2,
+        "Entity settings path is unsafe; nothing was saved.",
+        _FIX_CHMOD,
+        {},
+        "FAIL Entity settings path is unsafe; nothing was saved.\n",
+    ),
+    "SETTINGS_INVALID": (
+        ["config"],
+        _broken_settings,
+        2,
+        _INVALID_SETTINGS,
+        _FIX_SETTINGS,
+        {},
+        f"FAIL {_INVALID_SETTINGS}\n",
+    ),
+    "SETTINGS_REFUSED": (
+        ["config"],
+        _shared_settings,
+        2,
+        _REFUSED_SETTINGS,
+        _FIX_CHMOD,
+        {},
+        f"FAIL {_REFUSED_SETTINGS}\n",
+    ),
+    "CUSTOM_PATTERN_INVALID": (
+        ["config", "--custom", "LOOP=(a+)+$", "--yes"],
+        _valid_settings,
+        2,
+        "pattern LOOP backtracks on repeated input; simplify it",
+        "Change the pattern, or remove it with shim config --remove-custom NAME --yes.",
+        {},
+        "FAIL pattern LOOP backtracks on repeated input; simplify it\n",
+    ),
+    "REVEAL_INVALID": (
+        ["config", "--reveal", "SECRET=4", "--yes"],
+        _valid_settings,
+        2,
+        "that entity cannot reveal a tail",
+        "Use --reveal IBAN=N, CREDIT_CARD=N or PHONE=N with N from 1 to 4.",
+        {},
+        "FAIL that entity cannot reveal a tail\n",
+    ),
+    "SETTINGS_CHANGED": (
+        ["config", "--enable", "PHONE", "--yes"],
+        _fails("shim_cli.cli.configuration.apply"),
+        2,
+        "Entity settings were unsafe or changed; nothing was saved.",
+        "Run the command again.",
+        {},
+        "FAIL Entity settings were unsafe or changed; nothing was saved.\n",
+    ),
+    "CLIENT_SETTINGS_UNREADABLE": (
+        ["status", "claude"],
+        _fails("shim_cli.cli.integrations.client_plan"),
+        2,
+        "Unable to inspect Claude Code hook configuration.",
+        "Run shim doctor claude.",
+        {"client": "claude"},
+        "FAIL Unable to inspect Claude Code hook configuration.\n",
+    ),
+    "CLIENT_SETTINGS_MALFORMED": (
+        ["install", "claude", "--yes"],
+        _claude_settings(b'{"hooks":'),
+        2,
+        "Claude Code hook configuration cannot be changed safely.",
+        "Fix {settings} by hand so it parses, then run the command again.",
+        {"client": "claude", "target": "{settings}"},
+        "FAIL Claude Code hook configuration cannot be changed safely.\n"
+        "WARN Review Claude Code hooks manually; shim did not change malformed, "
+        "ambiguous, or unsafe settings.\n",
+    ),
+    "CLIENT_SETTINGS_UNSAFE": (
+        ["revert", "claude", "--yes"],
+        _claude_settings(None, link=True),
+        2,
+        "Claude Code hook configuration cannot be removed safely.",
+        "Make {settings} a regular file owned by you, then run the command again.",
+        {"client": "claude", "target": "{settings}"},
+        "FAIL Claude Code hook configuration cannot be removed safely.\n"
+        "WARN Review Claude Code hooks manually; shim removes only its exact hook "
+        "group.\n",
+    ),
+    "CLIENT_SETTINGS_CHANGED": (
+        ["install", "claude", "--yes"],
+        _fails("shim_cli.cli.integrations.apply"),
+        2,
+        "Claude Code hook configuration was not changed.",
+        "Run the command again.",
+        {"client": "claude"},
+        "FAIL Claude Code hook configuration was not changed.\n",
+    ),
+    "DETECTOR_UNAVAILABLE": (
+        ["install", "claude", "--yes"],
+        _fails("shim_cli.guard.evaluate", RuntimeError),
+        2,
+        "shim detector could not start.",
+        "Reinstall shim: uv tool install --reinstall shim, or pipx reinstall shim.",
+        {"client": "claude"},
+        "FAIL shim detector could not start.\n",
+    ),
+    "INVALID_DATE": (
+        ["audit", "--since", "2026/09/01"],
+        _history,
+        2,
+        "--since takes a date as YYYY-MM-DD",
+        "Pass --since as YYYY-MM-DD.",
+        {},
+        "shim: --since takes a date as YYYY-MM-DD.\n",
+    ),
+    "HISTORY_NOT_FOUND": (
+        ["audit"],
+        _missing_history,
+        2,
+        "no Claude Code history at {history}",
+        None,
+        {},
+        "shim: no Claude Code history at {history}.\n",
+    ),
+    "HISTORY_UNREADABLE": (
+        ["audit"],
+        _unreadable_history,
+        2,
+        "the Claude Code history at {history} could not be read",
+        None,
+        {},
+        "shim: the Claude Code history at {history} could not be read.\n",
+    ),
+    "RECORDS_UNREADABLE": (
+        ["report"],
+        _fails("shim_cli.session.spool.newest", SpoolError),
+        2,
+        "Session records could not be read.",
+        "Run shim doctor claude (or codex, copilot); its session_record line "
+        "names the cause.",
+        {},
+        "FAIL Session records could not be read.\n",
+    ),
+    "LEDGER_UNREADABLE": (
+        ["ledger", "show"],
+        _fails("shim_cli.session.ledger.entries", LedgerError),
+        2,
+        "The ledger could not be read.",
+        "Run shim doctor claude (or codex, copilot).",
+        {},
+        "FAIL The ledger could not be read.\n",
+    ),
+    "FILE_NOT_FOUND": (
+        ["keys", "{file}"],
+        _keys_file(None),
+        2,
+        "{file} does not exist",
+        None,
+        {},
+        "shim: {file} does not exist.\n",
+    ),
+    "NOT_A_FILE": (
+        ["keys", "{file}"],
+        _keys_file(None, directory=True),
+        2,
+        "{file} is not a regular file",
+        None,
+        {},
+        "shim: {file} is not a regular file.\n",
+    ),
+    "FILE_TOO_LARGE": (
+        ["keys", "{file}"],
+        _keys_file(b"A=1\n" * 262_145),
+        2,
+        "{file} is larger than 1 MB",
+        None,
+        {},
+        "shim: {file} is larger than 1 MB.\n",
+    ),
+    "NOT_UTF8": (
+        ["keys", "{file}"],
+        _keys_file(b"A=\xff\n"),
+        2,
+        "{file} is not UTF-8 text",
+        None,
+        {},
+        "shim: {file} is not UTF-8 text.\n",
+    ),
+    "STDIN_UNPROCESSABLE": (
+        ["scan"],
+        _valid_settings,
+        1,
+        "Unable to process stdin.",
+        "Pipe UTF-8 text; if the settings file is refused, shim config prints why.",
+        {},
+        "FAIL Unable to process stdin.\n",
+    ),
+    "NOTHING_TO_RUN": (
+        ["watch"],
+        _watch(),
+        2,
+        "Nothing to run. Try: shim watch -- claude",
+        "shim watch -- claude",
+        {},
+        "FAIL Nothing to run. Try: shim watch -- claude\n",
+    ),
+    "CLIENT_UNSUPPORTED": (
+        ["watch", "--", "codex"],
+        _watch(),
+        2,
+        "shim watch does not support codex. Codex takes its endpoint from its own "
+        "configuration, so the proxy would be bypassed and the session measured as "
+        "empty. The Codex prompt hook is unaffected.",
+        "shim install codex installs the hook, which needs no proxy.",
+        {},
+        "FAIL shim watch does not support codex. Codex takes its endpoint from its "
+        "own configuration, so the proxy would be bypassed and the session measured "
+        "as empty. The Codex prompt hook is unaffected.\n",
+    ),
+    "BASE_URL_ALREADY_SET": (
+        ["watch", "--", "claude"],
+        _watch(base_url=True),
+        2,
+        "ANTHROPIC_BASE_URL is already configured; custom upstreams are "
+        "unsupported. Run shim watch with ANTHROPIC_BASE_URL unset, or use the hook "
+        "(shim install claude), which does not need the proxy.",
+        "Unset ANTHROPIC_BASE_URL for this command.",
+        {},
+        "FAIL ANTHROPIC_BASE_URL is already configured; custom upstreams are "
+        "unsupported. Run shim watch with ANTHROPIC_BASE_URL unset, or use the hook "
+        "(shim install claude), which does not need the proxy.\n",
+    ),
+    "EXECUTABLE_NOT_FOUND": (
+        ["watch", "--", "claude"],
+        _watch(claude=False),
+        2,
+        "claude was not found on PATH.",
+        None,
+        {},
+        "FAIL claude was not found on PATH.\n",
+    ),
+    "PROXY_FAILED": (
+        ["watch", "--", "claude"],
+        _watch(proxy="fails"),
+        2,
+        "The proxy could not start (synthetic); nothing was run.",
+        None,
+        {},
+        "FAIL The proxy could not start (synthetic); nothing was run.\n",
+    ),
+    "CLIENT_START_FAILED": (
+        ["watch", "--", "claude"],
+        _watch(proxy="client fails"),
+        2,
+        "claude could not be started (synthetic).",
+        None,
+        {},
+        "FAIL claude could not be started (synthetic).\n",
+    ),
+}
+
+
+def _with_json(argv: list[str]) -> list[str]:
+    if "--" in argv:
+        index = argv.index("--")
+        return [*argv[:index], "--json", *argv[index:]]
+    return [*argv, "--json"]
+
+
+def _run_case(code: str, as_json: bool, monkeypatch, tmp_path: Path):
+    argv, setup, *_ = _ERROR_CASES[code]
+    monkeypatch.setenv("COLUMNS", "1000")
+    values = setup(monkeypatch, tmp_path)
+    argv = [part.format(**values) for part in argv]
+    result = runner.invoke(
+        app,
+        _with_json(argv) if as_json else argv,
+        input=b"\xff" if argv == ["scan"] else None,
+    )
+    return result, values
+
+
+@pytest.mark.parametrize(
+    "code", sorted(code for code in _ERROR_CASES if code != "TERMINAL_REQUIRED")
+)
+def test_every_json_error_carries_its_code_and_fix(
+    code: str, monkeypatch, tmp_path: Path
+) -> None:
+    _, _, exit_code, error, fix, extra, _ = _ERROR_CASES[code]
+
+    result, values = _run_case(code, True, monkeypatch, tmp_path)
+
+    assert result.exit_code == exit_code
+    argv = _ERROR_CASES[code][0]
+    assert json.loads(result.stdout) == {
+        "schema_version": 1,
+        "command": f"ledger-{argv[1]}" if argv[0] == "ledger" else argv[0],
+        "status": "error",
+        "error": error.format(**values),
+        "code": code,
+        "fix": fix and fix.format(**values),
+        **{key: value.format(**values) for key, value in extra.items()},
+    }
+
+
+@pytest.mark.parametrize(
+    "code", sorted(code for code, case in _ERROR_CASES.items() if case[6])
+)
+def test_human_error_output_is_unchanged(
+    code: str, monkeypatch, tmp_path: Path
+) -> None:
+    _, _, exit_code, *_, human = _ERROR_CASES[code]
+
+    result, values = _run_case(code, False, monkeypatch, tmp_path)
+
+    assert result.exit_code == exit_code
+    assert result.stderr == human.format(**values)
+    assert not result.stdout.startswith("{")
+
+
+def test_lt_b24_reveal_error_says_what_is_wrong(monkeypatch, tmp_path: Path) -> None:
+    _valid_settings(monkeypatch, tmp_path)
+
+    shown = runner.invoke(app, ["config", "--reveal", "SECRET=4", "--yes"])
+    answered = runner.invoke(app, ["config", "--reveal", "SECRET=4", "--json"])
+
+    payload = json.loads(answered.stdout)
+    assert payload["code"] == "REVEAL_INVALID"
+    assert f"FAIL {payload['error']}" in unstyle(shown.stderr)
+    assert "unable to process entity settings" not in answered.stdout
+
+
+_CLAUDE_EVENTS = [
+    "PostToolUse",
+    "PostToolUseFailure",
+    "PreToolUse",
+    "SessionEnd",
+    "Stop",
+    "UserPromptSubmit",
+]
+
+
+def _json_install(*arguments: str) -> tuple[int, dict]:
+    result = runner.invoke(app, ["install", *arguments, "--json"])
+    return result.exit_code, json.loads(result.stdout)
+
+
+def test_install_json_creates_updates_and_does_nothing_twice(
+    monkeypatch, tmp_path: Path
+) -> None:
+    home = _claude_home(monkeypatch, tmp_path)
+    target = home / ".claude" / "settings.json"
+
+    created = _json_install("claude", "--yes")
+    again = _json_install("claude", "--yes")
+
+    assert created == (
+        0,
+        {
+            "schema_version": 1,
+            "command": "install",
+            "status": "ok",
+            "client": "claude",
+            "target": str(target),
+            "action": "create",
+            "events": _CLAUDE_EVENTS,
+            "replaced_legacy": False,
+            "preserved_hooks": False,
+            "warnings": [],
+            "next_step": "Start a new Claude Code session; /hooks lists shim.",
+        },
+    )
+    assert again[1]["action"] == "noop"
+    assert again[1]["events"] == []
+
+
+def test_install_json_names_what_it_kept_and_replaced(
+    monkeypatch, tmp_path: Path
+) -> None:
+    home = _claude_home(monkeypatch, tmp_path)
+    _legacy_claude_settings(home, foreign=True)
+
+    code, payload = _json_install("claude", "--yes")
+
+    assert code == 0
+    assert payload["action"] == "update"
+    assert payload["replaced_legacy"] is True
+    assert payload["preserved_hooks"] is True
+    assert payload["warnings"] == [
+        "Existing Claude Code hooks will be preserved; shim will be appended last."
+    ]
+
+
+def test_install_json_for_codex_names_the_trust_step(
+    monkeypatch, tmp_path: Path
+) -> None:
+    _codex_home(monkeypatch, tmp_path)
+
+    code, payload = _json_install("codex", "--yes")
+
+    assert code == 0
+    assert payload["events"] == ["UserPromptSubmit"]
+    assert payload["next_step"] == (
+        "Codex skips a hook you have not trusted, without warning: open /hooks in "
+        "Codex, review the shim entry and enable it."
+    )
+
+
+def test_install_json_without_yes_writes_nothing(monkeypatch, tmp_path: Path) -> None:
+    home = _claude_home(monkeypatch, tmp_path)
+    target = home / ".claude" / "settings.json"
+
+    refused = runner.invoke(app, ["install", "claude", "--json"])
+
+    assert refused.exit_code == 2
+    assert json.loads(refused.stdout)["code"] == "CONFIRMATION_REQUIRED"
+    assert json.loads(refused.stdout)["fix"] == "Add --yes to apply without a question."
+    assert not target.exists()
+
+
+def test_install_dry_run_json_returns_the_fragment_and_writes_nothing(
+    monkeypatch, tmp_path: Path
+) -> None:
+    from shim_cli.cli.integrations import _fragment_summary, _hook_fragment
+
+    home = _claude_home(monkeypatch, tmp_path)
+    target = home / ".claude" / "settings.json"
+
+    result = runner.invoke(app, ["install", "claude", "--dry-run", "--json"])
+
+    assert result.exit_code == 0
+    assert json.loads(result.stdout) == {
+        "schema_version": 1,
+        "command": "install",
+        "status": "ok",
+        "client": "claude",
+        "target": str(target),
+        "action": "create",
+        "events": _CLAUDE_EVENTS,
+        "fragment": _hook_fragment("claude"),
+        "summary": _fragment_summary("claude"),
+        "dry_run": True,
+    }
+    assert not target.exists()
+
+
+@pytest.mark.parametrize(
+    ("content", "code"),
+    [(b'{"hooks":', "CLIENT_SETTINGS_MALFORMED"), (None, "CLIENT_SETTINGS_UNSAFE")],
+)
+def test_install_json_refuses_a_file_it_cannot_change(
+    content: bytes | None, code: str, monkeypatch, tmp_path: Path
+) -> None:
+    home = _claude_home(monkeypatch, tmp_path)
+    target = home / ".claude" / "settings.json"
+    if content is None:
+        (tmp_path / "real.json").write_text("{}")
+        target.symlink_to(tmp_path / "real.json")
+    else:
+        target.write_bytes(content)
+    before = target.read_bytes()
+
+    exit_code, payload = _json_install("claude", "--yes")
+
+    assert exit_code == 2
+    assert payload["code"] == code
+    assert payload["target"] == str(target)
+    assert target.read_bytes() == before
+
+
+def test_revert_json_removes_does_nothing_and_asks_for_yes(
+    monkeypatch, tmp_path: Path
+) -> None:
+    home = _claude_home(monkeypatch, tmp_path)
+    target = home / ".claude" / "settings.json"
+    runner.invoke(app, ["install", "claude", "--yes"])
+    installed = target.read_bytes()
+
+    refused = runner.invoke(app, ["revert", "claude", "--json"])
+    unchanged = target.read_bytes()
+    removed = runner.invoke(app, ["revert", "claude", "--yes", "--json"])
+    again = runner.invoke(app, ["revert", "claude", "--yes", "--json"])
+
+    assert refused.exit_code == 2
+    assert json.loads(refused.stdout)["code"] == "CONFIRMATION_REQUIRED"
+    assert unchanged == installed
+    assert removed.exit_code == 0
+    assert json.loads(removed.stdout) == {
+        "schema_version": 1,
+        "command": "revert",
+        "status": "ok",
+        "client": "claude",
+        "target": str(target),
+        "action": "remove",
+        "removed_legacy_file": False,
+        "deleted_file": None,
+    }
+    assert json.loads(again.stdout)["action"] == "noop"
+
+
+def test_revert_json_names_the_copilot_file_it_deleted(
+    monkeypatch, tmp_path: Path
+) -> None:
+    home = _copilot_home(monkeypatch, tmp_path)
+    target = home / ".copilot" / "hooks" / "shim.json"
+    runner.invoke(app, ["install", "copilot", "--yes"])
+
+    removed = runner.invoke(app, ["revert", "copilot", "--yes", "--json"])
+
+    assert removed.exit_code == 0
+    assert json.loads(removed.stdout)["deleted_file"] == str(target)
+    assert not target.exists()
+
+
+def _doctor_check(code: str, monkeypatch, tmp_path: Path):
+    from shim_cli.cli import diagnostics
+    from shim_cli.cli.resolution import Resolution
+    from shim_cli.session import spool
+
+    def refuse(*_args, **_kwargs):
+        raise OSError("synthetic")
+
+    _valid_settings(monkeypatch, tmp_path)
+    home = _claude_home(monkeypatch, tmp_path)
+    settings = home / ".claude" / "settings.json"
+    shim_settings = Path(os.environ["SHIM_CONFIG"])
+    if code == "CLIENT_NOT_FOUND":
+        monkeypatch.setenv("PATH", "")
+        return diagnostics._version_check("claude")
+    if code in {"CLIENT_VERSION_UNKNOWN", "CLIENT_TOO_OLD", "CLIENT_NEWER_THAN_TESTED"}:
+        version = {
+            "CLIENT_VERSION_UNKNOWN": "unknown",
+            "CLIENT_TOO_OLD": "0.0.1",
+            "CLIENT_NEWER_THAN_TESTED": "99.0.0",
+        }[code]
+        _claude(monkeypatch, tmp_path, version)
+        return diagnostics._version_check("claude")
+    if code == "CODEX_HOOKS_DISABLED":
+        _codex(monkeypatch, tmp_path)
+        (tmp_path / "codex").write_text("#!/bin/sh\nprintf 'hooks stable false\\n'\n")
+        return diagnostics._codex_hooks_feature()
+    if code == "CODEX_HOOKS_UNCHECKED":
+        monkeypatch.setenv("PATH", "")
+        return diagnostics._codex_hooks_feature()
+    if code == "LEGACY_NAMES_PRESENT":
+        return diagnostics._legacy_state("claude", True)
+    if code == "CLIENT_SETTINGS_UNREADABLE":
+        monkeypatch.setattr(diagnostics, "client_plan", refuse)
+        return diagnostics._hook_state("claude")
+    if code == "HOOK_NOT_INSTALLED":
+        return diagnostics._hook_state("claude")
+    if code == "CLIENT_SETTINGS_MALFORMED":
+        settings.write_bytes(b'{"hooks":')
+        return diagnostics._hook_state("claude")
+    if code == "CLIENT_SETTINGS_UNSAFE":
+        (tmp_path / "real.json").write_text("{}")
+        settings.symlink_to(tmp_path / "real.json")
+        return diagnostics._hook_state("claude")
+    if code == "SETTINGS_INVALID":
+        shim_settings.write_bytes(b"not toml")
+        return diagnostics._entity_settings()
+    if code == "SETTINGS_REFUSED":
+        shim_settings.parent.chmod(0o777)
+        return diagnostics._entity_settings()
+    if code == "DETECTION_DISABLED":
+        shim_settings.write_text("enabled_entities = []\n")
+        return diagnostics._entity_settings()
+    if code == "CUSTOM_PATTERN_UNSAFE":
+        shim_settings.write_text(
+            'enabled_entities = ["CUSTOM"]\n\n'
+            "[[custom]]\nname = \"LOOP\"\npattern = '(a+)+$'\n"
+        )
+        return diagnostics._custom_patterns()
+    if code == "HOOK_RUNNER_FAILED":
+        monkeypatch.setattr(diagnostics, "_run_hook", refuse)
+        return diagnostics._runner_check("claude")
+    if code in {"HOOK_RESOLUTION_FAILED", "ARCHIVE_VERSION_SKEW"}:
+        resolution = (
+            Resolution("none", "No hook is runnable.", None, None)
+            if code == "HOOK_RESOLUTION_FAILED"
+            else Resolution("path", "The package hook is active.", "1.1.0", "1.0.0")
+        )
+        monkeypatch.setattr(diagnostics, "resolve", lambda: resolution)
+        return diagnostics._resolution_check("claude", frozenset())
+    if code == "PLUGIN_NOT_DISCOVERABLE":
+        return diagnostics._duplicate_check("codex", frozenset())
+    if code == "DUPLICATE_HOOKS":
+        monkeypatch.setattr(
+            diagnostics, "installed_plugins", lambda: [{"key": "shim-cli@shim-cli"}]
+        )
+        return diagnostics._duplicate_check("claude", frozenset({"Stop"}))
+    if code == "SESSION_RECORDS_UNWRITABLE":
+        monkeypatch.setattr(spool, "append", refuse)
+        return diagnostics._session_record_check()
+    if code == "HOOK_EVENTS_MISSING":
+        return diagnostics._coverage_check("claude", [{"installed": False}])
+    if code == "HOOK_ACTIVATION_UNVERIFIED":
+        return diagnostics._activation_check("claude")
+    raise AssertionError(f"no fixture for {code}")
+
+
+_DOCTOR_CODES = (
+    "CLIENT_NOT_FOUND",
+    "CLIENT_VERSION_UNKNOWN",
+    "CLIENT_TOO_OLD",
+    "CLIENT_NEWER_THAN_TESTED",
+    "CODEX_HOOKS_DISABLED",
+    "CODEX_HOOKS_UNCHECKED",
+    "LEGACY_NAMES_PRESENT",
+    "CLIENT_SETTINGS_UNREADABLE",
+    "HOOK_NOT_INSTALLED",
+    "CLIENT_SETTINGS_MALFORMED",
+    "CLIENT_SETTINGS_UNSAFE",
+    "SETTINGS_INVALID",
+    "SETTINGS_REFUSED",
+    "DETECTION_DISABLED",
+    "CUSTOM_PATTERN_UNSAFE",
+    "HOOK_RUNNER_FAILED",
+    "HOOK_RESOLUTION_FAILED",
+    "ARCHIVE_VERSION_SKEW",
+    "PLUGIN_NOT_DISCOVERABLE",
+    "DUPLICATE_HOOKS",
+    "SESSION_RECORDS_UNWRITABLE",
+    "HOOK_EVENTS_MISSING",
+    "HOOK_ACTIVATION_UNVERIFIED",
+)
+
+
+@pytest.mark.parametrize("code", _DOCTOR_CODES)
+def test_every_doctor_problem_names_its_code_and_fix(
+    code: str, monkeypatch, tmp_path: Path
+) -> None:
+    check = _doctor_check(code, monkeypatch, tmp_path)
+
+    assert check is not None
+    assert check.status in {"WARN", "FAIL"}
+    assert check.code == code
+    assert check.fix
+    assert "<" not in check.fix, "placeholders are filled at the call site"
+
+
+def test_doctor_json_carries_detail_code_and_fix(monkeypatch, tmp_path: Path) -> None:
+    _claude_home(monkeypatch, tmp_path)
+    _claude(monkeypatch, tmp_path)
+
+    before = json.loads(runner.invoke(app, ["doctor", "claude", "--json"]).stdout)
+    runner.invoke(app, ["install", "claude", "--yes"])
+    after = json.loads(runner.invoke(app, ["doctor", "claude", "--json"]).stdout)
+
+    for payload in (before, after):
+        for check in payload["checks"]:
+            assert set(check) == {"name", "status", "detail", "code", "fix"}
+            if check["status"] == "PASS":
+                assert check["code"] is check["fix"] is None
+            else:
+                assert check["code"] in _DOCTOR_CODES
+                assert check["fix"]
+    missing = next(c for c in before["checks"] if c["name"] == "coverage")
+    assert missing["code"] == "HOOK_EVENTS_MISSING"
+    assert missing["fix"] == "Run shim install claude."

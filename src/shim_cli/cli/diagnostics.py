@@ -14,7 +14,12 @@ import typer
 from rich import box
 from rich.table import Table
 
-from shim_cli.cli.integrations import client_name, client_plan, plan_status
+from shim_cli.cli.integrations import (
+    FIX_REINSTALL,
+    client_name,
+    client_plan,
+    plan_status,
+)
 from shim_cli.cli.output import console, emit, emit_json
 from shim_cli.cli.resolution import installed_plugins, resolve
 from shim_cli.clients.claude import settings as claude_settings
@@ -25,13 +30,13 @@ from shim_cli.clients.hook_settings import installed_events, interpreter_path
 from shim_cli.settings_files import StateKind, inspect_file
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Check:
-    __slots__ = ("detail", "name", "status")
-
     name: str
     status: str
     detail: str
+    code: str | None = None
+    fix: str | None = None
 
 
 def _client_version(
@@ -39,7 +44,13 @@ def _client_version(
 ) -> Check:
     path = shutil.which(executable)
     if path is None:
-        return Check(executable, "FAIL", f"{name} executable was not found on PATH.")
+        return Check(
+            executable,
+            "FAIL",
+            f"{name} executable was not found on PATH.",
+            code="CLIENT_NOT_FOUND",
+            fix=f"Install {name}, or add the folder holding {executable} to PATH.",
+        )
     try:
         result = subprocess.run(
             [path, "--version"],
@@ -50,12 +61,20 @@ def _client_version(
         )
     except (OSError, UnicodeError, subprocess.SubprocessError):
         return Check(
-            executable, "FAIL", f"{name} at {path} could not report its version."
+            executable,
+            "FAIL",
+            f"{name} at {path} could not report its version.",
+            code="CLIENT_VERSION_UNKNOWN",
+            fix=f"Run {path} --version; reinstall {name} if it fails.",
         )
     match = re.search(r"\b(\d+)\.(\d+)\.(\d+)\b", result.stdout + result.stderr)
     if result.returncode or match is None:
         return Check(
-            executable, "FAIL", f"{name} at {path} has an unrecognized version."
+            executable,
+            "FAIL",
+            f"{name} at {path} has an unrecognized version.",
+            code="CLIENT_VERSION_UNKNOWN",
+            fix=f"Run {path} --version; reinstall {name} if it fails.",
         )
     version_text = match.group(0)
     version = tuple(int(part) for part in match.groups())
@@ -66,12 +85,17 @@ def _client_version(
             executable,
             "FAIL",
             f"{name} {version_text} is older than {minimum_text}.",
+            code="CLIENT_TOO_OLD",
+            fix=f"Update {name} to {minimum_text} or newer.",
         )
     if version > tested:
         return Check(
             executable,
             "WARN",
             f"{name} {version_text} is newer than tested {tested_text}.",
+            code="CLIENT_NEWER_THAN_TESTED",
+            fix="Check shim once by hand: a prompt holding ops@example.com "
+            "must be reported.",
         )
     return Check(executable, "PASS", f"{name} {version_text} at {path} is tested.")
 
@@ -101,6 +125,9 @@ def _version_check(client: str) -> Check:
     raise ValueError("unsupported client")
 
 
+_FIX_CODEX_HOOKS_UNCHECKED = "Run codex features list; it must show hooks as true."
+
+
 def _codex_hooks_feature() -> Check:
     path = shutil.which("codex")
     if path is None:
@@ -108,6 +135,8 @@ def _codex_hooks_feature() -> Check:
             "hooks_feature",
             "FAIL",
             "Codex hook support was not checked: the executable was not found.",
+            code="CODEX_HOOKS_UNCHECKED",
+            fix=_FIX_CODEX_HOOKS_UNCHECKED,
         )
     try:
         result = subprocess.run(
@@ -119,14 +148,25 @@ def _codex_hooks_feature() -> Check:
         )
     except (OSError, UnicodeError, subprocess.SubprocessError):
         return Check(
-            "hooks_feature", "FAIL", "Codex hook support could not be checked."
+            "hooks_feature",
+            "FAIL",
+            "Codex hook support could not be checked.",
+            code="CODEX_HOOKS_UNCHECKED",
+            fix=_FIX_CODEX_HOOKS_UNCHECKED,
         )
     enabled = any(
         fields and fields[0] == "hooks" and fields[-1] == "true"
         for fields in map(str.split, result.stdout.splitlines())
     )
     if result.returncode or not enabled:
-        return Check("hooks_feature", "FAIL", "Codex hook support is not enabled.")
+        return Check(
+            "hooks_feature",
+            "FAIL",
+            "Codex hook support is not enabled.",
+            code="CODEX_HOOKS_DISABLED",
+            fix="Set hooks = true under [features] in Codex's config.toml "
+            "(~/.codex or $CODEX_HOME), or delete that line.",
+        )
     return Check("hooks_feature", "PASS", "Codex hook support is enabled.")
 
 
@@ -138,6 +178,7 @@ def _legacy_state(client: str, fragment: bool) -> Check:
     from shim_cli.settings_files import StateKind, inspect_file
 
     found: list[str] = []
+    commands: list[str] = []
     if client == "copilot" and not fragment:
         legacy = copilot_settings.legacy_target_path()
         state = inspect_file(legacy, copilot_settings.MAX_CONFIG_BYTES)
@@ -147,16 +188,19 @@ def _legacy_state(client: str, fragment: bool) -> Check:
                     f"Hook file uses the old name at {legacy}; "
                     "run shim install copilot to rename it"
                 )
+                commands.append("shim install copilot")
     if fragment:
         found.append(
             f"Hook installed in the 0.2.0 shape, which 1.0 does not run; "
             f"run shim install {client}"
         )
+        commands.append(f"shim install {client}")
     settings_file = legacy_config_path()
     if settings_file is not None and settings_file.is_file():
         found.append(
             f"Settings are still at {settings_file} and move on the next shim config"
         )
+        commands.append("shim config")
     try:
         directory = ledger.legacy_root_path()
     except ledger.LedgerError:
@@ -167,6 +211,7 @@ def _legacy_state(client: str, fragment: bool) -> Check:
         found.append(
             f"Ledger files are still in {directory} and move on the next shim report"
         )
+        commands.append("shim report")
     if not found:
         return Check("legacy_names", "PASS", "No 0.2.0 names are left on disk.")
     detail = ". ".join(found)
@@ -174,6 +219,8 @@ def _legacy_state(client: str, fragment: bool) -> Check:
         "legacy_names",
         "FAIL" if fragment else "WARN",
         f"{detail[0].lower()}{detail[1:]}.",
+        code="LEGACY_NAMES_PRESENT",
+        fix=f"Run {', then '.join(commands)}.",
     )
 
 
@@ -214,39 +261,83 @@ def _has_legacy_fragment(client: str) -> bool:
 def _hook_state(client: str, on_disk: bool = False) -> Check | None:
     name = client_name(client)
     try:
-        label, state = plan_status(client_plan(client, "install"))
+        plan = client_plan(client, "install")
+        label, state = plan_status(plan)
     except (OSError, ValueError):
         return Check(
             "hook_configuration",
             "FAIL",
             f"Could not inspect {name} hook configuration.",
+            code="CLIENT_SETTINGS_UNREADABLE",
+            fix=f"Make the {name} settings file and its folder readable by you.",
         )
-    messages = {
-        "installed": f"shim's exact {name} hook group is present.",
-        "not_installed": (
-            f"shim's {name} hook group is not installed; run shim install {client}."
-        ),
-        "conflict": f"{name} hook configuration needs manual review.",
-        "unsafe": f"{name} hook configuration cannot be trusted safely.",
-    }
-    if state == "not_installed" and on_disk:
-        return None
-    return Check("hook_configuration", label, messages[state])
+    if state == "installed":
+        return Check(
+            "hook_configuration", label, f"shim's exact {name} hook group is present."
+        )
+    if state == "not_installed":
+        if on_disk:
+            return None
+        return Check(
+            "hook_configuration",
+            label,
+            f"shim's {name} hook group is not installed; run shim install {client}.",
+            code="HOOK_NOT_INSTALLED",
+            fix=f"Run shim install {client}.",
+        )
+    if state == "conflict":
+        return Check(
+            "hook_configuration",
+            label,
+            f"{name} hook configuration needs manual review.",
+            code="CLIENT_SETTINGS_MALFORMED",
+            fix=f"Fix {plan.target} by hand so it parses; shim install will not "
+            "change it until then.",
+        )
+    return Check(
+        "hook_configuration",
+        label,
+        f"{name} hook configuration cannot be trusted safely.",
+        code="CLIENT_SETTINGS_UNSAFE",
+        fix=f"Make {plan.target} a regular file owned by you, then run shim "
+        f"install {client}.",
+    )
 
 
 def _entity_settings() -> Check:
+    from shim_cli.cli.configuration import (
+        FIX_SETTINGS_INVALID,
+        FIX_SETTINGS_UNSAFE,
+        settings_refused,
+    )
     from shim_cli.config import describe_settings_error, load_entities
     from shim_cli.guard import ENTITY_TYPES
 
     try:
         enabled = load_entities()
     except (OSError, ValueError) as error:
-        return Check("entity_settings", "FAIL", describe_settings_error(error))
+        if settings_refused(error):
+            return Check(
+                "entity_settings",
+                "FAIL",
+                describe_settings_error(error),
+                code="SETTINGS_REFUSED",
+                fix=FIX_SETTINGS_UNSAFE,
+            )
+        return Check(
+            "entity_settings",
+            "FAIL",
+            describe_settings_error(error),
+            code="SETTINGS_INVALID",
+            fix=FIX_SETTINGS_INVALID,
+        )
     if not enabled:
         return Check(
             "entity_settings",
             "WARN",
             "All sensitive-data detection is disabled; review with `shim config`.",
+            code="DETECTION_DISABLED",
+            fix="Turn types back on with shim config --enable ENTITY --yes.",
         )
     return Check(
         "entity_settings",
@@ -276,7 +367,14 @@ def _custom_patterns() -> Check | None:
         if (reason := unsafe_pattern(pattern.name, entry_source(pattern.entry)))
     ]
     if reasons:
-        return Check("custom_patterns", "FAIL", " ".join(reasons))
+        return Check(
+            "custom_patterns",
+            "FAIL",
+            " ".join(reasons),
+            code="CUSTOM_PATTERN_UNSAFE",
+            fix="Simplify the pattern, or remove it with "
+            "shim config --remove-custom NAME --yes.",
+        )
     named = ", ".join(pattern.name for pattern in patterns)
     return Check("custom_patterns", "PASS", f"{len(patterns)} custom: {named}.")
 
@@ -337,13 +435,19 @@ def _runner_check(client: str) -> Check:
         block = json.loads(block_result.stdout)
     except (OSError, UnicodeError, subprocess.SubprocessError, json.JSONDecodeError):
         return Check(
-            "runner", "FAIL", "The local hook runner fixtures did not complete."
+            "runner",
+            "FAIL",
+            "The local hook runner fixtures did not complete.",
+            code="HOOK_RUNNER_FAILED",
+            fix=FIX_REINSTALL,
         )
     if safe_result.returncode or safe_result.stdout or safe_result.stderr:
         return Check(
             "runner",
             "FAIL",
             "The local hook runner did not allow the safe fixture silently.",
+            code="HOOK_RUNNER_FAILED",
+            fix=FIX_REINSTALL,
         )
     if client == "copilot":
         expected, field = "email <EMAIL_1>", "modifiedTransformedPrompt"
@@ -362,6 +466,8 @@ def _runner_check(client: str) -> Check:
             "runner",
             "FAIL",
             "The local hook runner did not protect the sensitive fixture.",
+            code="HOOK_RUNNER_FAILED",
+            fix=FIX_REINSTALL,
         )
     return Check(
         "runner",
@@ -383,7 +489,13 @@ def _resolution_check(client: str, installed: frozenset) -> Check:
                 f"directly ({interpreter_path(sys.executable)}); nothing is "
                 "needed on PATH.",
             )
-        return Check("hook_resolution", "FAIL", resolution.detail)
+        return Check(
+            "hook_resolution",
+            "FAIL",
+            resolution.detail,
+            code="HOOK_RESOLUTION_FAILED",
+            fix=f"Run shim install {client}.",
+        )
     if resolution.skewed:
         return Check(
             "hook_resolution",
@@ -391,6 +503,9 @@ def _resolution_check(client: str, installed: frozenset) -> Check:
             f"{resolution.detail} The bundled archive is "
             f"{resolution.archive_version} while the package is "
             f"{resolution.path_version}; the package wins. Update the plugin.",
+            code="ARCHIVE_VERSION_SKEW",
+            fix="Run claude plugin update shim-cli@shim-cli and restart Claude "
+            "Code; in a cloned plugin folder, check out the newest release tag.",
         )
     return Check("hook_resolution", "PASS", resolution.detail)
 
@@ -409,6 +524,9 @@ def _duplicate_check(client: str, installed: frozenset) -> Check:
             "WARN",
             "Plugin installs are not discoverable for this client; if you "
             "installed both the plugin and `shim install`, remove one.",
+            code="PLUGIN_NOT_DISCOVERABLE",
+            fix=f"If the {client_name(client)} plugin is installed beside "
+            f"shim install {client}, remove the plugin.",
         )
     plugins = installed_plugins()
     if len(plugins) > 1:
@@ -419,6 +537,8 @@ def _duplicate_check(client: str, installed: frozenset) -> Check:
             f"Both the {plugins[0]['key']} and {plugins[1]['key']} plugins are "
             "installed; every event is inspected twice. Run "
             f"`claude plugin uninstall {alias['key']}`.",
+            code="DUPLICATE_HOOKS",
+            fix=f"claude plugin uninstall {alias['key']}",
         )
     if plugins and installed:
         return Check(
@@ -427,8 +547,16 @@ def _duplicate_check(client: str, installed: frozenset) -> Check:
             f"Both the {plugins[0]['key']} plugin and a settings hook are installed; "
             "every prompt is inspected twice. Run `shim revert claude` or "
             "uninstall the plugin.",
+            code="DUPLICATE_HOOKS",
+            fix="Run shim revert claude, or uninstall the plugin.",
         )
     return Check("duplicate_hooks", "PASS", "Exactly one shim hook path is installed.")
+
+
+_FIX_SPOOL = (
+    "Set TMPDIR to a folder you own, or make the shim-session folder in it "
+    "yours with mode 700."
+)
 
 
 def _session_record_check() -> Check:
@@ -443,6 +571,8 @@ def _session_record_check() -> Check:
             "WARN",
             f"Session records cannot be written ({error}); masking still works "
             "but no session summary will appear.",
+            code="SESSION_RECORDS_UNWRITABLE",
+            fix=_FIX_SPOOL,
         )
     except OSError:
         return Check(
@@ -450,6 +580,8 @@ def _session_record_check() -> Check:
             "WARN",
             "Session records cannot be written; masking still works but no "
             "session summary will appear.",
+            code="SESSION_RECORDS_UNWRITABLE",
+            fix=_FIX_SPOOL,
         )
     return Check(
         "session_record",
@@ -510,7 +642,13 @@ def _coverage_check(client: str, rows: list) -> Check:
     detail = f"Coverage: {installed} of {len(rows)} events installed"
     if installed == len(rows):
         return Check("coverage", "PASS", f"{detail}.")
-    return Check("coverage", "WARN", f"{detail}; run shim install {client}.")
+    return Check(
+        "coverage",
+        "WARN",
+        f"{detail}; run shim install {client}.",
+        code="HOOK_EVENTS_MISSING",
+        fix=f"Run shim install {client}.",
+    )
 
 
 def _activation_check(client: str) -> Check:
@@ -525,6 +663,9 @@ def _activation_check(client: str) -> Check:
         "hook_activation",
         "WARN",
         f"{client_name(client)} hook activation is client UI state; verify shim with /hooks.",
+        code="HOOK_ACTIVATION_UNVERIFIED",
+        fix=f"Open /hooks in {client_name(client)} and check that shim is listed"
+        + (" and enabled." if client == "codex" else "."),
     )
 
 
@@ -582,7 +723,16 @@ def doctor(*, client: str, as_json: bool) -> None:
             "doctor",
             status,
             client=client,
-            checks=[{"name": check.name, "status": check.status} for check in checks],
+            checks=[
+                {
+                    "name": check.name,
+                    "status": check.status,
+                    "detail": check.detail,
+                    "code": check.code,
+                    "fix": check.fix,
+                }
+                for check in checks
+            ],
             coverage=rows,
         )
     else:
