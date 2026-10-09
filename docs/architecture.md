@@ -125,7 +125,10 @@ may need. Lossless JSON compaction is the default; trailing-whitespace removal
 is available only through explicit configuration because it can change
 Markdown hard breaks.
 
-Eleven entity types are built in. The twelfth, `CUSTOM`, is whatever the user
+Twelve entity types are built in; `TR_LICENSE_PLATE` is opt-in
+(`OPT_IN_TYPES` in `guard/entities.py`), so the default set leaves it out and
+every default that is not the user's own settings uses `DEFAULT_ENTITIES`.
+The thirteenth, `CUSTOM`, is whatever the user
 named in `[[custom]]`: `guard/entities.py` compiles those entries, the hook and
 the proxy pass the compiled tuple to `evaluate`, and a `Finding` carries the
 pattern's name as its `label` so the report can say which one matched while the

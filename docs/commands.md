@@ -550,7 +550,7 @@ ledger and diet settings, and the file it all lives in:
 
 ```console
 $ shim config
-Current detection: 12/12 enabled
+Current detection: 12/13 enabled
  Entity           Status
  ───────────────────────
  EMAIL            ON
@@ -559,7 +559,9 @@ Ledger: off    Diet: json
 PASS File: /home/you/.config/shim/config.toml
 ```
 
-**Turning entity types on and off.** Every type is on by default.
+**Turning entity types on and off.** Every type is on by default except
+`TR_LICENSE_PLATE`, Turkish licence plates, which coding traffic imitates too
+often (`[12 GET 200]`, `01 OCT 26`) to look for unasked.
 
 ```console
 shim config --disable PHONE --yes
@@ -568,9 +570,18 @@ shim config --only SECRET --only DB_URI --yes   # exactly these two, nothing els
 ```
 
 The types are `EMAIL`, `PHONE`, `CREDIT_CARD`, `IBAN`, `IP_ADDRESS`,
-`MAC_ADDRESS`, `US_SSN`, `TR_NATIONAL_ID`, `TR_VKN`, `SECRET`, `DB_URI`,
-`CUSTOM`. Checksums are verified where they exist, so a mistyped IBAN or card
-number is not reported.
+`MAC_ADDRESS`, `US_SSN`, `TR_NATIONAL_ID`, `TR_VKN`, `TR_LICENSE_PLATE`,
+`SECRET`, `DB_URI`, `CUSTOM`. Checksums are verified where they exist, so a
+mistyped IBAN or card number is not reported.
+
+```console
+shim config --enable TR_LICENSE_PLATE --yes   # look for Turkish plates too
+```
+
+A plate is uppercase, or lowercase right after `plaka` or `plate`; HTTP methods,
+log words (`GET`, `PUT`, `ERR`, `CPU`, `PID`, `ID`, `RC`, `OK`), months, units
+and currencies are never plate letters. `line 42 E 1234` still reads as a
+plate.
 
 **Your own terms.**
 

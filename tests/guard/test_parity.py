@@ -259,9 +259,9 @@ NARROWED_SPANS = {
 
 
 def test_every_divergence_is_still_a_real_case() -> None:
-    known = set(DELIBERATE_DIVERGENCES) | set(NARROWED_SPANS)
-    assert known <= {case["id"] for case in _CASES}
-    assert not set(DELIBERATE_DIVERGENCES) & set(NARROWED_SPANS)
+    tables = (set(DELIBERATE_DIVERGENCES), set(NARROWED_SPANS), set(TIGHTENED))
+    assert set().union(*tables) <= {case["id"] for case in _CASES}
+    assert sum(map(len, tables)) == len(set().union(*tables))
 
 
 def test_divergences_only_ever_relax_detection() -> None:
@@ -297,6 +297,63 @@ def test_the_generator_still_produces_the_frozen_inputs() -> None:
     ]
 
 
+LOWERCASE_IBAN = (
+    "A lowercase IBAN with a valid checksum is an IBAN, as the gateway reads it "
+    "(ShimIbanRecognizer at GetSHIM/shim ca6b2e9)."
+)
+WHOLE_IBAN = (
+    "A spaced IBAN is one IBAN, never a card over its middle digits, as the "
+    "gateway reads it."
+)
+
+# A ported gateway rule that masks more than the frozen build. Each new span
+# covers every frozen one, so nothing that was masked comes back.
+TIGHTENED = {
+    **{
+        f"iban-lower-{country}": (
+            LOWERCASE_IBAN,
+            [["IBAN", 5, end, 1.0]],
+            "IBAN <IBAN_1> confirmed",
+        )
+        for country, end in (
+            ("TR", 31),
+            ("DE", 27),
+            ("GB", 27),
+            ("FR", 32),
+            ("NL", 23),
+            ("IT", 32),
+            ("CH", 26),
+            ("PL", 33),
+            ("DK", 23),
+            ("FI", 23),
+            ("GR", 32),
+            ("IE", 27),
+            ("MT", 36),
+            ("HR", 26),
+            ("HU", 33),
+            ("BG", 27),
+            ("CY", 35),
+            ("LI", 26),
+            ("MC", 32),
+            ("SM", 32),
+        )
+    },
+    "iban-spaced-AT": (WHOLE_IBAN, [["IBAN", 5, 29, 1.0]], "IBAN <IBAN_1> confirmed"),
+    "iban-spaced-PL": (WHOLE_IBAN, [["IBAN", 5, 39, 1.0]], "IBAN <IBAN_1> confirmed"),
+}
+
+
+def test_tightened_cases_never_unmask() -> None:
+    by_id = {case["id"]: case for case in _CASES}
+    for identifier, (_reason, expected, _redacted) in TIGHTENED.items():
+        for _type, start, end, _score in by_id[identifier]["findings"]:
+            assert any(
+                new_start <= start and end <= new_end
+                for _new, new_start, new_end, _ in expected
+            ), identifier
+        assert expected != by_id[identifier]["findings"], identifier
+
+
 @pytest.mark.parametrize("case", _CASES, ids=lambda case: case["id"])
 def test_detection_is_unchanged(case: dict) -> None:
     decision = evaluate(case["text"])
@@ -307,6 +364,11 @@ def test_detection_is_unchanged(case: dict) -> None:
     if case["id"] in NARROWED_SPANS:
         reason, expected, redacted = NARROWED_SPANS[case["id"]]
         assert actual == expected, f"{case['id']} narrows on purpose: {reason}"
+        assert decision.redacted_text == redacted
+        return
+    if case["id"] in TIGHTENED:
+        reason, expected, redacted = TIGHTENED[case["id"]]
+        assert actual == expected, f"{case['id']} tightens on purpose: {reason}"
         assert decision.redacted_text == redacted
         return
     if case["id"] in DELIBERATE_DIVERGENCES:

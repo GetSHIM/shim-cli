@@ -283,7 +283,7 @@ def test_config_selects_entities_for_privacy_commands(
     assert json.loads(path_scan.output)["status"] == "safe"
     assert initial.exit_code == saved.exit_code == current.exit_code == 0
     assert adjusted.exit_code == final.exit_code == 0
-    assert "Current detection: 12/12 enabled" in initial.output
+    assert "Current detection: 12/13 enabled" in initial.output
     assert "ON" in saved.output and "OFF" in saved.output
     assert stat.S_IMODE(target.stat().st_mode) == 0o600
     assert json.loads(scan.output)["counts"] == {"EMAIL": 1}
@@ -2550,3 +2550,20 @@ def test_doctor_json_carries_detail_code_and_fix(monkeypatch, tmp_path: Path) ->
     missing = next(c for c in before["checks"] if c["name"] == "coverage")
     assert missing["code"] == "HOOK_EVENTS_MISSING"
     assert missing["fix"] == "Run shim install claude."
+
+
+def test_the_plate_type_is_listed_off_and_can_be_turned_on(
+    monkeypatch, tmp_path: Path
+) -> None:
+    target = _guard_config(monkeypatch, tmp_path)
+
+    shown = json.loads(runner.invoke(app, ["config", "--json"]).stdout)
+    enabled = runner.invoke(
+        app, ["config", "--enable", "TR_LICENSE_PLATE", "--yes", "--json"]
+    )
+    found = runner.invoke(app, ["scan", "--json"], input="Plaka 34 ABC 123")
+
+    assert "TR_LICENSE_PLATE" in shown["disabled_entities"]
+    assert "TR_LICENSE_PLATE" in json.loads(enabled.stdout)["enabled_entities"]
+    assert "TR_LICENSE_PLATE" in target.read_text()
+    assert json.loads(found.stdout)["counts"] == {"TR_LICENSE_PLATE": 1}

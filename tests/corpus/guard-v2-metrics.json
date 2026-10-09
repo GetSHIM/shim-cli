@@ -3,7 +3,7 @@
   "corpus": {
     "file": "guard-v2.json",
     "version": 2,
-    "case_count": 146
+    "case_count": 210
   },
   "evaluation_unit": "exact redacted output",
   "claim_scope": "Synthetic fixture-bound evidence only; not a real-world statistical claim.",
@@ -13,53 +13,53 @@
     "exact_output": 1.0
   },
   "exact_output": {
-    "cases": 146,
-    "matching": 146,
+    "cases": 210,
+    "matching": 210,
     "ratio": 1.0
   },
   "exact_source_spans": {
-    "cases": 15,
-    "matching": 15,
+    "cases": 22,
+    "matching": 22,
     "ratio": 1.0
   },
   "categories": {
     "EMAIL": {
-      "true_positive": 15,
+      "true_positive": 17,
       "false_positive": 0,
       "false_negative": 0,
-      "negative_cases": 131,
+      "negative_cases": 193,
       "precision": 1.0,
       "recall": 1.0
     },
     "PHONE": {
-      "true_positive": 10,
+      "true_positive": 15,
       "false_positive": 0,
       "false_negative": 0,
-      "negative_cases": 136,
+      "negative_cases": 195,
       "precision": 1.0,
       "recall": 1.0
     },
     "CREDIT_CARD": {
-      "true_positive": 2,
+      "true_positive": 4,
       "false_positive": 0,
       "false_negative": 0,
-      "negative_cases": 144,
+      "negative_cases": 206,
       "precision": 1.0,
       "recall": 1.0
     },
     "IBAN": {
-      "true_positive": 1,
+      "true_positive": 5,
       "false_positive": 0,
       "false_negative": 0,
-      "negative_cases": 145,
+      "negative_cases": 205,
       "precision": 1.0,
       "recall": 1.0
     },
     "IP_ADDRESS": {
-      "true_positive": 2,
+      "true_positive": 5,
       "false_positive": 0,
       "false_negative": 0,
-      "negative_cases": 144,
+      "negative_cases": 205,
       "precision": 1.0,
       "recall": 1.0
     },
@@ -67,7 +67,7 @@
       "true_positive": 2,
       "false_positive": 0,
       "false_negative": 0,
-      "negative_cases": 144,
+      "negative_cases": 208,
       "precision": 1.0,
       "recall": 1.0
     },
@@ -75,15 +75,15 @@
       "true_positive": 3,
       "false_positive": 0,
       "false_negative": 0,
-      "negative_cases": 143,
+      "negative_cases": 207,
       "precision": 1.0,
       "recall": 1.0
     },
     "TR_NATIONAL_ID": {
-      "true_positive": 1,
+      "true_positive": 3,
       "false_positive": 0,
       "false_negative": 0,
-      "negative_cases": 145,
+      "negative_cases": 207,
       "precision": 1.0,
       "recall": 1.0
     },
@@ -91,15 +91,23 @@
       "true_positive": 2,
       "false_positive": 0,
       "false_negative": 0,
-      "negative_cases": 144,
+      "negative_cases": 208,
+      "precision": 1.0,
+      "recall": 1.0
+    },
+    "TR_LICENSE_PLATE": {
+      "true_positive": 7,
+      "false_positive": 0,
+      "false_negative": 0,
+      "negative_cases": 203,
       "precision": 1.0,
       "recall": 1.0
     },
     "SECRET": {
-      "true_positive": 38,
+      "true_positive": 43,
       "false_positive": 0,
       "false_negative": 0,
-      "negative_cases": 108,
+      "negative_cases": 167,
       "precision": 1.0,
       "recall": 1.0
     },
@@ -107,13 +115,13 @@
       "true_positive": 10,
       "false_positive": 0,
       "false_negative": 0,
-      "negative_cases": 136,
+      "negative_cases": 200,
       "precision": 1.0,
       "recall": 1.0
     }
   },
   "micro": {
-    "true_positive": 46,
+    "true_positive": 116,
     "false_positive": 0,
     "false_negative": 0,
     "precision": 1.0,

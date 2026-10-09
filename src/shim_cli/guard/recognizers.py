@@ -26,6 +26,7 @@ ENTITY_MAP = {
     "US_SSN": "US_SSN",
     "TR_NATIONAL_ID": "TR_NATIONAL_ID",
     "TR_VKN": "TR_VKN",
+    "TR_LICENSE_PLATE": "TR_LICENSE_PLATE",
     "SECRET": "SECRET",
     "DB_URI": "DB_URI",
     "CUSTOM": "CUSTOM",
@@ -42,12 +43,22 @@ _BARE_DIGITS = re.compile(r"\d+")
 _DECIMAL_LITERAL = re.compile(r"\d+\.\d+")
 _DECIMAL_POINT = re.compile(r"\d\.|\.\d")
 _TURKISH_SHAPES = re.compile(r"(?:90)?0?5\d{9}|0[2-4]\d{9}")
+# `_` joins a cue to its key: `phone_number`, `"customer_phone"`.
 _PHONE_CUE = re.compile(
-    r"(?<![a-z])(?:telefon|tel|phone|gsm|cep|mobile|mobil|fax|whatsapp|call|numara"
-    r"|num|no)(?:\W{1,3}(?:number|numaras[ıi]))?\W{0,4}\Z",
+    r"(?<![a-z])(?P<cue>telefon|tel|phone|gsm|cep|mobile|mobil|fax|whatsapp|call"
+    r"|numara|num|no)(?:[\W_]{1,3}(?:number|numaras[ıi]))?\W{0,4}\Z",
     re.IGNORECASE,
 )
 _PHONE_CUE_WINDOW = 24
+# A generic number word after one of these names another kind of number.
+_GENERIC_CUES = ("numara", "num", "no")
+_NOT_PHONE_WORD = re.compile(
+    r"(?<![a-z])(?:order|sipari[şs]|fatura|invoice|ticket|ref|reference|sku|kod|code)"
+    r"[^a-zçğıöşü]{1,3}\Z",
+    re.IGNORECASE,
+)
+_IDENTIFIER_TAIL = re.compile(r"[A-Za-z0-9_.-]*\Z")
+_LETTER = re.compile(r"[A-Za-z]")
 
 
 class Match(NamedTuple):
@@ -150,7 +161,10 @@ _EMAIL_PATTERNS = _compile(
 
 
 def _validate_email(text: str) -> bool:
-    return is_registrable(text.rpartition("@")[-1])
+    # A DNS name is at most 253 characters; a longer run is no address, and
+    # the suffix lookup is superlinear in it.
+    domain = text.rpartition("@")[-1]
+    return len(domain) <= 253 and is_registrable(domain)
 
 
 _CARD_PATTERNS = _compile(
@@ -158,6 +172,13 @@ _CARD_PATTERNS = _compile(
         (
             r"\b(?!1\d{12}(?!\d))((4\d{3})|(5[0-5]\d{2})|(6\d{3})|(1\d{3})"
             r"|(3\d{3}))[- ]?(\d{3,4})[- ]?(\d{3,4})[- ]?(\d{3,5})\b",
+            0.3,
+        ),
+        # Troy and the Mastercard 2-series, as the gateway reads them.
+        (r"\b9792[- ]?\d{4}[- ]?\d{4}[- ]?\d{4}\b", 0.3),
+        (
+            r"\b(?:222[1-9]|22[3-9]\d|2[3-6]\d{2}|27[01]\d|2720)"
+            r"[- ]?\d{4}[- ]?\d{4}[- ]?\d{4}\b",
             0.3,
         ),
     )
@@ -215,6 +236,24 @@ _IP_PATTERNS = _compile(
 )
 
 
+# The gateway's version cue, plus `==` for a pinned requirement. A bare "ver"
+# after a word is the Turkish verb: "izin ver 10.0.0.5" is an address.
+_VERSION_CUE = re.compile(
+    r"(?:\b(?:v|version|sürüm|ver\.)|(?<!\w\s)\bver|==)\W{0,2}\Z", re.IGNORECASE
+)
+_VERSION_CUE_WINDOW = 16
+
+
+def _scan_ip(text: str) -> list[Match]:
+    return [
+        found
+        for found in _scan(text, "IP_ADDRESS", _IP_PATTERNS, invalidate=_invalidate_ip)
+        if not _VERSION_CUE.search(
+            text, max(0, found.start - _VERSION_CUE_WINDOW), found.start
+        )
+    ]
+
+
 def _invalidate_ip(text: str) -> bool:
     try:
         parsed = ipaddress.ip_interface(text)
@@ -259,10 +298,16 @@ def _invalidate_ssn(text: str) -> bool:
     return digits in _SSN_DENY
 
 
-_TCKN_PATTERNS = _compile(((r"\b[1-9][0-9]{10}\b", 0.3),))
+_TCKN_PATTERNS = _compile(
+    (
+        (r"\b[1-9][0-9]{10}\b", 0.3),
+        (r"\b[1-9][0-9]{2}([ -])[0-9]{3}\1[0-9]{3}\1[0-9]{2}\b", 0.3),
+    )
+)
 
 
 def _validate_tckn(text: str) -> bool:
+    text = text.replace(" ", "").replace("-", "")
     if len(text) != 11 or not text.isdigit() or text[0] == "0":
         return False
     digits = [int(character) for character in text]
@@ -312,7 +357,15 @@ _IBAN_PATTERN = re.compile(
     r"((?:[ -]?[A-Z0-9]{4})?)((?:[ -]?[A-Z0-9]{1,3})?)(?![A-Z0-9])",
     _IBAN_FLAGS,
 )
-_IBAN_SCORE = 0.5
+# Lowercase, or broken over a line between groups. The strict pattern stays for
+# every other IBAN: this one alone can pull a following word into the match.
+_IBAN_SEPARATOR = r"(?:[ -]|[ ]*\r?\n[ ]*)?"
+_IBAN_LOOSE_PATTERN = re.compile(
+    rf"(?<![A-Z0-9])([A-Z]{{2}}[0-9]{{2}}(?:{_IBAN_SEPARATOR}[A-Z0-9]{{4}}){{2,6}})"
+    rf"((?:{_IBAN_SEPARATOR}[A-Z0-9]{{4}})?)((?:{_IBAN_SEPARATOR}[A-Z0-9]{{1,3}})?)"
+    r"(?![A-Z0-9])",
+    _IBAN_FLAGS | re.IGNORECASE,
+)
 _IBAN_LETTERS: dict[int, str] = {
     ord(character): str(index)
     for index, character in enumerate(string.digits + string.ascii_uppercase)
@@ -334,37 +387,45 @@ def _iban_format_matches(iban: str) -> bool:
     return country is not None and country.match(iban) is not None
 
 
-def _validate_iban(text: str) -> bool | None:
+def _validate_iban(text: str) -> bool:
+    value = re.sub(r"[ \r\n-]", "", text).upper()
     try:
-        value = text.replace("-", "").replace(" ", "")
-        if _iban_check_digits(value) != value[2:4]:
-            return False
-        if _iban_format_matches(value):
-            return True
-        if _iban_format_matches(value.upper()):
-            return None
-        return False
+        return _iban_check_digits(value) == value[2:4] and _iban_format_matches(value)
     except ValueError:
         return False
 
 
 def _scan_iban(text: str) -> list[Match]:
     results: list[Match] = []
-    for match in _IBAN_PATTERN.finditer(text):
+    matches = [*_IBAN_PATTERN.finditer(text), *_IBAN_LOOSE_PATTERN.finditer(text)]
+    for match in matches:
         for group in reversed(range(1, len(match.groups()) + 1)):
             start = match.span(0)[0]
             end = match.span(group)[1] if match.span(group)[1] > 0 else match.span(0)[1]
             current = text[start:end]
-            if not current:
-                continue
-            score = _IBAN_SCORE
-            verdict = _validate_iban(current)
-            if verdict is not None:
-                score = 1.0 if verdict else 0.0
-            if score > 0:
-                results.append(Match("IBAN_CODE", start, end, score))
+            if current and _validate_iban(current):
+                results.append(Match("IBAN_CODE", start, end, 1.0))
                 break
     return results
+
+
+def _phone_cue(text: str, start: int) -> bool:
+    found = _PHONE_CUE.search(text, max(0, start - _PHONE_CUE_WINDOW), start)
+    if found is None:
+        return False
+    if found.group("cue").lower() not in _GENERIC_CUES:
+        return True
+    return not _NOT_PHONE_WORD.search(
+        text, max(0, found.start() - _PHONE_CUE_WINDOW), found.start()
+    )
+
+
+def _glued_to_identifier(text: str, start: int) -> bool:
+    """claude-sonnet-4-5-20250929, build_7.20250929: the end of a name."""
+    if not start or text[start - 1] not in "-_.":
+        return False
+    tail = _IDENTIFIER_TAIL.search(text, max(0, start - 65), start - 1)
+    return tail is not None and bool(_LETTER.search(tail.group()))
 
 
 def _scan_phone(text: str) -> list[Match]:
@@ -393,11 +454,12 @@ def _scan_phone(text: str) -> list[Match]:
             or _DECIMAL_POINT.fullmatch(text, end, end + 2)
         ):
             continue
-        if _BARE_DIGITS.fullmatch(raw) and not (
-            _TURKISH_SHAPES.fullmatch(raw)
-            or _PHONE_CUE.search(text, max(0, start - _PHONE_CUE_WINDOW), start)
-        ):
-            candidate = candidate._replace(entity_type=BARE_NUMBER)
+        bare = _BARE_DIGITS.fullmatch(raw)
+        if not ((bare and _TURKISH_SHAPES.fullmatch(raw)) or _phone_cue(text, start)):
+            if _glued_to_identifier(text, start):
+                continue
+            if bare:
+                candidate = candidate._replace(entity_type=BARE_NUMBER)
         results.append(candidate)
     return results
 
@@ -409,6 +471,7 @@ _SECRET_KEY = (
     _LEGACY_KEY
     + r"|access[_-]?key|private[_-]?key|signing[_-]?key|encryption[_-]?key"
     + r"|credentials?|auth[_-]?token|pass"
+    + r"|[şs]ifre(?:si|m|n|niz)?|parola(?:s[ıi]|m|n|n[ıi]z)?"
 )
 _SECRET_WORD = (
     r"(?:(?<![^\W_])|(?-i:(?<=[a-z0-9])(?=[A-Z])))"
@@ -745,19 +808,75 @@ def _scan_basic_auth(text: str) -> list[Match]:
     return results
 
 
+_WRITTEN_AT = re.compile(r"\[ *at *\]|\( *at *\)", re.IGNORECASE)
+_LOCAL_PART = re.compile(r"\w[\w.!#$%&'*+/?^`{|}~-]{0,63}\Z")
+_WRITTEN_DOMAIN = re.compile(r"[\w-]+(?:\.[\w-]+)+\b")
+
+
+def _scan_written_at(text: str) -> list[Match]:
+    """jane[at]example.com and jane(at)example.com, the whole written form.
+
+    Anchored on each `[at]`, so the local part is read once, backwards and
+    bounded, rather than from every word start.
+    """
+    results: list[Match] = []
+    for at in _WRITTEN_AT.finditer(text):
+        local = _LOCAL_PART.search(text, max(0, at.start() - 64), at.start())
+        domain = _WRITTEN_DOMAIN.match(text, at.end())
+        if local and domain and _validate_email("@" + domain.group()):
+            results.append(Match("EMAIL_ADDRESS", local.start(), domain.end(), 1.0))
+    return results
+
+
 def _scan_email(text: str) -> list[Match]:
     if "@" not in text:
-        return []
+        return _scan_written_at(text)
     found = _scan(text, "EMAIL_ADDRESS", _EMAIL_PATTERNS, validate=_validate_email)
     if "://" not in text:
-        return found
+        return found + _scan_written_at(text)
     authority = {match.end("userinfo") for match in _URL_USERINFO.finditer(text)}
     authority.update(
         text.rfind("@", *match.span(1)) for match in _DB_URI.finditer(text)
     )
     return [
         item for item in found if text.find("@", item.start, item.end) not in authority
-    ]
+    ] + _scan_written_at(text)
+
+
+_PLATE_LETTER = "[A-PR-VYZa-pr-vyz]"
+# The gateway's shape: one separator repeated between the groups, and not a
+# longer number, a date, a version or a quantity. Case-sensitive for the units.
+_PLATE_PATTERN = re.compile(
+    r"(?<![\w-])(?:0[1-9]|[1-7][0-9]|8[01])(?P<separator>[ -]?)"
+    rf"(?:{_PLATE_LETTER}(?P=separator)[0-9]{{4,5}}|"
+    rf"{_PLATE_LETTER}{{2}}(?P=separator)[0-9]{{3,4}}|"
+    rf"{_PLATE_LETTER}{{3}}(?P=separator)[0-9]{{2,3}})"
+    r"(?!\w|[-./:,]\d)"
+    r"(?!\s*(?:W|V|A|mA|mAh|kW|Hz|kHz|MHz|GHz|KB|GB|MB|TB|rpm)\b)",
+    re.DOTALL | re.MULTILINE,
+)
+_NOT_PLATE_LETTERS = frozenset(
+    "GB MB KB TB GHZ MHZ KM KG CM MM ML LT AM PM "
+    "USD EUR TRY TL GBP CHF JPY CNY CAD AUD RUB SEK NOK DKK PLN AED SAR "
+    "JAN FEB MAR APR MAY JUN JUL AUG SEP OCT NOV DEC "
+    "OCA SUB NIS HAZ TEM AGU EYL EKI KAS ARA "
+    # Never a plate in logs and code; the gateway does not list these.
+    "GET PUT ERR CPU PID ID RC OK".split()
+)
+_PLATE_CUE = re.compile(r"\b(?:plaka|plate)\w*\W{0,3}\Z", re.IGNORECASE)
+
+
+def _scan_plate(text: str) -> list[Match]:
+    """Lowercase counts only after a plate word, so "15 dk 30" stays prose."""
+    results: list[Match] = []
+    for found in _PLATE_PATTERN.finditer(text):
+        start, end = found.span()
+        value = found.group()
+        if "".join(filter(str.isalpha, value)).upper() in _NOT_PLATE_LETTERS:
+            continue
+        if value.isupper() or _PLATE_CUE.search(text, max(0, start - 24), start):
+            results.append(Match("TR_LICENSE_PLATE", start, end, 1.0))
+    return results
 
 
 _RECOGNIZERS: tuple[tuple[str, Callable[[str], list[Match]]], ...] = (
@@ -770,10 +889,7 @@ _RECOGNIZERS: tuple[tuple[str, Callable[[str], list[Match]]], ...] = (
         ),
     ),
     ("IBAN_CODE", _scan_iban),
-    (
-        "IP_ADDRESS",
-        lambda text: _scan(text, "IP_ADDRESS", _IP_PATTERNS, invalidate=_invalidate_ip),
-    ),
+    ("IP_ADDRESS", _scan_ip),
     (
         "MAC_ADDRESS",
         lambda text: _scan(
@@ -791,6 +907,7 @@ _RECOGNIZERS: tuple[tuple[str, Callable[[str], list[Match]]], ...] = (
         ),
     ),
     ("TR_VKN", _scan_vkn),
+    ("TR_LICENSE_PLATE", _scan_plate),
     ("SECRET", _scan_secret),
     ("DB_URI", _scan_db_uri),
     ("SECRET", _scan_encoded_secret),
@@ -818,4 +935,15 @@ def analyze_text(
             results.extend(scan(text))
     if custom and "CUSTOM" in requested:
         results.extend(scan_custom(text, custom))
+    ibans = [
+        (item.start, item.end) for item in results if item.entity_type == "IBAN_CODE"
+    ]
+    if ibans:
+        # A card number inside a valid IBAN is that IBAN's middle digits.
+        results = [
+            item
+            for item in results
+            if item.entity_type != "CREDIT_CARD"
+            or not any(start <= item.start and item.end <= end for start, end in ibans)
+        ]
     return results

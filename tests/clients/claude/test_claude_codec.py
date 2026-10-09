@@ -146,8 +146,8 @@ def test_the_model_context_is_bounded_at_every_type_and_the_longest_label() -> N
     )
     context = output["hookSpecificOutput"]["additionalContext"]
 
-    assert len(ENTITY_TYPES) == 12
-    assert len(context) == 480
+    assert len(ENTITY_TYPES) == 13
+    assert len(context) == 508
 
 
 FAILED = (

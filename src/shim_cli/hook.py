@@ -470,12 +470,12 @@ def _tool_output(
     from shim_cli.config import load_policy
     from shim_cli.events.pipeline import process
     from shim_cli.guard import evaluate
-    from shim_cli.guard.entities import ENTITY_TYPES
+    from shim_cli.guard.entities import DEFAULT_ENTITIES
     from shim_cli.session import remember
 
     policy = load_policy()
 
-    def scan(text: str, entities: tuple = ENTITY_TYPES):
+    def scan(text: str, entities: tuple = DEFAULT_ENTITIES):
         return evaluate(text, entities, policy.custom, policy.reveal)
 
     def mode_for(direction: str, tool: str) -> str:

@@ -47,9 +47,10 @@ def _at(payload: object, path: list) -> object:
     return value
 
 
+# The prompt corpus grades the whole catalogue, so the opt-in plate type is on.
 @pytest.mark.parametrize("case", PROMPTS["cases"], ids=lambda case: case["id"])
 def test_prompt_corpus_output_is_exact(case: dict) -> None:
-    decision = evaluate(case["text"])
+    decision = evaluate(case["text"], BUILT_IN_TYPES)
 
     assert [f.entity_type for f in decision.findings] == case["categories"]
     assert decision.blocked is bool(case["categories"])
@@ -108,7 +109,9 @@ def test_prompt_corpus_covers_every_category_and_the_assignment_rule() -> None:
 def test_published_prompt_metrics_match_the_detector() -> None:
     cases = PROMPTS["cases"]
     predictions = {
-        case["id"]: {f.entity_type for f in evaluate(case["text"]).findings}
+        case["id"]: {
+            f.entity_type for f in evaluate(case["text"], BUILT_IN_TYPES).findings
+        }
         for case in cases
     }
     for category in BUILT_IN_TYPES:
