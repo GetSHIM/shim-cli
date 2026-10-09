@@ -179,6 +179,9 @@ class UsageReader:
         self.usage = Usage()
         self.status = "unavailable"
         self.stop_reason = ""
+        # The model the response names; it stands in when the request body
+        # was not inspected, so that request is priced and kept in its chain.
+        self.model = ""
         self._pending = ""
         self._data: list[str] = []
         self._data_chars = 0
@@ -291,6 +294,8 @@ class UsageReader:
         if not self.stop_reason:
             self.stop_reason = stop_reason_from(document)
         nested = document.get("message") or document.get("response") or document
+        if not self.model and isinstance(nested, dict):
+            self.model = valid_model(nested.get("model"))
         block = document.get("usage")
         if not isinstance(block, dict) and isinstance(nested, dict):
             block = nested.get("usage")
@@ -315,6 +320,16 @@ class UsageReader:
 def model_id(model: str) -> str:
     """The price table's key: one trailing `-latest` and one snapshot date dropped."""
     return _SNAPSHOT.sub("", model.removesuffix("-latest"))
+
+
+def valid_model(model: object) -> str:
+    if not isinstance(model, str) or not model:
+        return ""
+    return (
+        model
+        if len(model) <= MAX_MODEL_CHARS and model.isprintable()
+        else UNKNOWN_MODEL
+    )
 
 
 def _dimensions(raw: bytes) -> tuple[int, int] | None:
@@ -634,12 +649,7 @@ def inspect_request(body: bytes | bytearray, evaluate=None, memo=None) -> Exchan
         exchange.incomplete_reason = NOT_JSON
         return exchange
     if isinstance(document, dict) and isinstance(document.get("model"), str):
-        model = document["model"]
-        exchange.model = (
-            model
-            if model and len(model) <= MAX_MODEL_CHARS and model.isprintable()
-            else UNKNOWN_MODEL
-        )
+        exchange.model = valid_model(document["model"]) or UNKNOWN_MODEL
     exchange.sections = sections(document)
     exchange.at_files = at_files(document)
     if isinstance(document, dict):

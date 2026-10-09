@@ -449,6 +449,8 @@ If you sign in with a subscription, `spend` is what the same traffic would cost
 on an API key, not a bill, and the line says so. When some requests arrived
 while both inspection slots were busy, the section header adds `2 of 4 requests
 measured` and the response line gives the same reason as the inspection line.
+Such a request is still priced, and still compared for cache rewrites, under
+the model its response names.
 
 `--json` writes the same report as one object, on one line of stdout after
 the client exits, so it follows whatever the client printed there itself: read

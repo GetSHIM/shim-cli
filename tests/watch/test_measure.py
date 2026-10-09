@@ -944,3 +944,17 @@ def test_a_broken_image_part_leaves_the_request_measured(monkeypatch) -> None:
     assert exchange.measured
     assert exchange.image_count == 0
     assert exchange.tool_results == {}
+
+
+def test_the_reader_keeps_the_model_the_response_names() -> None:
+    reader = measure.UsageReader()
+    reader.feed(
+        'event: message_start\ndata: {"type":"message_start","message":'
+        '{"model":"claude-sonnet-5-5","usage":{"input_tokens":3}}}\n\n'
+    )
+    forged = measure.UsageReader("application/json")
+    forged.feed('{"model":"claude\\nforged","usage":{"input_tokens":3}}')
+    forged.finish()
+
+    assert reader.model == "claude-sonnet-5-5"
+    assert forged.model == measure.UNKNOWN_MODEL

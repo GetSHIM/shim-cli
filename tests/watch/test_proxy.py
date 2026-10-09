@@ -1064,3 +1064,18 @@ def test_a_request_without_a_measurement_slot_is_still_hashed(monkeypatch) -> No
     exchanges = running.session.exchanges
     assert not any(exchange.measured for exchange in exchanges)
     assert sorted(e.duplicate_in_flight for e in exchanges) == [False, True]
+
+
+def test_a_request_without_a_slot_takes_its_model_from_the_response(watched) -> None:
+    running, _upstream = watched
+    slots = running.session._measurement_slots
+    assert slots.acquire(False) and slots.acquire(False)
+    try:
+        _post(running, BODY, HEADERS)
+    finally:
+        slots.release()
+        slots.release()
+
+    [exchange] = running.session.exchanges
+    assert not exchange.measured
+    assert exchange.model == "claude-sonnet-5"

@@ -327,6 +327,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             pass
         exchange.usage = reader.usage
         exchange.stop_reason = reader.stop_reason
+        exchange.model = exchange.model or reader.model
         # The client has its last byte; only now does the detector run.
         if measuring and self.evaluate is not None:
             exchange.response_scan_status = (
