@@ -1,0 +1,18 @@
+# shim-cli
+
+> Local hooks and an opt-in measuring proxy for coding agents (Claude Code, Codex, GitHub Copilot CLI, VS Code): reports or masks secrets and personal data in prompts and tool traffic, and measures what a session sent and cost.
+
+What it cannot do: a prompt typed into Claude Code or Codex cannot be masked, because neither client lets a hook rewrite it; shim reports it, or blocks it with `user-prompt = "enforce"` under `[mode]` in the settings file. GitHub Copilot CLI replaces the prompt the model sees. Windows is not supported; use WSL, macOS or Linux.
+
+## Docs
+
+- [README](https://github.com/GetSHIM/shim-cli/blob/main/README.md): what shim-cli does, install, the supported clients and what each one lets shim change
+- [Command reference](https://github.com/GetSHIM/shim-cli/blob/main/docs/commands.md): every command, flag, exit code, JSON error code and settings key
+- [Cookbook](https://github.com/GetSHIM/shim-cli/blob/main/docs/cookbook.md): recipes, including letting an agent run shim, blocking a secret before it leaves, CI and scripts
+- [Privacy](https://github.com/GetSHIM/shim-cli/blob/main/docs/privacy.md): what is recorded, what leaves the machine, and the limits of a best-effort guard
+- [Compatibility](https://github.com/GetSHIM/shim-cli/blob/main/docs/compatibility.md): tested client versions, live evidence and detector parity with the gateway
+- [Architecture](https://github.com/GetSHIM/shim-cli/blob/main/docs/architecture.md): the hook, the detector and the `shim watch` proxy, and who owns what
+
+## Optional
+
+- [1.1.2 release notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/1.1.2.md): the newest release

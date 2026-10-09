@@ -655,7 +655,8 @@ PASS No supported sensitive data found.
 ```
 
 Exit `1` means it found something and `0` that it found nothing. That makes it
-usable as a gate:
+usable as a gate. `--json` writes `"status": "findings"` or `"safe"` and
+`counts`, one entry per type, with the same exit codes:
 
 ```console
 shim scan < config.env && echo "clean"

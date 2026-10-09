@@ -774,6 +774,7 @@ In a script, `shim ledger purge --yes` skips the question.
 
 ## Project documentation
 
+- [llms.txt](https://github.com/GetSHIM/shim-cli/blob/main/llms.txt) — the documentation map that agents and Context7 read
 - [Command reference](https://github.com/GetSHIM/shim-cli/blob/main/docs/commands.md) — every command, flag and exit code
 - [Cookbook](https://github.com/GetSHIM/shim-cli/blob/main/docs/cookbook.md) — recipes for getting more out of it once it runs
 - [Architecture](https://github.com/GetSHIM/shim-cli/blob/main/docs/architecture.md)

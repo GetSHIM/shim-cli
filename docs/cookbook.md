@@ -19,6 +19,7 @@ Everything here runs locally. Nothing in this document sends anything anywhere.
 - [See what a whole session sent](#see-what-a-whole-session-sent)
 - [Use it in CI and in scripts](#use-it-in-ci-and-in-scripts)
 - [Know what your client can actually do](#know-what-your-client-can-actually-do)
+- [Let an agent run shim](#let-an-agent-run-shim)
 - [When something looks wrong](#when-something-looks-wrong)
 - [Leaving](#leaving)
 
@@ -423,6 +424,49 @@ outbound = "enforce"
 `outbound` is a tool call before it runs, the one place VS Code lets shim
 refuse. `inbound` is a result, which VS Code lets shim report but not change,
 so `inbound = "enforce"`, already the default, refuses nothing there.
+
+## Let an agent run shim
+
+An agent cannot answer a question, so give it the forms that never ask one.
+`--json` turns every prompt into an answer: `install`, `revert`, `config` and
+`ledger purge` refuse to change anything without `--yes`, and say so.
+
+```console
+$ shim install claude --json
+{"client":"claude","code":"CONFIRMATION_REQUIRED","command":"install","error":"--yes is required with --json","fix":"Add --yes to apply without a question.","schema_version":1,"status":"error"}
+$ shim install claude --dry-run --json       # the target file and the exact fragment; writes nothing
+$ shim install claude --yes --json
+{"action":"create","client":"claude","command":"install","events":["PostToolUse","PostToolUseFailure","PreToolUse","SessionEnd","Stop","UserPromptSubmit"],"next_step":"Start a new Claude Code session; /hooks lists shim.","preserved_hooks":false,"replaced_legacy":false,"schema_version":1,"status":"ok","target":"/home/you/.claude/settings.json","warnings":[]}
+```
+
+Branch on `code`, never on the wording of `error`, and do what `fix` says.
+Every code is listed in the [command reference](commands.md#error-codes):
+
+```console
+$ shim config --custom 'LOOP=(a+)+$' --yes --json
+{"code":"CUSTOM_PATTERN_INVALID","command":"config","error":"pattern LOOP backtracks on repeated input; simplify it","fix":"Change the pattern, or remove it with shim config --remove-custom NAME --yes.","schema_version":1,"status":"error"}
+```
+
+When something is off, `shim doctor <client> --json` comes first. Each check
+carries `status`, `code` and `fix`, so the next step is the `fix` of the first
+`FAIL`:
+
+```console
+$ shim doctor claude --json | jq -r '.checks[] | select(.status == "FAIL") | .code + ": " + .fix'
+SETTINGS_INVALID: Fix the line the error names, or run shim config --reset --yes (it discards every setting).
+```
+
+A fix that discards settings, as `--reset` does, is one to ask about first.
+
+To let an agent see which variables a `.env` file defines without reading the
+values, point it at `shim keys` instead of `cat`:
+
+```console
+$ shim keys .env --json | jq -c '.files[0].variables[] | {name, state, entity}'
+{"name":"APP_ENV","state":"set","entity":null}
+{"name":"DATABASE_URL","state":"set","entity":"DB_URI"}
+{"name":"STRIPE_SECRET_KEY","state":"set","entity":"SECRET"}
+```
 
 ## When something looks wrong
 
