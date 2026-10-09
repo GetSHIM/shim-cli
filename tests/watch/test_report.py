@@ -88,16 +88,17 @@ def test_at_files_are_called_out_as_not_masked() -> None:
 
 
 def test_spend_is_priced_per_kind_of_token() -> None:
-    dollars, priced, unpriced = report.spend([_exchange()])
+    dollars, priced, unpriced, costs = report.spend([_exchange()])
 
     assert priced == 1
     assert unpriced == []
-    expected = (2 * 3.0 + 214 * 15.0 + 18_093 * 3.75 + 91_562 * 0.3) / 1_000_000
+    expected = (2 * 2.0 + 214 * 10.0 + 18_093 * 2.5 + 91_562 * 0.2) / 1_000_000
     assert abs(dollars - expected) < 1e-9
+    assert costs == [dollars]
 
 
 def test_an_unknown_model_is_named_rather_than_guessed() -> None:
-    dollars, priced, unpriced = report.spend([_exchange(model="some-future-model")])
+    dollars, priced, unpriced, _ = report.spend([_exchange(model="some-future-model")])
 
     assert dollars == 0.0
     assert priced == 0
@@ -347,7 +348,10 @@ def test_the_json_report_carries_both_directions_and_each_request() -> None:
                 "output_tokens": 214,
                 "cache_read_input_tokens": 91_562,
                 "cache_creation_input_tokens": 18_093,
+                "cache_creation_1h_input_tokens": 0,
             },
+            "spend_usd": 0.065689,
+            "priced_as": "claude-sonnet-5",
         }
     ]
 
@@ -499,3 +503,74 @@ def test_the_response_line_does_not_claim_the_values_were_invented() -> None:
     assert report.NOT_LEAKS == (
         "written by the model; it may repeat values it was given"
     )
+
+
+def test_each_exchange_carries_its_own_cost_and_the_row_it_was_priced_as() -> None:
+    priced = _exchange(model="claude-opus-5-5-20260101")
+    unpriced = _exchange(model="some-future-model")
+
+    rows = report.as_json(_session(priced, unpriced), 5.0)["exchanges"]
+
+    assert rows[0]["priced_as"] == "claude-opus-5-5"
+    assert rows[0]["spend_usd"] == round(report.exchange_spend(priced), 6)
+    assert rows[1]["priced_as"] is rows[1]["spend_usd"] is None
+
+
+def test_the_costliest_request_is_named_once_two_are_priced() -> None:
+    cheap = _exchange(model="claude-haiku-4-5")
+    dear = _exchange(model="claude-opus-5-5")
+
+    alone = report.render(_session(dear), 5.0)
+    both = report.render(_session(cheap, dear), 5.0)
+
+    assert "costliest" not in alone
+    line = next(row for row in both.splitlines() if "costliest" in row)
+    cost = report.exchange_spend(dear)
+    assert line == (
+        f"  costliest  one request ~${cost:,.2f} (claude-opus-5-5, "
+        "109,657 input tokens)"
+    )
+
+
+def test_one_hour_cache_writes_are_priced_at_the_one_hour_rate() -> None:
+    usage = measure.Usage(
+        cache_creation_input_tokens=1_000_000, cache_creation_1h_input_tokens=400_000
+    )
+
+    cost = report.exchange_spend(_exchange(model="claude-opus-5-5", usage=usage))
+
+    assert cost == pytest.approx(600_000 * 5 / 1e6 + 400_000 * 8 / 1e6)
+
+
+@pytest.mark.parametrize(
+    ("prompt", "rate"), [(99_999, 0.1), (100_000, 0.1), (100_001, 0.5)]
+)
+def test_haiku_5_5_prices_a_long_prompt_at_the_upper_row(prompt, rate) -> None:
+    usage = measure.Usage(
+        input_tokens=prompt - 2,
+        cache_read_input_tokens=1,
+        cache_creation_input_tokens=1,
+    )
+
+    cost = report.exchange_spend(_exchange(model="claude-haiku-5-5", usage=usage))
+
+    read, write = (0.01, 0.125) if rate == 0.1 else (0.05, 0.625)
+    assert cost == pytest.approx(((prompt - 2) * rate + read + write) / 1e6)
+
+
+@pytest.mark.parametrize(("days", "stale"), [(90, False), (91, True)])
+def test_the_spend_line_says_when_its_prices_are_old(monkeypatch, days, stale) -> None:
+    import datetime
+
+    read_on = datetime.date.fromisoformat(report.PRICED_ON)
+    monkeypatch.setattr(report, "_today", lambda: read_on + datetime.timedelta(days))
+
+    line = _spend_line(_exchange(auth_route="api-key"))
+    document = report.as_json(_session(_exchange()), 5.0)
+
+    old = (
+        f"(approximate, {report.PRICED_ON} prices, older than 90 days; newer "
+        "models and price changes are not reflected)"
+    )
+    assert line.endswith(old) is stale
+    assert document["approximate"]["prices_stale"] is stale

@@ -423,13 +423,20 @@ shim watch — 2m 34s, 3 requests
             written by the model; it may repeat values it was given
   compare   EMAIL   3 in request, 2 in response (text, thinking)
             DB_URI  3 in request, 0 in response
-  spend     ~$0.69  (approximate, 2026-08-30 prices)
+  spend     ~$0.69  (approximate, 2026-10-09 prices)
+  costliest  one request ~$0.41 (claude-opus-5-5, 54,212 input tokens)
   largest   one request was 112,384 bytes, system 61% of it
   nothing was modified, and no request body was written to disk
 ```
 
 `(exact)` means the provider reported that number. `(approximate)` means shim
 attributed it by byte share, and the `~` is there to keep you honest about it.
+Each request is priced by its own model and token kinds, 1-hour cache writes
+at their own rate, from a table dated in the line; a model the table does not
+name exactly is listed as `not priced`, never priced as a neighbour. Once the
+table is more than 90 days old, the line adds `older than 90 days; newer models
+and price changes are not reflected`. `costliest` names the dearest request
+when at least two were priced.
 If you sign in with a subscription, `spend` is what the same traffic would cost
 on an API key, not a bill, and the line says so. When some requests arrived
 while both inspection slots were busy, the section header adds `2 of 4 requests
@@ -442,6 +449,10 @@ the last line. Three of its fields say what a figure covers:
 | Field | Where | Values |
 | --- | --- | --- |
 | `spend_basis` | top level | `"api-key"`, `"subscription"`, `"mixed"`, or `"unknown"` when a priced request sent neither auth header or nothing was priced |
+| `prices_stale` | `approximate` | `true` when the price table (`priced_on`) is more than 90 days older than the run, else `false` |
+| `spend_usd` | each of `exchanges` | that request's approximate cost, or `null` when its model is not in the table |
+| `priced_as` | each of `exchanges` | the table row used (the model id without a snapshot date or `-latest`), or `null` |
+| `cache_creation_1h_input_tokens` | each of `exchanges`' `usage` | the part of `cache_creation_input_tokens` written to the 1-hour cache, priced at the 1-hour rate |
 | `auth_route` | each of `exchanges` | `"api-key"` (an `x-api-key` header), `"subscription"` (`authorization` and no `x-api-key`), `""` (neither) |
 | `response_scan_reason` | each of `exchanges` | `""` when the response was scanned; the request's `incomplete_reason` (`"slots busy"`, `"body too large"`, `"not JSON"`, `"too many fields"`) when it was not measured; otherwise `"unavailable"` or `"partial"` |
 

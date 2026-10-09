@@ -323,7 +323,10 @@ shim watch -- claude -p "Read calc.py and explain it in one sentence."
 
 It binds to loopback, forwards bytes unchanged, invents no request of its own,
 and writes no request or response body to disk. It reports both directions
-separately and reads usage off the wire rather than guessing.
+separately and reads usage off the wire rather than guessing. On an API key,
+its `spend` should land close to Claude Code's own `/cost` for the same
+session; a large gap usually means a cost the requests do not carry, such as a
+web search.
 
 **Claude Code only.** Codex is refused, with the reason measured rather than
 assumed: it takes its endpoint from its own configuration, so the proxy would

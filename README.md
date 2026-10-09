@@ -68,7 +68,12 @@ request each finding was in.
 
 If you sign in with a subscription, the `spend` line is what the same traffic
 would cost on an API key, not a bill. shim reads the tokens the provider
-reports and prices them; it cannot see what your plan charges.
+reports and prices each request by kind — input, 5-minute and 1-hour cache
+writes, cache reads, output — from a table read off Anthropic's pricing page on
+the date the line prints; it cannot see what your plan charges. A model the
+table does not name exactly is listed as not priced rather than guessed, and
+once the table is more than 90 days old the line says so. `--json` carries the
+cost of every request.
 
 The `response` line is the other direction — what the model wrote back, with
 its `thinking` counted apart from its answer. It is a recall measurement, not a

@@ -51,6 +51,8 @@ class Usage:
     output_tokens: int = 0
     cache_creation_input_tokens: int = 0
     cache_read_input_tokens: int = 0
+    # The part of cache_creation_input_tokens written to the 1-hour cache.
+    cache_creation_1h_input_tokens: int = 0
 
     @property
     def total_input(self) -> int:
@@ -61,15 +63,15 @@ class Usage:
         )
 
     def merge(self, other: Usage) -> Usage:
+        writes = self if self.cache_creation_input_tokens else other
         return Usage(
             input_tokens=self.input_tokens or other.input_tokens,
             output_tokens=max(self.output_tokens, other.output_tokens),
-            cache_creation_input_tokens=(
-                self.cache_creation_input_tokens or other.cache_creation_input_tokens
-            ),
+            cache_creation_input_tokens=writes.cache_creation_input_tokens,
             cache_read_input_tokens=(
                 self.cache_read_input_tokens or other.cache_read_input_tokens
             ),
+            cache_creation_1h_input_tokens=writes.cache_creation_1h_input_tokens,
         )
 
 
@@ -127,11 +129,17 @@ def usage_from(document: object) -> Usage:
         block = message.get("usage") if isinstance(message, dict) else None
     if not isinstance(block, dict):
         return Usage()
+    writes = _int(block.get("cache_creation_input_tokens"))
+    split = block.get("cache_creation")
+    hour = (
+        _int(split.get("ephemeral_1h_input_tokens")) if isinstance(split, dict) else 0
+    )
     return Usage(
         input_tokens=_int(block.get("input_tokens", block.get("prompt_tokens"))),
         output_tokens=_int(block.get("output_tokens", block.get("completion_tokens"))),
-        cache_creation_input_tokens=_int(block.get("cache_creation_input_tokens")),
+        cache_creation_input_tokens=writes,
         cache_read_input_tokens=_int(block.get("cache_read_input_tokens")),
+        cache_creation_1h_input_tokens=min(hour, writes),
     )
 
 
