@@ -746,3 +746,215 @@ def test_merged_usage_keeps_the_split_with_its_total() -> None:
     assert merged.cache_creation_input_tokens == 1_000
     assert merged.cache_creation_1h_input_tokens == 400
     assert delta.merge(start).cache_creation_1h_input_tokens == 400
+
+
+def _png(width: int, height: int) -> bytes:
+    import struct
+    import zlib
+
+    header = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    chunk = struct.pack(">I", len(header)) + b"IHDR" + header
+    crc = struct.pack(">I", zlib.crc32(b"IHDR" + header))
+    return b"\x89PNG\r\n\x1a\n" + chunk + crc + b"\x00" * 64
+
+
+def _gif(width: int, height: int) -> bytes:
+    import struct
+
+    return b"GIF89a" + struct.pack("<HH", width, height) + b"\x00" * 32
+
+
+def _webp(kind: bytes, width: int, height: int) -> bytes:
+    import struct
+
+    if kind == b"VP8 ":
+        body = b"\x00" * 3 + b"\x9d\x01\x2a" + struct.pack("<HH", width, height)
+    elif kind == b"VP8L":
+        bits = (width - 1) | ((height - 1) << 14)
+        body = b"\x2f" + bits.to_bytes(4, "little")
+    else:
+        body = b"\x00" * 4 + (width - 1).to_bytes(3, "little")
+        body += (height - 1).to_bytes(3, "little")
+    return b"RIFF" + b"\x00" * 4 + b"WEBP" + kind + b"\x00" * 4 + body + b"\x00" * 16
+
+
+def _jpeg(width: int, height: int, app_bytes: int = 16) -> bytes:
+    import struct
+
+    app = b"\xff\xe1" + struct.pack(">H", app_bytes + 2) + b"\x00" * app_bytes
+    sof = b"\xff\xc0" + struct.pack(">HBHHB", 17, 8, height, width, 3) + b"\x00" * 9
+    return b"\xff\xd8" + app + sof + b"\xff\xd9"
+
+
+def _b64(raw: bytes) -> str:
+    import base64
+
+    return base64.b64encode(raw).decode()
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        _png(1600, 1200),
+        _gif(1600, 1200),
+        _webp(b"VP8 ", 1600, 1200),
+        _webp(b"VP8L", 1600, 1200),
+        _webp(b"VP8X", 1600, 1200),
+        _jpeg(1600, 1200),
+        _jpeg(1600, 1200, app_bytes=40_000),
+    ],
+    ids=["png", "gif", "webp-vp8", "webp-vp8l", "webp-vp8x", "jpeg", "jpeg-large-app"],
+)
+def test_image_size_is_read_from_the_header(raw: bytes) -> None:
+    assert measure.image_size(_b64(raw)) == (1600, 1200)
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        _b64(_jpeg(1600, 1200, app_bytes=60_000)),
+        _b64(_png(1600, 1200)[:20]),
+        _b64(b"plain text, not an image at all"),
+        "not base64 at all!",
+        "",
+    ],
+    ids=["header-past-the-window", "truncated", "not-an-image", "not-base64", "empty"],
+)
+def test_an_unreadable_image_has_an_unknown_size(data: str) -> None:
+    assert measure.image_size(data) is None
+
+
+@pytest.mark.parametrize(
+    ("size", "model", "tokens"),
+    [
+        ((1000, 1000), "claude-opus-5-5", 36 * 36),
+        ((2576, 1449), "claude-opus-5-5", 4784),
+        ((3840, 2160), "claude-opus-5-5-20260101", 4784),
+        ((1600, 1200), "claude-opus-5-5", 58 * 43),
+        ((1568, 1176), "claude-sonnet-4-6", 1568),
+        ((1000, 1000), "claude-sonnet-4-6", 36 * 36),
+        ((1092, 1092), "claude-haiku-4-5", 39 * 39),
+        ((1600, 1200), "some-future-model", 1568),
+        ((200, 100), "claude-sonnet-4-6", 8 * 4),
+        (None, "claude-opus-5-5", 0),
+    ],
+)
+def test_image_tokens_follow_the_tier_of_the_model(size, model, tokens) -> None:
+    assert measure.image_tokens(size, model) == tokens
+
+
+def _image_block(raw: bytes) -> dict:
+    data = _b64(raw)
+    return {"type": "image", "source": {"type": "base64", "data": data}}
+
+
+def test_image_bytes_leave_the_messages_share_for_their_own() -> None:
+    picture = _png(1600, 1200) + b"\x00" * 30_000
+    document = {
+        "model": "claude-opus-5-5",
+        "messages": [
+            {"role": "user", "content": [_image_block(picture)]},
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "toolu_1",
+                        "content": [
+                            _image_block(picture),
+                            {"type": "text", "text": "ok"},
+                        ],
+                    }
+                ],
+            },
+        ],
+    }
+    body = json.dumps(document).encode()
+    plain = measure.inspect_request(
+        json.dumps(
+            {**document, "messages": [{"role": "user", "content": "hi"}]}
+        ).encode()
+    )
+
+    exchange = measure.inspect_request(body)
+    exchange.usage = measure.Usage(input_tokens=10_000)
+
+    assert exchange.image_count == 2
+    assert exchange.estimated_image_tokens == 2 * 58 * 43
+    assert len(exchange.images) == 1
+    assert exchange.sections["messages"] < 1_000
+    shares = exchange.tokens_by_section()
+    assert shares["images"] == 2 * 58 * 43
+    assert sum(shares.values()) == 10_000
+    plain.usage = measure.Usage(input_tokens=10_000)
+    assert "images" not in plain.tokens_by_section()
+    assert sum(plain.tokens_by_section().values()) == 10_000
+
+
+def test_image_tokens_never_exceed_the_request_input() -> None:
+    picture = _png(1600, 1200)
+    exchange = measure.inspect_request(
+        json.dumps(
+            {
+                "model": "claude-opus-5-5",
+                "messages": [{"role": "user", "content": [_image_block(picture)]}],
+            }
+        ).encode()
+    )
+    exchange.usage = measure.Usage(input_tokens=100)
+
+    assert exchange.tokens_by_section() == {"images": 100}
+
+
+def test_tool_results_are_sized_and_named_by_their_tool_use() -> None:
+    document = {
+        "messages": [
+            {
+                "role": "assistant",
+                "content": [{"type": "tool_use", "id": "toolu_1", "name": "Bash"}],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "tool_result", "tool_use_id": "toolu_1", "content": "çok"},
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "toolu_2",
+                        "content": [{"type": "text", "text": "abc"}],
+                    },
+                ],
+            },
+        ]
+    }
+
+    _images, results = measure.images_and_results(document)
+
+    assert results == {"toolu_1": ("Bash", 4), "toolu_2": ("unknown tool", 3)}
+
+
+def test_a_broken_image_part_leaves_the_request_measured(monkeypatch) -> None:
+    def broken(_document):
+        raise RuntimeError("synthetic")
+
+    monkeypatch.setattr(measure, "images_and_results", broken)
+    exchange = measure.inspect_request(
+        json.dumps({"model": "claude-opus-5-5", "messages": []}).encode()
+    )
+
+    assert exchange.measured
+    assert exchange.image_count == 0
+    assert exchange.tool_results == {}
+
+
+def test_the_reader_keeps_the_model_the_response_names() -> None:
+    reader = measure.UsageReader()
+    reader.feed(
+        'event: message_start\ndata: {"type":"message_start","message":'
+        '{"model":"claude-sonnet-5-5","usage":{"input_tokens":3}}}\n\n'
+    )
+    forged = measure.UsageReader("application/json")
+    forged.feed('{"model":"claude\\nforged","usage":{"input_tokens":3}}')
+    forged.finish()
+
+    assert reader.model == "claude-sonnet-5-5"
+    assert forged.model == measure.UNKNOWN_MODEL
