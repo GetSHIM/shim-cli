@@ -142,7 +142,6 @@ _INVALID = (
     "review unsafe paths manually."
 )
 FIX_SETTINGS_INVALID = "Edit the settings file the error names until it parses."
-_FIX_CONFLICT = "Run the command with one of them."
 
 
 def refusal_fix(reason: str, target: Path) -> str:
@@ -241,30 +240,25 @@ def configure(
         or reveal
         or no_reveal
     )
-    if reset and (only or enable or disable):
-        emit_error(
-            "config",
-            "OPTIONS_CONFLICT",
+    for conflicting, message in (
+        (
+            reset and (only or enable or disable),
             "--reset cannot be combined with entity options.",
-            _FIX_CONFLICT,
-            as_json=as_json,
-        )
-    if only and (enable or disable):
-        emit_error(
-            "config",
-            "OPTIONS_CONFLICT",
+        ),
+        (
+            only and (enable or disable),
             "--only cannot be combined with --enable or --disable.",
-            _FIX_CONFLICT,
-            as_json=as_json,
-        )
-    if set(enable).intersection(disable):
-        emit_error(
-            "config",
-            "OPTIONS_CONFLICT",
-            "The same entity cannot be enabled and disabled.",
-            _FIX_CONFLICT,
-            as_json=as_json,
-        )
+        ),
+        (set(enable) & set(disable), "The same entity cannot be enabled and disabled."),
+    ):
+        if conflicting:
+            emit_error(
+                "config",
+                "OPTIONS_CONFLICT",
+                message,
+                "Run the command with one of them.",
+                as_json=as_json,
+            )
 
     try:
         if changing:

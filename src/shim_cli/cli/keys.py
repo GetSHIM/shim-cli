@@ -134,47 +134,32 @@ def parse(text: str) -> list[Entry]:
     return entries
 
 
+_UNREADABLE = {
+    "FILE_NOT_FOUND": "does not exist",
+    "NOT_A_FILE": "is not a regular file",
+    "FILE_TOO_LARGE": "is larger than 1 MB",
+    "NOT_UTF8": "is not UTF-8 text",
+}
+
+
 def _read(path: Path, as_json: bool) -> str:
     if not path.exists():
-        emit_error(
-            "keys",
-            "FILE_NOT_FOUND",
-            f"{path} does not exist",
-            None,
-            as_json=as_json,
-            plain=True,
-        )
-    if not path.is_file():
-        emit_error(
-            "keys",
-            "NOT_A_FILE",
-            f"{path} is not a regular file",
-            None,
-            as_json=as_json,
-            plain=True,
-        )
-    with path.open("rb") as stream:
-        data = stream.read(MAX_FILE_BYTES + 1)
-    if len(data) > MAX_FILE_BYTES:
-        emit_error(
-            "keys",
-            "FILE_TOO_LARGE",
-            f"{path} is larger than 1 MB",
-            None,
-            as_json=as_json,
-            plain=True,
-        )
-    try:
-        return data.decode("utf-8")
-    except UnicodeDecodeError:
-        emit_error(
-            "keys",
-            "NOT_UTF8",
-            f"{path} is not UTF-8 text",
-            None,
-            as_json=as_json,
-            plain=True,
-        )
+        code = "FILE_NOT_FOUND"
+    elif not path.is_file():
+        code = "NOT_A_FILE"
+    else:
+        with path.open("rb") as stream:
+            data = stream.read(MAX_FILE_BYTES + 1)
+        if len(data) > MAX_FILE_BYTES:
+            code = "FILE_TOO_LARGE"
+        else:
+            try:
+                return data.decode("utf-8")
+            except UnicodeDecodeError:
+                code = "NOT_UTF8"
+    emit_error(
+        "keys", code, f"{path} {_UNREADABLE[code]}", None, as_json=as_json, plain=True
+    )
 
 
 def _row(entry: Entry) -> dict:

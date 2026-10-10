@@ -33,12 +33,26 @@ def _code_argument(call: ast.Call) -> ast.expr | None:
     return None
 
 
+def _table(tree: ast.Module) -> set[str]:
+    """The keys of a module-level `_UNREADABLE`-style table of codes."""
+    return {
+        key.value
+        for node in tree.body
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Dict)
+        for key in node.value.keys
+        if isinstance(key, ast.Constant)
+        and isinstance(key.value, str)
+        and CODE.fullmatch(key.value)
+    }
+
+
 def _emitted() -> set[str]:
-    """A code is a literal, or a forwarded `Check.code`, whose literal is
-    collected where that `Check` is built."""
+    """A code is a literal, a key of the module's code table, or a forwarded
+    `Check.code`, whose literal is collected where that `Check` is built."""
     found = set()
     for path in sorted((ROOT / "src" / "shim_cli" / "cli").glob("*.py")):
-        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
             argument = _code_argument(node)
@@ -46,6 +60,11 @@ def _emitted() -> set[str]:
                 continue
             where = f"{path.name}:{node.lineno}"
             if isinstance(argument, ast.Attribute) and argument.attr == "code":
+                continue
+            if isinstance(argument, ast.Name):
+                table = _table(tree)
+                assert table, f"{where}: code is a name but the module has no table"
+                found |= table
                 continue
             assert isinstance(argument, ast.Constant), f"{where}: code is not a literal"
             assert isinstance(argument.value, str), f"{where}: code is not a string"

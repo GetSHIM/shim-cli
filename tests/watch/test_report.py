@@ -90,7 +90,7 @@ def test_at_files_are_called_out_as_not_masked() -> None:
 def test_spend_is_priced_per_kind_of_token() -> None:
     dollars, priced, unpriced, costs = report.spend([_exchange()])
 
-    assert priced == 1
+    assert len(priced) == 1
     assert unpriced == []
     expected = (2 * 2.0 + 214 * 10.0 + 18_093 * 2.5 + 91_562 * 0.2) / 1_000_000
     assert abs(dollars - expected) < 1e-9
@@ -101,7 +101,7 @@ def test_an_unknown_model_is_named_rather_than_guessed() -> None:
     dollars, priced, unpriced, _ = report.spend([_exchange(model="some-future-model")])
 
     assert dollars == 0.0
-    assert priced == 0
+    assert priced == []
     assert unpriced == ["some-future-model"]
 
     text = report.render(_session(_exchange(model="some-future-model")), 5.0)

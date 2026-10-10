@@ -45,9 +45,9 @@ PRICES = {
     "claude-haiku-4-5": (1.0, 1.25, 2.0, 0.1, 5.0),
     "claude-3-5-haiku": (0.8, 1.0, 1.6, 0.08, 4.0),
 }
-# A prompt (input, cache writes and cache reads together) above the threshold
-# pays the second row on every component of that request.
-LONG_PROMPT = {"claude-haiku-5-5": (100_000, (0.5, 0.625, 1.0, 0.05, 2.5))}
+# A Haiku 5.5 prompt (input, cache writes and cache reads together) over
+# 100,000 tokens pays this row on every component of that request.
+_HAIKU_5_5_LONG = (0.5, 0.625, 1.0, 0.05, 2.5)
 PRICED_ON = "2026-10-09"
 STALE_AFTER_DAYS = 90
 _PER = 1_000_000
@@ -55,9 +55,8 @@ _PER = 1_000_000
 
 def _price(model: str, prompt_tokens: int = 0):
     key = model_id(model)
-    threshold, long_rates = LONG_PROMPT.get(key, (0, None))
-    if long_rates is not None and prompt_tokens > threshold:
-        return long_rates
+    if key == "claude-haiku-5-5" and prompt_tokens > 100_000:
+        return _HAIKU_5_5_LONG
     return PRICES.get(key)
 
 
@@ -87,15 +86,15 @@ def exchange_spend(exchange) -> float | None:
 
 
 def spend(exchanges: list) -> tuple:
-    """Session total, priced count, unpriced model names, and each exchange's cost."""
+    """Session total, (cost, exchange) for each priced exchange, unpriced model
+    names, and each exchange's cost (None when unpriced)."""
     costs = [exchange_spend(exchange) for exchange in exchanges]
+    pairs = list(zip(costs, exchanges, strict=True))
+    priced = [(cost, exchange) for cost, exchange in pairs if cost is not None]
     unpriced = {
-        exchange.model
-        for exchange, cost in zip(exchanges, costs, strict=True)
-        if cost is None and exchange.model
+        exchange.model for cost, exchange in pairs if cost is None and exchange.model
     }
-    priced = [cost for cost in costs if cost is not None]
-    return sum(priced), len(priced), sorted(unpriced), costs
+    return sum(cost for cost, _ in priced), priced, sorted(unpriced), costs
 
 
 def image_totals(exchanges: list) -> dict:
@@ -187,8 +186,8 @@ def _plural(count: int, word: str) -> str:
     return f"{count} {word}" + ("" if count == 1 else "s")
 
 
-def spend_basis(exchanges: list) -> str:
-    routes = {e.auth_route for e in exchanges if _price(e.model or "")}
+def spend_basis(priced: list) -> str:
+    routes = {exchange.auth_route for _, exchange in priced}
     if routes in ({"api-key"}, {"subscription"}):
         return routes.pop()
     return "unknown" if not routes or "" in routes else "mixed"
@@ -500,20 +499,16 @@ def render(session, seconds: float) -> str:
     for index, line in enumerate(_compared(by_section, by_kind)):
         lines.append(f"  compare   {line}" if not index else f"            {line}")
 
-    dollars, priced, unpriced, costs = spend(exchanges)
+    dollars, priced, unpriced, _ = spend(exchanges)
     if priced:
-        basis = spend_basis(exchanges)
+        basis = spend_basis(priced)
         if basis == "subscription":
             on = "; API-key equivalent, this session is on a subscription, not a bill"
         elif basis == "api-key":
             on = ""
         else:
-            subscribed = sum(
-                e.auth_route == "subscription"
-                for e in exchanges
-                if _price(e.model or "")
-            )
-            on = f"; {subscribed} of {priced} requests on a subscription"
+            subscribed = sum(e.auth_route == "subscription" for _, e in priced)
+            on = f"; {subscribed} of {len(priced)} requests on a subscription"
         stale = (
             f", older than {STALE_AFTER_DAYS} days; newer models and price changes "
             "are not reflected"
@@ -523,15 +518,8 @@ def render(session, seconds: float) -> str:
         lines.append(
             f"  spend     ~${dollars:,.2f}  (approximate, {PRICED_ON} prices{stale}{on})"
         )
-    if priced >= 2:
-        cost, costliest = max(
-            (
-                (cost, exchange)
-                for cost, exchange in zip(costs, exchanges, strict=True)
-                if cost is not None
-            ),
-            key=lambda pair: pair[0],
-        )
+    if len(priced) >= 2:
+        cost, costliest = max(priced, key=lambda pair: pair[0])
         lines.append(
             f"  costliest  one request ~${cost:,.2f} ({costliest.model}, "
             f"{_thousands(costliest.usage.total_input)} input tokens)"
@@ -627,7 +615,7 @@ def as_json(session, seconds: float) -> dict:
             "prices_stale": prices_stale(),
             "unpriced_models": unpriced,
         },
-        "spend_basis": spend_basis(exchanges),
+        "spend_basis": spend_basis(priced),
         "at_files": {"count": count, "bytes": size},
         "entities": entity_totals(exchanges),
         "entities_by_section": entity_section_totals(exchanges),
@@ -688,11 +676,8 @@ __all__ = [
     "cache_rewrite_totals",
     "cache_rewrites",
     "duplicate_totals",
-    "exchange_spend",
     "image_totals",
     "largest_tool_result",
-    "model_id",
-    "prices_stale",
     "response_scan",
     "response_scan_reason",
     "response_totals",
