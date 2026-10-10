@@ -443,8 +443,9 @@ def _size(value: object) -> int:
 
 
 def _conversation(document: dict) -> str:
-    """Which conversation a request continues: its system prompt and first user
-    message are the same in every request of it. Hashed, never kept as text."""
+    """Which conversation a request continues: its first user message is the same
+    in every request of it. The system prompt is left out, because a new one
+    mid-conversation is a cache rewrite to report. Hashed, never kept as text."""
     first = next(
         (
             message
@@ -453,8 +454,7 @@ def _conversation(document: dict) -> str:
         ),
         None,
     )
-    serialised = _bytes(document.get("system")) + b"\0" + _bytes(first)
-    return hashlib.sha256(serialised).hexdigest()[:16]
+    return hashlib.sha256(_bytes(first)).hexdigest()[:16]
 
 
 def sections(document: object) -> dict:
@@ -637,7 +637,7 @@ class Exchange:
     images: dict = field(default_factory=dict)
     tool_results: dict = field(default_factory=dict)
     duplicate_in_flight: bool = False
-    # A short hash of the system prompt and first user message: which
+    # A short hash of the first user message: which
     # conversation a request belongs to. In memory only, never reported.
     conversation: str = ""
 

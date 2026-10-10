@@ -993,5 +993,12 @@ def test_a_conversation_keeps_its_key_as_it_grows() -> None:
     assert first
     assert _conversation("be brief", "fix the parser", "done", "now the lexer") == first
     assert _conversation("be brief", "write a poem") != first
-    assert _conversation("be verbose", "fix the parser") != first
     assert "fix the parser" not in first
+
+
+def test_a_system_prompt_change_stays_in_its_conversation() -> None:
+    # A new system prompt mid-conversation is what rewrites the cache, so it
+    # must stay in the same chain for the rewrite line to report it.
+    assert _conversation("be verbose", "fix the parser") == _conversation(
+        "be brief", "fix the parser"
+    )
