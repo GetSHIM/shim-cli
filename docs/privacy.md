@@ -467,7 +467,9 @@ base64 image, so a screenshot replayed in every later request counts once; the
 size of each tool result and the `tool_use` id and tool name it answers, so the
 largest result can be named with how many requests carried it; and, for each
 request still in flight, the SHA-256 of its body, dropped when its answer ends,
-so two identical requests sent at once are counted. Image dimensions come from
+so two identical requests sent at once are counted; and, for each request, a
+short hash of its system prompt and first user message, so a cache rewrite is
+looked for only within one conversation. Image dimensions come from
 the first 65,536 base64 characters of the header; no pixel is decoded.
 
 The response is scanned too, and on the same terms. Its text and `thinking`

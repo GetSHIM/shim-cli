@@ -589,8 +589,13 @@ def _usage(read: int, written: int, uncached: int = 2) -> measure.Usage:
     )
 
 
-def _turn(model: str, size: int, read: int, written: int):
-    return _exchange(model=model, request_bytes=size, usage=_usage(read, written))
+def _turn(model: str, size: int, read: int, written: int, conversation: str = ""):
+    return _exchange(
+        model=model,
+        request_bytes=size,
+        usage=_usage(read, written),
+        conversation=conversation,
+    )
 
 
 # A session shaped like the 8 September study: a cold first request, a growing
@@ -642,8 +647,61 @@ def test_a_cold_start_or_a_smaller_side_call_is_never_a_rewrite() -> None:
     assert "  cache  " not in report.render(_session(*side_call), 9.0)
 
 
+def test_a_failed_request_does_not_break_the_chain() -> None:
+    errored = _exchange(
+        model="claude-opus-5-5",
+        status=429,
+        usage=measure.Usage(),
+        usage_status="unavailable",
+        request_bytes=115_000,
+    )
+    series = [
+        _turn("claude-opus-5-5", 100_000, 0, 20_000),
+        _turn("claude-opus-5-5", 110_000, 20_000, 2_000),
+        errored,
+        _turn("claude-opus-5-5", 120_000, 0, 22_000),
+    ]
+
+    assert report.cache_rewrites(series) == [3]
+
+
+def test_a_parallel_conversation_on_the_same_model_is_not_a_rewrite() -> None:
+    model = "claude-opus-5-5"
+    series = [
+        _turn(model, 100_000, 0, 20_000, "main"),
+        _turn(model, 110_000, 20_000, 2_000, "main"),
+        _turn(model, 120_000, 0, 15_000, "agent"),
+        _turn(model, 130_000, 22_000, 1_000, "main"),
+        _turn(model, 125_000, 15_000, 500, "agent"),
+    ]
+
+    assert report.cache_rewrites(series) == []
+
+
+def test_a_rewrite_inside_one_conversation_is_found_beside_another() -> None:
+    model = "claude-opus-5-5"
+    series = [
+        _turn(model, 100_000, 0, 20_000, "main"),
+        _turn(model, 110_000, 20_000, 2_000, "main"),
+        _turn(model, 90_000, 0, 15_000, "agent"),
+        _turn(model, 130_000, 5_000, 18_000, "main"),
+    ]
+
+    assert report.cache_rewrites(series) == [3]
+
+
 def _with_images(digests: dict, count: int, tokens: int):
     return _exchange(images=digests, image_count=count, estimated_image_tokens=tokens)
+
+
+def test_an_image_of_unknown_size_is_counted_not_priced_at_zero() -> None:
+    unknown = _with_images({"a": False}, 1, 0)
+
+    text = report.render(_session(unknown), 9.0)
+    line = next(row for row in text.splitlines() if row.startswith("  images"))
+
+    assert line == "  images    1 distinct across 1 request; 1 of unknown size"
+    assert "~0" not in text
 
 
 def test_images_are_counted_once_however_often_history_replays_them() -> None:
@@ -664,8 +722,8 @@ def test_images_are_counted_once_however_often_history_replays_them() -> None:
         "unknown_size": 1,
     }
     assert (
-        line
-        == "  images    2 distinct, ~4,988 input tokens across 2 requests (estimated)"
+        line == "  images    2 distinct, ~4,988 input tokens across 2 requests "
+        "(estimated); 1 of unknown size"
     )
     assert [row["image_count"] for row in document["exchanges"]] == [1, 2, 0]
     assert "images" not in report.render(_session(_exchange()), 9.0)
@@ -691,6 +749,17 @@ def test_the_largest_tool_result_is_named_with_its_replays() -> None:
     )
     assert report.as_json(_session(_exchange()), 9.0)["largest_tool_result"] is None
     assert "largest tool result" not in report.render(_session(_exchange()), 9.0)
+
+
+def test_a_result_shrunk_in_later_requests_is_carried_at_full_size_once() -> None:
+    sizes = [40_000, 35, 35]
+    series = [_exchange(tool_results={"toolu_1": ("Bash", size)}) for size in sizes]
+
+    assert report.largest_tool_result(series) == {
+        "tool": "Bash",
+        "bytes": 40_000,
+        "requests": 1,
+    }
 
 
 def test_identical_requests_in_flight_are_counted_not_withheld() -> None:
@@ -719,9 +788,11 @@ def test_no_digest_or_tool_id_reaches_the_json() -> None:
         images={"f" * 64: True},
         image_count=1,
         tool_results={"toolu_secret_id": ("Bash", 10)},
+        conversation="c" * 16,
     )
 
     dumped = json.dumps(report.as_json(_session(exchange), 9.0))
 
     assert "f" * 64 not in dumped
     assert "toolu_secret_id" not in dumped
+    assert "c" * 16 not in dumped

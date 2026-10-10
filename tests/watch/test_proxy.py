@@ -1079,3 +1079,14 @@ def test_a_request_without_a_slot_takes_its_model_from_the_response(watched) -> 
     [exchange] = running.session.exchanges
     assert not exchange.measured
     assert exchange.model == "claude-sonnet-5"
+
+
+def test_a_request_without_a_model_keeps_the_one_the_response_names(watched) -> None:
+    running, _upstream = watched
+    body = json.dumps({"messages": [{"role": "user", "content": "hello"}]}).encode()
+
+    _post(running, body, HEADERS)
+
+    [exchange] = running.session.exchanges
+    assert exchange.measured
+    assert exchange.model == "claude-sonnet-5"

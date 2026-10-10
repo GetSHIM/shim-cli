@@ -441,7 +441,9 @@ attributed it by byte share, and the `~` is there to keep you honest about it.
 Images are the exception: their base64 bytes say nothing about their cost, so
 each request's estimated image tokens get an `images` row of their own (and an
 `images` key in `tokens_by_section`), and the rest is split by byte share. The
-rows still add up to the exact total.
+rows still add up to the exact total. An image whose size shim could not read
+has no estimate, so its bytes stay in `messages` and the `images` line counts it
+as `of unknown size` instead of pricing it at zero.
 Each request is priced by its own model and token kinds, 1-hour cache writes
 at their own rate, from a table dated in the line; a model the table does not
 name exactly is listed as `not priced`, never priced as a neighbour. Once the
@@ -467,8 +469,8 @@ the last line. Three of its fields say what a figure covers:
 | `priced_as` | each of `exchanges` | the table row used (the model id without a snapshot date or `-latest`), or `null` |
 | `cache_creation_1h_input_tokens` | each of `exchanges`' `usage` | the part of `cache_creation_input_tokens` written to the 1-hour cache, priced at the 1-hour rate |
 | `images` | top level | `distinct`, `requests` that carried one, `estimated_tokens` (scaled to the model's tier, 28 px patches) and `unknown_size` (a header shim could not read) |
-| `largest_tool_result` | top level | `tool`, `bytes` and the `requests` that carried it, or `null` |
-| `cache_rewrites` | top level | `count`, `tokens` written again, `spend_usd` (or `null`) and the 1-based `requests` |
+| `largest_tool_result` | top level | `tool`, `bytes` and the `requests` that carried it at that size (a later request that carries it shrunk does not count), or `null` |
+| `cache_rewrites` | top level | `count`, `tokens` written again, `spend_usd` (or `null`) and the 1-based `requests`; compared within one model and one conversation, so a parallel agent on the same model is not the request before |
 | `duplicates_in_flight` | top level | `count` and the `input_tokens` billed again |
 | `image_count`, `estimated_image_tokens`, `cache_rewrite`, `duplicate_in_flight` | each of `exchanges` | the same, per request |
 | `auth_route` | each of `exchanges` | `"api-key"` (an `x-api-key` header), `"subscription"` (`authorization` and no `x-api-key`), `""` (neither) |

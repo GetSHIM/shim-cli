@@ -891,6 +891,24 @@ def test_image_bytes_leave_the_messages_share_for_their_own() -> None:
     assert sum(plain.tokens_by_section().values()) == 10_000
 
 
+def test_an_image_of_unknown_size_keeps_its_bytes_in_messages() -> None:
+    # 64 KB of APP1 pushes the start-of-frame marker past the header window.
+    picture = _jpeg(4000, 3000, app_bytes=65_000)
+    document = {
+        "model": "claude-opus-5-5",
+        "messages": [{"role": "user", "content": [_image_block(picture)]}],
+    }
+    exchange = measure.inspect_request(json.dumps(document).encode())
+    exchange.usage = measure.Usage(input_tokens=90_000)
+
+    assert exchange.image_count == 1
+    assert exchange.estimated_image_tokens == 0
+    assert exchange.sections["messages"] > len(_b64(picture))
+    shares = exchange.tokens_by_section()
+    assert "images" not in shares
+    assert sum(shares.values()) == 90_000
+
+
 def test_image_tokens_never_exceed_the_request_input() -> None:
     picture = _png(1600, 1200)
     exchange = measure.inspect_request(
@@ -958,3 +976,22 @@ def test_the_reader_keeps_the_model_the_response_names() -> None:
 
     assert reader.model == "claude-sonnet-5-5"
     assert forged.model == measure.UNKNOWN_MODEL
+
+
+def _conversation(system: str, *turns: str) -> str:
+    messages = [
+        {"role": "user" if index % 2 == 0 else "assistant", "content": text}
+        for index, text in enumerate(turns)
+    ]
+    document = {"model": "claude-opus-5-5", "system": system, "messages": messages}
+    return measure.inspect_request(json.dumps(document).encode()).conversation
+
+
+def test_a_conversation_keeps_its_key_as_it_grows() -> None:
+    first = _conversation("be brief", "fix the parser")
+
+    assert first
+    assert _conversation("be brief", "fix the parser", "done", "now the lexer") == first
+    assert _conversation("be brief", "write a poem") != first
+    assert _conversation("be verbose", "fix the parser") != first
+    assert "fix the parser" not in first

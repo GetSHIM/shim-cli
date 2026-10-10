@@ -225,7 +225,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             exchange.measured = False
             exchange.incomplete_reason = NOT_JSON
             return
-        exchange.model = measured.model
+        exchange.model = measured.model or exchange.model
+        exchange.conversation = measured.conversation
         exchange.sections = measured.sections
         exchange.entities = measured.entities
         exchange.entities_by_section = measured.entities_by_section

@@ -445,6 +445,21 @@ def _size(value: object) -> int:
     return len(_bytes(value))
 
 
+def _conversation(document: dict) -> str:
+    """Which conversation a request continues: its system prompt and first user
+    message are the same in every request of it. Hashed, never kept as text."""
+    first = next(
+        (
+            message
+            for message in document.get("messages") or ()
+            if isinstance(message, dict) and message.get("role") == "user"
+        ),
+        None,
+    )
+    serialised = _bytes(document.get("system")) + b"\0" + _bytes(first)
+    return hashlib.sha256(serialised).hexdigest()[:16]
+
+
 def sections(document: object) -> dict:
     if not isinstance(document, dict):
         return {}
@@ -624,6 +639,9 @@ class Exchange:
     images: dict = field(default_factory=dict)
     tool_results: dict = field(default_factory=dict)
     duplicate_in_flight: bool = False
+    # A short hash of the system prompt and first user message: which
+    # conversation a request belongs to. In memory only, never reported.
+    conversation: str = ""
 
     def __post_init__(self) -> None:
         if self.entities_by_section and not self.entities:
@@ -655,20 +673,25 @@ def inspect_request(body: bytes | bytearray, evaluate=None, memo=None) -> Exchan
     if isinstance(document, dict):
         try:
             images, exchange.tool_results = images_and_results(document)
-            image_bytes = sum(len(data) for data in images)
-            if image_bytes and "messages" in exchange.sections:
-                exchange.sections["messages"] -= image_bytes
+            read_bytes = 0
             for data in images:
                 size = image_size(data)
+                if size is not None:
+                    read_bytes += len(data)
                 exchange.estimated_image_tokens += image_tokens(size, exchange.model)
                 digest = hashlib.sha256(data.encode()).hexdigest()
                 exchange.images[digest] = size is not None
             exchange.image_count = len(images)
+            # An image whose size was not read has no tokens of its own, so its
+            # bytes stay in messages instead of vanishing from the split.
+            exchange.sections["messages"] -= read_bytes
+            exchange.conversation = _conversation(document)
         except Exception:
             # The image and tool-result lines are unknown for this request; the
             # request itself is still measured.
             exchange.image_count = exchange.estimated_image_tokens = 0
             exchange.images, exchange.tool_results = {}, {}
+            exchange.conversation = ""
     if evaluate is not None and isinstance(document, dict):
         try:
             leaves = walk(

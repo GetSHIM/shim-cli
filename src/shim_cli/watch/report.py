@@ -110,7 +110,8 @@ def image_totals(exchanges: list) -> dict:
 
 
 def largest_tool_result(exchanges: list) -> dict | None:
-    """A result replayed in a later request's history is the same result."""
+    """The same id in a later request's history is the same result; it counts
+    only where it is carried at its full size, not once a diet shrank it."""
     largest = None
     for exchange in exchanges:
         for key, (tool, size) in exchange.tool_results.items():
@@ -119,35 +120,40 @@ def largest_tool_result(exchanges: list) -> dict | None:
     if largest is None:
         return None
     size, tool, key = largest
-    carried = sum(key in exchange.tool_results for exchange in exchanges)
+    carried = sum(
+        exchange.tool_results.get(key, ("", 0))[1] == size for exchange in exchanges
+    )
     return {"tool": tool, "bytes": size, "requests": carried}
 
 
 def cache_rewrites(exchanges: list) -> list:
     """Requests that wrote again a prefix the one before them had cached.
 
-    Per model, in session order. A request smaller than the one before it
+    Per model and conversation, in session order: a parallel agent on the same
+    model is not the request before. A request smaller than the one before it
     starts a new chain (Claude Code's closing side call shares only the system
     prompt and tools), and a chain's leading requests that read no cache are a
     cold start. After that, a read below 90 percent of the previous request's
-    whole input, with something written, is a rewrite.
+    whole input, with something written, is a rewrite. A request that came back
+    without usage (an error) says nothing about the cache and is skipped.
     """
     found = []
     chains: dict = {}
     for index, exchange in enumerate(exchanges):
         usage = exchange.usage
-        previous, warm = chains.get(model_id(exchange.model or ""), (None, False))
-        if previous is not None and exchange.request_bytes < previous.request_bytes:
-            previous, warm = None, False
-        if (
+        if not usage.total_input:
+            continue
+        key = (model_id(exchange.model or ""), exchange.conversation)
+        previous, warm = chains.get(key, (exchange, False))
+        if exchange.request_bytes < previous.request_bytes:
+            warm = False
+        elif (
             warm
-            and previous is not None
             and usage.cache_read_input_tokens < 0.9 * previous.usage.total_input
             and usage.cache_creation_input_tokens
         ):
             found.append(index)
-        reads = usage.cache_read_input_tokens > 0
-        chains[model_id(exchange.model or "")] = (exchange, warm or reads)
+        chains[key] = (exchange, warm or usage.cache_read_input_tokens > 0)
     return found
 
 
@@ -538,10 +544,14 @@ def render(session, seconds: float) -> str:
 
     images = image_totals(exchanges)
     if images["requests"]:
+        tokens = images["estimated_tokens"]
+        unknown = images["unknown_size"]
         lines.append(
-            f"  images    {images['distinct']} distinct, "
-            f"~{_thousands(images['estimated_tokens'])} input tokens across "
-            f"{_plural(images['requests'], 'request')} (estimated)"
+            f"  images    {images['distinct']} distinct"
+            + (f", ~{_thousands(tokens)} input tokens" if tokens else "")
+            + f" across {_plural(images['requests'], 'request')}"
+            + (" (estimated)" if tokens else "")
+            + (f"; {unknown} of unknown size" if unknown else "")
         )
     result = largest_tool_result(exchanges)
     if result and result["bytes"]:
