@@ -34,6 +34,8 @@ def _code_argument(call: ast.Call) -> ast.expr | None:
 
 
 def _emitted() -> set[str]:
+    """A code is a literal, or a forwarded `Check.code`, whose literal is
+    collected where that `Check` is built."""
     found = set()
     for path in sorted((ROOT / "src" / "shim_cli" / "cli").glob("*.py")):
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
@@ -43,6 +45,8 @@ def _emitted() -> set[str]:
             if argument is None:
                 continue
             where = f"{path.name}:{node.lineno}"
+            if isinstance(argument, ast.Attribute) and argument.attr == "code":
+                continue
             assert isinstance(argument, ast.Constant), f"{where}: code is not a literal"
             assert isinstance(argument.value, str), f"{where}: code is not a string"
             assert CODE.fullmatch(argument.value), f"{where}: {argument.value!r}"

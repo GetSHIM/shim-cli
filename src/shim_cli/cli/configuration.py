@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import shlex
+from pathlib import Path
+
 import typer
 from rich import box
 from rich.table import Table
@@ -7,13 +10,16 @@ from rich.text import Text
 
 from shim_cli.cli.output import (
     FIX_CONFIRMATION,
+    Check,
     console,
     emit,
     emit_error,
     emit_json,
+    unwritable,
 )
 from shim_cli.config import (
     MAX_CONFIG_BYTES,
+    SettingsRefused,
     config_path,
     describe_settings_error,
     policy_from_state,
@@ -135,17 +141,51 @@ _INVALID = (
     "Entity settings are invalid or unsafe. Reset malformed contents; "
     "review unsafe paths manually."
 )
-FIX_SETTINGS_INVALID = (
-    "Fix the line the error names, or run shim config --reset --yes "
-    "(it discards every setting)."
-)
-FIX_SETTINGS_UNSAFE = "chmod 700 ~/.config/shim && chmod 600 ~/.config/shim/config.toml"
+FIX_SETTINGS_INVALID = "Edit the settings file the error names until it parses."
 _FIX_CONFLICT = "Run the command with one of them."
 
 
-def settings_refused(error: BaseException) -> bool:
-    """The file was refused (owner, mode, link), not misparsed: chmod, not reset."""
-    return str(error).startswith("shim settings cannot be read safely")
+def refusal_fix(reason: str, target: Path) -> str:
+    """chmod mends a mode; a link, an owner or a shape needs something else."""
+    path, folder = shlex.quote(str(target)), shlex.quote(str(target.parent))
+    if "symlink" in reason:
+        return (
+            f"Replace the link {path} with the file it points to, or set "
+            "SHIM_CONFIG to that file."
+        )
+    if "not owned" in reason:
+        return (
+            f"{path} or a folder above it belongs to another user: have it given "
+            f'to you (sudo chown "$(id -un)" {folder} {path}), or set SHIM_CONFIG '
+            "to a file you own."
+        )
+    if "ancestor" in reason:
+        return "Set SHIM_CONFIG to a file in a folder only you can write to."
+    if "hard-linked" in reason or "regular file" in reason or "limit" in reason:
+        return f"Replace {path} with a regular file of its own, 16 KB at most."
+    if "changed" in reason:
+        return "Run the command again."
+    return f"chmod 700 {folder} && chmod 600 {path}"
+
+
+def settings_check(error: BaseException) -> Check:
+    """SETTINGS_REFUSED or SETTINGS_INVALID, as doctor, config and audit say it."""
+    detail = describe_settings_error(error)
+    if isinstance(error, SettingsRefused):
+        return Check(
+            "entity_settings",
+            "FAIL",
+            detail,
+            code="SETTINGS_REFUSED",
+            fix=refusal_fix(error.reason, config_path()),
+        )
+    return Check(
+        "entity_settings",
+        "FAIL",
+        detail,
+        code="SETTINGS_INVALID",
+        fix=FIX_SETTINGS_INVALID,
+    )
 
 
 def _emit_settings_json(enabled: tuple[str, ...], **data: object) -> None:
@@ -229,36 +269,27 @@ def configure(
     try:
         if changing:
             ensure_parent(target)
-    except (InstallationError, OSError):
+    except (InstallationError, OSError) as error:
+        found = unwritable(error, target)
         emit_error(
             "config",
             "SETTINGS_PATH_UNSAFE",
             "Entity settings path is unsafe; nothing was saved.",
-            FIX_SETTINGS_UNSAFE,
+            found[1] if found else refusal_fix(str(error), target),
             as_json=as_json,
         )
     state = inspect_file(target, MAX_CONFIG_BYTES)
     # Parse and plan from the same snapshot, before confirmation.
-    problem = ""
-    refused = False
     try:
         policy = policy_from_state(state)
     except ValueError as error:
         policy = None
-        problem = describe_settings_error(error)
-        refused = settings_refused(error)
-    if policy is None and not (reset or only):
-        if refused:
+        if not (reset or only):
+            problem = settings_check(error)
+            assert problem.code is not None
             emit_error(
-                "config",
-                "SETTINGS_REFUSED",
-                problem,
-                FIX_SETTINGS_UNSAFE,
-                as_json=as_json,
+                "config", problem.code, problem.detail, problem.fix, as_json=as_json
             )
-        emit_error(
-            "config", "SETTINGS_INVALID", problem, FIX_SETTINGS_INVALID, as_json=as_json
-        )
 
     try:
         if reset:
@@ -326,7 +357,11 @@ def configure(
         )
     except OSError:
         emit_error(
-            "config", "SETTINGS_REFUSED", _INVALID, FIX_SETTINGS_UNSAFE, as_json=as_json
+            "config",
+            "SETTINGS_REFUSED",
+            _INVALID,
+            refusal_fix("", target),
+            as_json=as_json,
         )
 
     if not changing:
@@ -391,7 +426,16 @@ def configure(
 
     try:
         changed = apply(plan)
-    except (InstallationError, OSError, ValueError):
+    except (InstallationError, OSError, ValueError) as error:
+        if (found := unwritable(error, target)) is not None:
+            reason, fix = found
+            emit_error(
+                "config",
+                "SETTINGS_UNWRITABLE",
+                f"Entity settings were not saved: {reason}.",
+                fix,
+                as_json=as_json,
+            )
         emit_error(
             "config",
             "SETTINGS_CHANGED",

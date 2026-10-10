@@ -429,12 +429,8 @@ def _report_lines(summary: dict) -> list[str]:
 def _run_scan(
     *, since: str | None, project: Path | None, as_json: bool
 ) -> tuple[_Scan, dict]:
-    from shim_cli.cli.configuration import (
-        FIX_SETTINGS_INVALID,
-        FIX_SETTINGS_UNSAFE,
-        settings_refused,
-    )
-    from shim_cli.config import describe_settings_error, load_policy
+    from shim_cli.cli.configuration import settings_check
+    from shim_cli.config import load_policy
     from shim_cli.guard import evaluate as evaluate_guard
 
     projects = _projects_folder()
@@ -464,21 +460,13 @@ def _run_scan(
     try:
         policy = load_policy()
     except ValueError as error:
-        problem = describe_settings_error(error).rstrip(".")
-        if settings_refused(error):
-            emit_error(
-                "audit",
-                "SETTINGS_REFUSED",
-                problem,
-                FIX_SETTINGS_UNSAFE,
-                as_json=as_json,
-                plain=True,
-            )
+        problem = settings_check(error)
+        assert problem.code is not None
         emit_error(
             "audit",
-            "SETTINGS_INVALID",
-            problem,
-            FIX_SETTINGS_INVALID,
+            problem.code,
+            problem.detail.rstrip("."),
+            problem.fix,
             as_json=as_json,
             plain=True,
         )

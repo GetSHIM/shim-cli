@@ -83,16 +83,18 @@ the detector is broken.
 | `OPTIONS_CONFLICT` | Two options that cannot be used together | `config`, `audit --purge --json` | `2` | `Run the command with one of them.` |
 | `TERMINAL_REQUIRED` | `audit --purge` asks for a typed confirmation and there is no terminal | `audit` | `2` | `Run shim audit --purge in a terminal.` |
 | `SETTINGS_PATH_INVALID` | `SHIM_CONFIG` is not an absolute path | `config` | `2` | `Unset SHIM_CONFIG or set it to an absolute path.` |
-| `SETTINGS_PATH_UNSAFE` | The settings folder is writable by someone else or cannot be created safely | `config` | `2` | `chmod 700 ~/.config/shim && chmod 600 ~/.config/shim/config.toml` |
-| `SETTINGS_INVALID` | The settings file does not parse or holds a value shim does not accept | `config`, `audit`, `doctor` | `2` | `Fix the line the error names, or run shim config --reset --yes (it discards every setting).` |
-| `SETTINGS_REFUSED` | The settings file was refused: a link, someone else's, or writable by another user | `config`, `audit`, `doctor` | `2` | `chmod 700 ~/.config/shim && chmod 600 ~/.config/shim/config.toml` |
+| `SETTINGS_PATH_UNSAFE` | The settings folder is writable by someone else or cannot be created safely | `config` | `2` | As for `SETTINGS_REFUSED`, or for `SETTINGS_UNWRITABLE` when the system refused to create the folder |
+| `SETTINGS_INVALID` | The settings file does not parse or holds a value shim does not accept | `config`, `audit`, `doctor` | `2` | `Edit the settings file the error names until it parses.` The error names `shim config --reset` as the last resort: it discards every setting |
+| `SETTINGS_REFUSED` | The settings file was refused: a link, someone else's, or writable by another user | `config`, `audit`, `doctor` | `2` | `chmod 700 <folder> && chmod 600 <path>` with the real paths (`SHIM_CONFIG`, or `$XDG_CONFIG_HOME/shim`); a link, a file that belongs to another user, a hard link or an oversized file gets its own fix instead |
 | `CUSTOM_PATTERN_INVALID` | A `--custom` or `--custom-literal` value is malformed or backtracks | `config` | `2` | `Change the pattern, or remove it with shim config --remove-custom NAME --yes.` |
 | `REVEAL_INVALID` | A `--reveal` names a type or length that is not allowed | `config` | `2` | `Use --reveal IBAN=N, CREDIT_CARD=N or PHONE=N with N from 1 to 4.` |
 | `SETTINGS_CHANGED` | The settings file changed, or became unsafe, while shim was writing it | `config` | `2` | `Run the command again.` |
+| `SETTINGS_UNWRITABLE` | The settings file cannot be written, and trying again will not help: permission denied, a read-only file system, a full disk | `config` | `2` | Names the folder and what to change: `chmod u+rwx <folder>`, a writable file system, or free space |
 | `CLIENT_SETTINGS_UNREADABLE` | The client's settings file could not be inspected | `install`, `status`, `revert`, `doctor` | `2` | `Run shim doctor <client>.`; in doctor, make the file and its folder readable |
 | `CLIENT_SETTINGS_MALFORMED` | The client's settings file does not parse, so shim will not change it | `install`, `status`, `revert`, `doctor` | `2` | `Fix <path> by hand so it parses, then run the command again.` |
 | `CLIENT_SETTINGS_UNSAFE` | The client's settings file is a link, someone else's, or otherwise unsafe | `install`, `status`, `revert`, `doctor` | `2` | `Make <path> a regular file owned by you, then run the command again.` |
 | `CLIENT_SETTINGS_CHANGED` | The client's settings file changed while shim was writing it | `install`, `revert` | `2` | `Run the command again.` |
+| `CLIENT_SETTINGS_UNWRITABLE` | The client's settings file cannot be written, and trying again will not help: permission denied, a read-only file system, a full disk | `install`, `revert` | `2` | As for `SETTINGS_UNWRITABLE`, with the client's folder |
 | `DETECTOR_UNAVAILABLE` | The detector could not start, so the hook would not work | `install` | `2` | `Reinstall shim: uv tool install --reinstall shim, or pipx reinstall shim.` |
 | `INVALID_DATE` | `--since` is not a `YYYY-MM-DD` date | `audit` | `2` | `Pass --since as YYYY-MM-DD.` |
 | `HISTORY_NOT_FOUND` | There is no Claude Code history folder to read | `audit` | `2` | `null` |
@@ -283,9 +285,10 @@ fully:
   are not readable as settings` and names neither the key nor the line. Check
   the values against [the settings file](#the-settings-file).
 - A refused settings file gives the reason, such as `target is writable by
-  another user`, and no command. The fix is `chmod 700 ~/.config/shim && chmod
-  600 ~/.config/shim/config.toml`; `shim config --reset --yes` does not repair
-  permissions.
+  another user`, and no command; `--json` carries the fix for that reason. For
+  a mode it is `chmod 700 ~/.config/shim && chmod 600
+  ~/.config/shim/config.toml`, with your real paths; `shim config --reset
+  --yes` does not repair permissions.
 - `FAIL Codex hook support is not enabled.` comes from `codex features list`,
   and usually means Codex's own `config.toml` (in `~/.codex`, or
   `$CODEX_HOME`) turns hooks off. Set `hooks = true` under `[features]`, or
@@ -641,7 +644,7 @@ shim config --ledger --yes      # keep records past the session; off by default
 shim config --no-ledger --yes
 shim config --diet --yes        # shrink tool results losslessly; on by default
 shim config --no-diet --yes
-shim config --reset --yes       # back to defaults; the fix for a malformed file
+shim config --reset --yes       # back to defaults; discards every setting
 ```
 
 `--reset` discards everything in the file, including custom patterns,

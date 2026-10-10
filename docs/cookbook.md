@@ -453,10 +453,11 @@ carries `status`, `code` and `fix`, so the next step is the `fix` of the first
 
 ```console
 $ shim doctor claude --json | jq -r '.checks[] | select(.status == "FAIL") | .code + ": " + .fix'
-SETTINGS_INVALID: Fix the line the error names, or run shim config --reset --yes (it discards every setting).
+SETTINGS_INVALID: Edit the settings file the error names until it parses.
 ```
 
-A fix that discards settings, as `--reset` does, is one to ask about first.
+The error itself names `shim config --reset` as the last resort; it discards
+every setting, so it is one to ask about first.
 
 To let an agent see which variables a `.env` file defines without reading the
 values, point it at `shim keys` instead of `cat`:

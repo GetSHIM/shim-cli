@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import errno
 import io
 import json
 import os
@@ -1705,7 +1706,7 @@ def _valid_settings(monkeypatch, tmp_path: Path) -> dict:
     target.parent.mkdir(mode=0o700)
     target.write_text('enabled_entities = ["EMAIL"]\n')
     target.chmod(0o600)
-    return {"path": str(target)}
+    return {"path": str(target), "folder": str(target.parent)}
 
 
 def _broken_settings(monkeypatch, tmp_path: Path) -> dict:
@@ -1740,7 +1741,11 @@ def _fails(target: str, error: type[BaseException] = OSError):
             raise error("synthetic")
 
         monkeypatch.setattr(target, fail)
-        return {**found, "settings": str(home / ".claude" / "settings.json")}
+        return {
+            **found,
+            "settings": str(home / ".claude" / "settings.json"),
+            "claude_folder": str(home / ".claude"),
+        }
 
     return setup
 
@@ -1840,11 +1845,14 @@ def _watch(*, claude: bool = True, base_url: bool = False, proxy: str = ""):
     return setup
 
 
-_FIX_SETTINGS = (
-    "Fix the line the error names, or run shim config --reset --yes "
-    "(it discards every setting)."
-)
-_FIX_CHMOD = "chmod 700 ~/.config/shim && chmod 600 ~/.config/shim/config.toml"
+_FIX_SETTINGS = "Edit the settings file the error names until it parses."
+_FIX_CHMOD = "chmod 700 {folder} && chmod 600 {path}"
+
+
+def _read_only(_message: str) -> OSError:
+    return OSError(errno.EROFS, "Read-only file system")
+
+
 _REFUSED_SETTINGS = (
     "Settings at {path} were refused: target parent is writable by another user. "
     "shim will not read settings anything else can rewrite, because whatever can "
@@ -1852,7 +1860,8 @@ _REFUSED_SETTINGS = (
 )
 _INVALID_SETTINGS = (
     "Settings at {path} are invalid: {parser}. "
-    "Run shim config --reset to start over, or edit the line above."
+    "Edit that line; as a last resort, shim config --reset starts over and "
+    "discards every setting."
 )
 
 # code: (argv, setup, exit code, error, fix, extra JSON keys, human stderr)
@@ -1947,6 +1956,16 @@ _ERROR_CASES: dict[str, tuple] = {
         {},
         "FAIL Entity settings were unsafe or changed; nothing was saved.\n",
     ),
+    "SETTINGS_UNWRITABLE": (
+        ["config", "--enable", "PHONE", "--yes"],
+        _fails("shim_cli.cli.configuration.apply", _read_only),
+        2,
+        "Entity settings were not saved: Read-only file system.",
+        "{folder} is on a read-only file system; make it writable, then run the "
+        "command again.",
+        {},
+        "FAIL Entity settings were not saved: Read-only file system.\n",
+    ),
     "CLIENT_SETTINGS_UNREADABLE": (
         ["status", "claude"],
         _fails("shim_cli.cli.integrations.client_plan"),
@@ -1986,6 +2005,16 @@ _ERROR_CASES: dict[str, tuple] = {
         "Run the command again.",
         {"client": "claude"},
         "FAIL Claude Code hook configuration was not changed.\n",
+    ),
+    "CLIENT_SETTINGS_UNWRITABLE": (
+        ["install", "claude", "--yes"],
+        _fails("shim_cli.cli.integrations.apply", _read_only),
+        2,
+        "Claude Code hook configuration was not changed: Read-only file system.",
+        "{claude_folder} is on a read-only file system; make it writable, then run "
+        "the command again.",
+        {"client": "claude"},
+        "FAIL Claude Code hook configuration was not changed: Read-only file system.\n",
     ),
     "DETECTOR_UNAVAILABLE": (
         ["install", "claude", "--yes"],
@@ -2208,6 +2237,133 @@ def test_human_error_output_is_unchanged(
     assert result.exit_code == exit_code
     assert result.stderr == human.format(**values)
     assert not result.stdout.startswith("{")
+
+
+@pytest.mark.parametrize(
+    ("error", "reason", "fix"),
+    (
+        (
+            OSError(errno.EACCES, "Permission denied"),
+            "Permission denied",
+            "Give yourself write access to {folder} (chmod u+rwx {folder}), then "
+            "run the command again.",
+        ),
+        (
+            OSError(errno.EPERM, "Operation not permitted"),
+            "Operation not permitted",
+            "The system refused the change: check the owner, group and flags of "
+            "{target} and {folder}, then run the command again.",
+        ),
+        (
+            OSError(errno.ENOSPC, "No space left on device"),
+            "No space left on device",
+            "Free space on the disk that holds {folder}, then run the command again.",
+        ),
+    ),
+    ids=("EACCES", "EPERM", "ENOSPC"),
+)
+def test_a_write_that_will_fail_again_names_its_cause(
+    error: OSError, reason: str, fix: str, tmp_path: Path
+) -> None:
+    from shim_cli.settings_files import InstallationError
+
+    target = tmp_path / "config.toml"
+    expected = (reason, fix.format(folder=tmp_path, target=target))
+    wrapped = InstallationError("cannot lock target parent")
+    wrapped.__cause__ = error
+
+    assert output.unwritable(error, target) == expected
+    assert output.unwritable(wrapped, target) == expected
+
+
+@pytest.mark.parametrize(
+    "error",
+    (
+        OSError("synthetic"),
+        OSError(errno.EEXIST, "File exists"),
+        ValueError("target changed after planning"),
+    ),
+)
+def test_a_race_is_not_called_a_permanent_failure(error, tmp_path: Path) -> None:
+    assert output.unwritable(error, tmp_path / "config.toml") is None
+
+
+def test_a_client_folder_that_cannot_be_planned_is_not_called_a_race(
+    monkeypatch, tmp_path: Path
+) -> None:
+    from shim_cli.cli import integrations
+
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    planned = integrations.client_plan("claude", "install")
+    calls = iter((planned,))
+
+    def plan(*_args):
+        for found in calls:
+            return found
+        raise ValueError("Claude Code home path is invalid")
+
+    monkeypatch.setattr(integrations, "client_plan", plan)
+    result = runner.invoke(app, ["install", "claude", "--yes", "--json"])
+
+    assert result.exit_code == 2
+    assert json.loads(result.stdout)["code"] == "CLIENT_SETTINGS_UNREADABLE"
+
+
+def test_a_refused_settings_file_gets_the_fix_for_its_cause(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """The chmod line names the real path, and is not offered for a link or for
+    a file that belongs to someone else, where it would change nothing."""
+    from shim_cli.settings_files import files
+
+    home = tmp_path / "xdg"
+    folder = home / "shim"
+    folder.mkdir(parents=True, mode=0o700)
+    target = folder / "config.toml"
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(home))
+
+    def fix() -> str:
+        result = runner.invoke(app, ["config", "--json"])
+        payload = json.loads(result.stdout)
+        assert payload["code"] == "SETTINGS_REFUSED"
+        return payload["fix"]
+
+    real = tmp_path / "real.toml"
+    real.write_text('enabled_entities = ["SECRET"]\n', encoding="utf-8")
+    real.chmod(0o600)
+    target.symlink_to(real)
+    linked = fix()
+    assert "chmod" not in linked
+    assert str(target) in linked and "link" in linked
+
+    target.unlink()
+    target.write_text('enabled_entities = ["SECRET"]\n', encoding="utf-8")
+    target.chmod(0o600)
+    folder.chmod(0o777)
+    assert fix() == f"chmod 700 {folder} && chmod 600 {target}"
+
+    folder.chmod(0o700)
+    real_euid = os.geteuid()
+    monkeypatch.setattr(files.os, "geteuid", lambda: real_euid + 1)
+    foreign = fix()
+    assert "chmod" not in foreign
+    assert "chown" in foreign and str(target) in foreign
+
+
+def test_settings_refusal_is_one_error_type(tmp_path: Path) -> None:
+    from shim_cli.config import SettingsRefused, policy_from_state
+    from shim_cli.settings_files import FileState, StateKind
+
+    state = FileState(StateKind.UNSAFE, path=tmp_path, reason="target is a test")
+
+    with pytest.raises(SettingsRefused) as refused:
+        policy_from_state(state)
+
+    assert isinstance(refused.value, ValueError)
+    assert refused.value.reason == "target is a test"
+    assert str(refused.value) == "shim settings cannot be read safely: target is a test"
 
 
 def test_lt_b24_reveal_error_says_what_is_wrong(monkeypatch, tmp_path: Path) -> None:
