@@ -449,10 +449,10 @@ $ shim config --custom 'LOOP=(a+)+$' --yes --json
 
 When something is off, `shim doctor <client> --json` comes first. Each check
 carries `status`, `code` and `fix`, so the next step is the `fix` of the first
-`FAIL`:
+`FAIL` or `WARN` (a hook that is not installed is a `WARN`):
 
 ```console
-$ shim doctor claude --json | jq -r '.checks[] | select(.status == "FAIL") | .code + ": " + .fix'
+$ shim doctor claude --json | jq -r '.checks[] | select(.status != "PASS") | .code + ": " + .fix'
 SETTINGS_INVALID: Edit the settings file the error names until it parses.
 ```
 

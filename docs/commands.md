@@ -244,7 +244,7 @@ Each client adds one more, such as `WARN Codex 0.160.0 is newer than tested
 
 `--json` writes `checks`, each with `name`, `status`, `detail`, `code` and
 `fix` ([Error codes](#error-codes)), and the `coverage` rows. An agent fixing
-an install reads `fix` from the first check whose `status` is `FAIL`.
+an install reads `fix` from the first check whose `status` is `FAIL` or `WARN`.
 
 Doctor cannot see whether the client runs the hook. To see it run:
 
