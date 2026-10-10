@@ -543,8 +543,11 @@ diet = ["json", "whitespace"]   # or false to disable entirely
 
 While reading results shim also flags text that is trying to give the model
 orders, in English or Turkish — "ignore all previous instructions", "önceki tüm
-talimatları yok say", impersonated system messages, invisible characters. These
-are **reported and never acted on**: rewriting a tool result because it reads
+talimatları yok say", impersonated system messages, invisible characters.
+Turkish is read however it is typed (capitals, no accents, separate accent
+marks); a commit subject such as `fix: eski komutları unut`, a data line such as
+`Sistem: Linux 6.1` or a noun phrase such as `kullanıcıya gösterme mantığı` is
+not flagged. These are **reported and never acted on**: rewriting a tool result because it reads
 as imperative would corrupt legitimate content, and nothing is ever blocked for
 it. They appear in the session summary as `flagged`, naming the file they came
 from — which is the only part you can act on:

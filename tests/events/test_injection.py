@@ -152,3 +152,22 @@ def test_a_turkish_marker_never_returns_text() -> None:
     )
 
     assert markers == ("INSTRUCTION_OVERRIDE",)
+
+
+def _per_megabyte(text: str) -> float:
+    started = time.perf_counter()
+    injection.scan(text)
+    return (time.perf_counter() - started) * 1_000_000 / len(text)
+
+
+def test_dense_turkish_costs_a_bounded_multiple_of_plain_prose() -> None:
+    plain = (
+        "Bu fonksiyon listeyi gezer ve sonucu önbelleğe yazar, sonra döner. " * 15_000
+    )
+    dense = "eski kural " * 90_000
+
+    ratio = min(_per_megabyte(dense) for _ in range(3)) / min(
+        _per_megabyte(plain) for _ in range(3)
+    )
+
+    assert ratio < 2.5, f"dense input took {ratio:.1f}x the time of prose"
