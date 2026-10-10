@@ -1623,6 +1623,198 @@
       "text": "34 AB 1234 KB",
       "categories": [],
       "expected_output": "34 AB 1234 KB"
+    },
+    {
+      "id": "ip-after-curl-verbose-flag",
+      "text": "curl -v 203.0.113.9",
+      "categories": [
+        "IP_ADDRESS"
+      ],
+      "expected_output": "curl -v <IP_ADDRESS_1>"
+    },
+    {
+      "id": "ip-after-ping-verbose-flag",
+      "text": "ping -v 203.0.113.9",
+      "categories": [
+        "IP_ADDRESS"
+      ],
+      "expected_output": "ping -v <IP_ADDRESS_1>"
+    },
+    {
+      "id": "ip-after-nmap-verbose-flag",
+      "text": "nmap -v 203.0.113.9",
+      "categories": [
+        "IP_ADDRESS"
+      ],
+      "expected_output": "nmap -v <IP_ADDRESS_1>"
+    },
+    {
+      "id": "ip-after-nc-verbose-flag",
+      "text": "nc -v 10.0.0.5 22",
+      "categories": [
+        "IP_ADDRESS"
+      ],
+      "expected_output": "nc -v <IP_ADDRESS_1> 22"
+    },
+    {
+      "id": "ip-after-grep-invert-flag",
+      "text": "grep -v 203.0.113.9 hosts.txt",
+      "categories": [
+        "IP_ADDRESS"
+      ],
+      "expected_output": "grep -v <IP_ADDRESS_1> hosts.txt"
+    },
+    {
+      "id": "ip-after-lone-v-word",
+      "text": "server v 192.168.1.1",
+      "categories": [
+        "IP_ADDRESS"
+      ],
+      "expected_output": "server v <IP_ADDRESS_1>"
+    },
+    {
+      "id": "ip-compared-in-code",
+      "text": "if ip == \"203.0.113.7\":",
+      "categories": [
+        "IP_ADDRESS"
+      ],
+      "expected_output": "if ip == \"<IP_ADDRESS_1>\":"
+    },
+    {
+      "id": "ip-compared-spaced",
+      "text": "host == 10.0.0.5",
+      "categories": [
+        "IP_ADDRESS"
+      ],
+      "expected_output": "host == <IP_ADDRESS_1>"
+    },
+    {
+      "id": "ip-compared-quoted",
+      "text": "ping==\"8.8.8.8\"",
+      "categories": [
+        "IP_ADDRESS"
+      ],
+      "expected_output": "ping==\"<IP_ADDRESS_1>\""
+    },
+    {
+      "id": "ip-compared-to-constant",
+      "text": "SERVER_IP==203.0.113.9",
+      "categories": [
+        "IP_ADDRESS"
+      ],
+      "expected_output": "SERVER_IP==<IP_ADDRESS_1>"
+    },
+    {
+      "id": "ip-pinned-mixed-case-requirement-negative",
+      "text": "Django==4.2.1.1",
+      "categories": [],
+      "expected_output": "Django==4.2.1.1"
+    },
+    {
+      "id": "phone-spaced-glued-to-word",
+      "text": "musteri-0532 123 45 67",
+      "categories": [
+        "PHONE"
+      ],
+      "expected_output": "musteri-<PHONE_1>"
+    },
+    {
+      "id": "phone-plus-glued-to-word",
+      "text": "user-+905321234567",
+      "categories": [
+        "PHONE"
+      ],
+      "expected_output": "user-<PHONE_1>"
+    },
+    {
+      "id": "phone-plus-spaced-glued-to-cue",
+      "text": "contact-+1 415 555 2671",
+      "categories": [
+        "PHONE"
+      ],
+      "expected_output": "contact-<PHONE_1>"
+    },
+    {
+      "id": "phone-plus-parens-glued-underscore",
+      "text": "x_+1 (415) 555-2671",
+      "categories": [
+        "PHONE"
+      ],
+      "expected_output": "x_<PHONE_1>"
+    },
+    {
+      "id": "phone-tr-dashed-glued-to-word",
+      "text": "musteri-0532-123-45-67",
+      "categories": [
+        "PHONE"
+      ],
+      "expected_output": "musteri-<PHONE_1>"
+    },
+    {
+      "id": "secret-password-space-separated",
+      "text": "password hunter2abc",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "password <SECRET_1>"
+    },
+    {
+      "id": "secret-api-key-env-space-separated",
+      "text": "export API_KEY abcdef123456",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "export API_KEY <SECRET_1>"
+    },
+    {
+      "id": "secret-space-separated-quoted",
+      "text": "password \"hunter two\"",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "password \"<SECRET_1>\""
+    },
+    {
+      "id": "secret-space-separated-reference-negative",
+      "text": "export API_KEY ${API_KEY}",
+      "categories": [],
+      "expected_output": "export API_KEY ${API_KEY}"
+    },
+    {
+      "id": "secret-space-separated-next-line-negative",
+      "text": "# rotate the token\nself._cache.clear()",
+      "categories": [],
+      "expected_output": "# rotate the token\nself._cache.clear()"
+    },
+    {
+      "id": "tckn-groups-three-three-two-three",
+      "text": "TCKN 100 000 00 146",
+      "categories": [
+        "TR_NATIONAL_ID"
+      ],
+      "expected_output": "TCKN <TR_NATIONAL_ID_1>"
+    },
+    {
+      "id": "tckn-groups-three-three-two-three-bad-checksum",
+      "text": "TCKN 100 000 00 147",
+      "categories": [],
+      "expected_output": "TCKN 100 000 00 147"
+    },
+    {
+      "id": "tr-license-plate-cue-beats-code-word",
+      "text": "plaka 34 get 123",
+      "categories": [
+        "TR_LICENSE_PLATE"
+      ],
+      "expected_output": "plaka <TR_LICENSE_PLATE_1>"
+    },
+    {
+      "id": "tr-license-plate-cue-beats-ok",
+      "text": "plaka: 34 ok 1234",
+      "categories": [
+        "TR_LICENSE_PLATE"
+      ],
+      "expected_output": "plaka: <TR_LICENSE_PLATE_1>"
     }
   ],
   "generated_cases": [

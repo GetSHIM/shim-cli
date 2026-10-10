@@ -37,9 +37,6 @@ GATEWAY_DIVERGENCES = {
     # keeps scheme, host, port and database (PRD-36).
     "postgres-uri": (NOT_PORTED, [("DB_URI", "user:pw")]),
     "file-path-home": (NO_TYPE, []),
-    # Tier 3 space-separated secrets: a key and a value with no `=` or `:`.
-    "password-space-separated": (NOT_PORTED, []),
-    "api-key-env-space-separated": (NOT_PORTED, []),
     # The gateway's run-of-more-than-four-numbers rule (`_in_decimal`).
     "not-ip-five-parts": (NOT_PORTED, [("IP_ADDRESS", "1.2.3.4")]),
     # A VKN with no tax word near it; shim-cli asks for the context word.

@@ -190,7 +190,7 @@ What shim-cli detects, and masks wherever the client allows it:
   phone numbers, payment cards that pass the Luhn check (Troy and the
   Mastercard 2-series included), IBANs (lowercase, spaced, or broken over a
   line), IP and MAC addresses, US SSNs, and Turkish national IDs (also in
-  `100 000 001 46` groups) and tax IDs. Turkish licence plates are the one
+  `100 000 001 46` or `100 000 00 146` groups) and tax IDs. Turkish licence plates are the one
   opt-in type: `shim config --enable TR_LICENSE_PLATE`, because coding traffic
   is full of plate-shaped strings such as `[12 GET 200]`.
 - **Keys and tokens:** Anthropic, OpenAI, Stripe and SendGrid keys; Slack
@@ -200,7 +200,9 @@ What shim-cli detects, and masks wherever the client allows it:
   `Bearer` headers.
 - **Credentials by context:** the value of a named key such as `DB_PASSWORD`,
   `AWS_SECRET_ACCESS_KEY` or, in Turkish, `şifre` and `parola` with `=` or `:`,
-  a `--password` argument, the user and password in
+  `password`, `token`, `secret` or `API_KEY` followed on the same line by a
+  value with a digit or a symbol in it (`password hunter2abc`), a `--password`
+  argument, the user and password in
   a connection string or URL, Docker and npm registry logins, and a base64
   block that decodes to one of these.
 
@@ -228,7 +230,8 @@ number only when it is Turkish-shaped or follows a cue such as `tel`, `phone`
 or a `phone_number` key, and `order no` or `sipariş no` is not a cue. Dated
 model ids (`claude-sonnet-4-5-20250929`) and version strings (`version
 1.2.3.4`, `numpy==1.26.4.1`) reach the model unchanged, so an `Edit` on that
-line still applies.
+line still applies; an address after a flag (`curl -v 203.0.113.9`) or a
+comparison (`host == 10.0.0.5`) is still an address.
 
 Detection runs locally without an account, API key, network request, daemon,
 telemetry, or prompt history.

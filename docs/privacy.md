@@ -112,7 +112,11 @@ still masked, and a team that wants internal host names hidden adds a [custom
 pattern](commands.md#shim-config). The exemptions are written narrowly, so that
 they drop noise rather than credentials.
 
-A secret is found by its key name or by its vendor prefix. A key name counts
+A secret is found by its key name or by its vendor prefix. `password`,
+`passwd`, `pwd`, `secret`, `token` or `api_key` followed by a space and a value
+on the same line is a secret too, the gateway's rule, when the value carries a
+digit or a symbol, so `password hunter2abc` and `export API_KEY abcdef123456`
+are masked and `token budget` is not. A key name counts
 when a secret word is one of its segments, in any case: `DB_PASSWORD`,
 `AWS_SECRET_ACCESS_KEY`, `LEDGER_API_TOKEN`, `client.secret`, `x-api-key`,
 `clientSecret`; `MAX_TOKENS`, `tokenizer` and `SORT_KEY` are not secrets. The
@@ -319,8 +323,9 @@ with placeholder numbering continuing across them, so a 400 KB file read comes
 back masked rather than passing through whole. A single line longer than the
 limit is cut where it must be, and the next piece starts 4,096 characters
 earlier, so a value on one line up to that length is read whole wherever the
-cut falls. A value written across a line break — a PEM block, a wrapped key —
-can still fall in a seam and go unreported. A piece that grows past the
+cut falls. A value written across a line break — a PEM block, a wrapped key,
+an IBAN broken between two groups — can still fall in a seam and go
+unreported. A piece that grows past the
 detector's limit when it is normalized, as Korean text does, is cut in half and
 scanned again, down to pieces of 25,000 characters. If one piece fails, the
 others are still masked and the summary counts the event as partially

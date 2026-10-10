@@ -593,9 +593,10 @@ mistyped IBAN or card number is not reported.
 shim config --enable TR_LICENSE_PLATE --yes   # look for Turkish plates too
 ```
 
-A plate is uppercase, or lowercase right after `plaka` or `plate`; HTTP methods,
-log words (`GET`, `PUT`, `ERR`, `CPU`, `PID`, `ID`, `RC`, `OK`), months, units
-and currencies are never plate letters. `line 42 E 1234` still reads as a
+A plate is uppercase, or lowercase right after `plaka` or `plate`. HTTP methods
+and log words (`GET`, `PUT`, `ERR`, `CPU`, `PID`, `ID`, `RC`, `OK`) are plate
+letters only right after `plaka` or `plate`; months, units and currencies never
+are. `line 42 E 1234` still reads as a
 plate.
 
 **Your own terms.**
