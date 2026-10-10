@@ -3,7 +3,15 @@ from __future__ import annotations
 import datetime
 
 from . import measure
-from .measure import OTHER, RESPONSE_KINDS, SECTIONS, TRUNCATED, Usage, model_id
+from .measure import (
+    MODEL_PATHS,
+    OTHER,
+    RESPONSE_KINDS,
+    SECTIONS,
+    TRUNCATED,
+    Usage,
+    model_id,
+)
 
 SECTION_WORDS = {
     "system": "system prompt",
@@ -69,20 +77,29 @@ def prices_stale() -> bool:
     return age.days > STALE_AFTER_DAYS
 
 
-def exchange_spend(exchange) -> float | None:
+def _cost(exchange) -> tuple[float, float] | None:
+    """(cache writes, everything else) in USD; None when the model is unpriced."""
     usage = exchange.usage
     rates = _price(exchange.model or "", usage.total_input)
     if rates is None:
         return None
     fresh, five_minutes, one_hour, read, output = rates
     hour_writes = usage.cache_creation_1h_input_tokens
-    return (
-        usage.input_tokens * fresh
-        + (usage.cache_creation_input_tokens - hour_writes) * five_minutes
+    writes = (
+        (usage.cache_creation_input_tokens - hour_writes) * five_minutes
         + hour_writes * one_hour
+    ) / _PER
+    rest = (
+        usage.input_tokens * fresh
         + usage.cache_read_input_tokens * read
         + usage.output_tokens * output
     ) / _PER
+    return writes, rest
+
+
+def exchange_spend(exchange) -> float | None:
+    cost = _cost(exchange)
+    return None if cost is None else sum(cost)
 
 
 def spend(exchanges: list) -> tuple:
@@ -97,32 +114,21 @@ def spend(exchanges: list) -> tuple:
     return sum(cost for cost, _ in priced), priced, sorted(unpriced), costs
 
 
-def image_totals(exchanges: list) -> dict:
-    distinct: dict = {}
-    for exchange in exchanges:
-        distinct.update(exchange.images)
+def image_totals(session, exchanges: list) -> dict:
     return {
-        "distinct": len(distinct),
+        "distinct": len(session.images),
         "requests": sum(bool(exchange.image_count) for exchange in exchanges),
         "estimated_tokens": sum(e.estimated_image_tokens for e in exchanges),
-        "unknown_size": sum(not known for known in distinct.values()),
+        "unknown_size": sum(not known for known in session.images.values()),
     }
 
 
-def largest_tool_result(exchanges: list) -> dict | None:
+def largest_tool_result(session) -> dict | None:
     """The same id in a later request's history is the same result; it counts
     only where it is carried at its full size, not once a diet shrank it."""
-    largest = None
-    for exchange in exchanges:
-        for key, (tool, size) in exchange.tool_results.items():
-            if largest is None or size > largest[0]:
-                largest = (size, tool, key)
-    if largest is None:
+    if not session.tool_results:
         return None
-    size, tool, key = largest
-    carried = sum(
-        exchange.tool_results.get(key, ("", 0))[1] == size for exchange in exchanges
-    )
+    tool, size, carried = max(session.tool_results.values(), key=lambda row: row[1])
     return {"tool": tool, "bytes": size, "requests": carried}
 
 
@@ -157,19 +163,9 @@ def cache_rewrites(exchanges: list) -> list:
     return found
 
 
-def _write_cost(exchange) -> float | None:
-    usage = exchange.usage
-    rates = _price(exchange.model or "", usage.total_input)
-    if rates is None:
-        return None
-    hour = usage.cache_creation_1h_input_tokens
-    five = usage.cache_creation_input_tokens - hour
-    return (five * rates[1] + hour * rates[2]) / _PER
-
-
 def cache_rewrite_totals(exchanges: list, rewrites: list) -> dict:
-    costs = [_write_cost(exchanges[index]) for index in rewrites]
-    priced = [cost for cost in costs if cost is not None]
+    costs = [_cost(exchanges[index]) for index in rewrites]
+    priced = [cost[0] for cost in costs if cost is not None]
     return {
         "count": len(rewrites),
         "tokens": sum(
@@ -392,11 +388,7 @@ def _why_incomplete(exchanges) -> str:
 
 
 def render(session, seconds: float) -> str:
-    exchanges = [
-        exchange
-        for exchange in session.exchanges
-        if exchange.path.endswith(("messages", "responses", "completions"))
-    ]
+    exchanges = [e for e in session.exchanges if e.path.endswith(MODEL_PATHS)]
     if not exchanges and not session.errors:
         return ""
     plural = "" if len(exchanges) == 1 else "s"
@@ -542,7 +534,7 @@ def render(session, seconds: float) -> str:
                 f"bytes, {largest[0]} {round(100 * largest[1] / biggest.request_bytes)}% of it"
             )
 
-    images = image_totals(exchanges)
+    images = image_totals(session, exchanges)
     if images["requests"]:
         tokens = images["estimated_tokens"]
         unknown = images["unknown_size"]
@@ -553,7 +545,7 @@ def render(session, seconds: float) -> str:
             + (" (estimated)" if tokens else "")
             + (f"; {unknown} of unknown size" if unknown else "")
         )
-    result = largest_tool_result(exchanges)
+    result = largest_tool_result(session)
     if result and result["bytes"]:
         lines.append(
             f"  largest tool result  {result['tool']}, "
@@ -566,12 +558,11 @@ def render(session, seconds: float) -> str:
         cost = rewrites["spend_usd"]
         priced = f", ~${cost:,.2f}" if cost is not None else ""
         shown = ", ".join(map(str, rewrites["requests"][:3]))
-        which = "request" if rewrites["count"] == 1 else "requests"
         lines.append(
             f"  cache     {_plural(rewrites['count'], 'request')} rewrote a prefix "
             "the previous one had cached "
             f"(~{_thousands(rewrites['tokens'])} tokens written again{priced}); "
-            f"{which} {shown}"
+            f"request {shown}"
         )
     duplicates = duplicate_totals(exchanges)
     if duplicates["count"]:
@@ -589,11 +580,7 @@ def render(session, seconds: float) -> str:
 
 
 def as_json(session, seconds: float) -> dict:
-    exchanges = [
-        exchange
-        for exchange in session.exchanges
-        if exchange.path.endswith(("messages", "responses", "completions"))
-    ]
+    exchanges = [e for e in session.exchanges if e.path.endswith(MODEL_PATHS)]
     combined = totals(exchanges)
     dollars, priced, unpriced, costs = spend(exchanges)
     count, size = at_file_totals(exchanges)
@@ -633,8 +620,8 @@ def as_json(session, seconds: float) -> dict:
         "response_entities": response_totals(exchanges),
         "response_scan": response_scan(exchanges),
         "custom": custom_totals(exchanges),
-        "images": image_totals(exchanges),
-        "largest_tool_result": largest_tool_result(exchanges),
+        "images": image_totals(session, exchanges),
+        "largest_tool_result": largest_tool_result(session),
         "cache_rewrites": cache_rewrite_totals(exchanges, rewrites),
         "duplicates_in_flight": duplicate_totals(exchanges),
         "exchanges": [

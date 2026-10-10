@@ -1090,3 +1090,37 @@ def test_a_request_without_a_model_keeps_the_one_the_response_names(watched) -> 
     [exchange] = running.session.exchanges
     assert exchange.measured
     assert exchange.model == "claude-sonnet-5"
+
+
+def test_a_session_keeps_each_image_and_result_once_not_one_copy_per_request(
+    watched,
+) -> None:
+    running, _upstream = watched
+    document = {
+        "model": "claude-sonnet-5",
+        "messages": [
+            {
+                "role": "assistant",
+                "content": [{"type": "tool_use", "id": "toolu_1", "name": "Bash"}],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "tool_result", "tool_use_id": "toolu_1", "content": "ok"},
+                    {
+                        "type": "image",
+                        "source": {"type": "base64", "data": "iVBORw0KGgo="},
+                    },
+                ],
+            },
+        ],
+    }
+
+    for _ in range(3):
+        _post(running, json.dumps(document).encode(), HEADERS)
+
+    session = running.session
+    assert session.tool_results == {"toolu_1": ("Bash", 2, 3)}
+    assert list(session.images.values()) == [False]
+    assert [e.image_count for e in session.exchanges] == [1, 1, 1]
+    assert not any(e.images or e.tool_results for e in session.exchanges)

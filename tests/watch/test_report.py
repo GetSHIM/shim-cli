@@ -30,11 +30,16 @@ def _exchange(**changes):
     return measure.Exchange(**values)
 
 
-def _session(*exchanges, errors: int = 0):
+def _session(*exchanges, errors: int = 0, images=None, results=()):
+    """`results` is what each request's history carried, as inspect_request
+    reads it: one `{tool_use id: (tool, bytes)}` per request."""
     session = proxy.Session()
     for exchange in exchanges:
         session.record(exchange)
     session.errors = errors
+    session.images = images or {}
+    for carried in results:
+        session.absorb(measure.Exchange(tool_results=carried))
     return session
 
 
@@ -690,14 +695,14 @@ def test_a_rewrite_inside_one_conversation_is_found_beside_another() -> None:
     assert report.cache_rewrites(series) == [3]
 
 
-def _with_images(digests: dict, count: int, tokens: int):
-    return _exchange(images=digests, image_count=count, estimated_image_tokens=tokens)
+def _with_images(count: int, tokens: int):
+    return _exchange(image_count=count, estimated_image_tokens=tokens)
 
 
 def test_an_image_of_unknown_size_is_counted_not_priced_at_zero() -> None:
-    unknown = _with_images({"a": False}, 1, 0)
+    unknown = _with_images(1, 0)
 
-    text = report.render(_session(unknown), 9.0)
+    text = report.render(_session(unknown, images={"a": False}), 9.0)
     line = next(row for row in text.splitlines() if row.startswith("  images"))
 
     assert line == "  images    1 distinct across 1 request; 1 of unknown size"
@@ -705,13 +710,14 @@ def test_an_image_of_unknown_size_is_counted_not_priced_at_zero() -> None:
 
 
 def test_images_are_counted_once_however_often_history_replays_them() -> None:
-    first = _with_images({"a": True}, 1, 2_494)
-    replay = _with_images({"a": True, "b": False}, 2, 2_494)
+    first = _with_images(1, 2_494)
+    replay = _with_images(2, 2_494)
+    seen = {"a": True, "b": False}
 
-    document = report.as_json(_session(first, replay, _exchange()), 9.0)
+    document = report.as_json(_session(first, replay, _exchange(), images=seen), 9.0)
     line = next(
         row
-        for row in report.render(_session(first, replay), 9.0).splitlines()
+        for row in report.render(_session(first, replay, images=seen), 9.0).splitlines()
         if row.startswith("  images")
     )
 
@@ -730,13 +736,14 @@ def test_images_are_counted_once_however_often_history_replays_them() -> None:
 
 
 def test_the_largest_tool_result_is_named_with_its_replays() -> None:
-    first = _exchange(tool_results={"toolu_1": ("Bash", 40_960)})
-    later = _exchange(
-        tool_results={"toolu_1": ("Bash", 40_960), "toolu_2": ("unknown tool", 12)}
-    )
+    results = [
+        {"toolu_1": ("Bash", 40_960)},
+        {"toolu_1": ("Bash", 40_960), "toolu_2": ("unknown tool", 12)},
+    ]
+    session = _session(_exchange(), _exchange(), results=results)
 
-    document = report.as_json(_session(first, later), 9.0)
-    text = report.render(_session(first, later), 9.0)
+    document = report.as_json(session, 9.0)
+    text = report.render(session, 9.0)
 
     assert document["largest_tool_result"] == {
         "tool": "Bash",
@@ -752,10 +759,9 @@ def test_the_largest_tool_result_is_named_with_its_replays() -> None:
 
 
 def test_a_result_shrunk_in_later_requests_is_carried_at_full_size_once() -> None:
-    sizes = [40_000, 35, 35]
-    series = [_exchange(tool_results={"toolu_1": ("Bash", size)}) for size in sizes]
+    results = [{"toolu_1": ("Bash", size)} for size in (40_000, 35, 35)]
 
-    assert report.largest_tool_result(series) == {
+    assert report.largest_tool_result(_session(results=results)) == {
         "tool": "Bash",
         "bytes": 40_000,
         "requests": 1,
@@ -784,14 +790,14 @@ def test_identical_requests_in_flight_are_counted_not_withheld() -> None:
 
 
 def test_no_digest_or_tool_id_reaches_the_json() -> None:
-    exchange = _exchange(
+    exchange = _exchange(image_count=1, conversation="c" * 16)
+    session = _session(
+        exchange,
         images={"f" * 64: True},
-        image_count=1,
-        tool_results={"toolu_secret_id": ("Bash", 10)},
-        conversation="c" * 16,
+        results=[{"toolu_secret_id": ("Bash", 10)}],
     )
 
-    dumped = json.dumps(report.as_json(_session(exchange), 9.0))
+    dumped = json.dumps(report.as_json(session, 9.0))
 
     assert "f" * 64 not in dumped
     assert "toolu_secret_id" not in dumped

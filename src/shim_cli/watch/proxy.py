@@ -10,11 +10,13 @@ import threading
 import time
 import urllib.parse
 import zlib
+from collections import Counter
 from dataclasses import dataclass, field
 
 from .measure import (
     BODY_TOO_LARGE,
     MAX_BODY_BYTES,
+    MODEL_PATHS,
     NOT_JSON,
     SLOTS_BUSY,
     Exchange,
@@ -57,7 +59,12 @@ class Session:
     _idle: threading.Event = field(default_factory=threading.Event)
     # (path, body digest) of requests still waiting for or streaming their
     # answer, counted; held in memory for the life of the exchange only.
-    _pending_bodies: dict = field(default_factory=dict)
+    _pending_bodies: Counter = field(default_factory=Counter)
+    # What every measured request carried, once however often history replays
+    # it: image digest -> whether its size was read, and tool_use id -> (tool,
+    # bytes, requests that carried it at that size). In memory only.
+    images: dict = field(default_factory=dict)
+    tool_results: dict = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self._idle.set()
@@ -79,15 +86,25 @@ class Session:
     def entered(self, key: tuple) -> bool:
         """True when an identical request is still in flight."""
         with self._lock:
-            seen = self._pending_bodies.get(key, 0)
-            self._pending_bodies[key] = seen + 1
-            return seen > 0
+            self._pending_bodies[key] += 1
+            return self._pending_bodies[key] > 1
 
     def left(self, key: tuple) -> None:
         with self._lock:
-            remaining = self._pending_bodies.pop(key, 1) - 1
-            if remaining:
-                self._pending_bodies[key] = remaining
+            self._pending_bodies[key] -= 1
+            if not self._pending_bodies[key]:
+                del self._pending_bodies[key]
+
+    def absorb(self, measured: Exchange) -> None:
+        """Fold one request's images and tool results into the session's."""
+        with self._lock:
+            self.images.update(measured.images)
+            for key, (tool, size) in measured.tool_results.items():
+                _, seen, carried = self.tool_results.get(key, (tool, 0, 0))
+                if size > seen:
+                    self.tool_results[key] = (tool, size, 1)
+                elif size == seen:
+                    self.tool_results[key] = (tool, size, carried + 1)
 
     def record(self, exchange: Exchange) -> None:
         with self._lock:
@@ -143,8 +160,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             exchange.incomplete_reason = BODY_TOO_LARGE if oversized else SLOTS_BUSY
         digest = (
             hashlib.sha256()
-            if self.command == "POST"
-            and exchange.path.endswith(("messages", "responses", "completions"))
+            if self.command == "POST" and exchange.path.endswith(MODEL_PATHS)
             else None
         )
         pending: tuple = ()
@@ -234,8 +250,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         exchange.at_files = measured.at_files
         exchange.image_count = measured.image_count
         exchange.estimated_image_tokens = measured.estimated_image_tokens
-        exchange.images = measured.images
-        exchange.tool_results = measured.tool_results
+        if exchange.path.endswith(MODEL_PATHS):
+            self.session.absorb(measured)
         exchange.measured = measured.measured
         exchange.incomplete_reason = measured.incomplete_reason
 

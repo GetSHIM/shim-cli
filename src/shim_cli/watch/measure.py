@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 
 from ..events.payload import PayloadTooLarge, walk
 
+# The paths of a model request; the rest of what a client sends is not counted.
+MODEL_PATHS = ("messages", "responses", "completions")
 SECTIONS = ("tools", "system", "messages")
 OTHER = "other"
 MEMOISED = ("tools", "system")
@@ -46,7 +48,7 @@ _SNAPSHOT = re.compile(r"-\d{8}$")
 # fits the model's tier, then billed one token per 28 x 28 patch, up to a cap.
 # Claude 4.7 and later read at the high-resolution tier.
 IMAGE_HEADER_CHARACTERS = 65_536
-_HIGH_RESOLUTION = frozenset(
+HIGH_RESOLUTION = frozenset(
     {
         "claude-opus-4-7",
         "claude-opus-4-8",
@@ -61,7 +63,6 @@ _HIGH_RESOLUTION = frozenset(
         "claude-mythos-5-1",
     }
 )
-_TIERS = {True: (2_576, 4_784), False: (1_568, 1_568)}
 UNKNOWN_TOOL = "unknown tool"
 
 MAX_STOP_REASON_CHARS = 40
@@ -294,8 +295,12 @@ class UsageReader:
         if not self.stop_reason:
             self.stop_reason = stop_reason_from(document)
         nested = document.get("message") or document.get("response") or document
-        if not self.model and isinstance(nested, dict):
-            self.model = valid_model(nested.get("model"))
+        if (
+            not self.model
+            and isinstance(nested, dict)
+            and isinstance(nested.get("model"), str)
+        ):
+            self.model = valid_label(nested["model"])
         block = document.get("usage")
         if not isinstance(block, dict) and isinstance(nested, dict):
             block = nested.get("usage")
@@ -322,14 +327,10 @@ def model_id(model: str) -> str:
     return _SNAPSHOT.sub("", model.removesuffix("-latest"))
 
 
-def valid_model(model: object) -> str:
-    if not isinstance(model, str) or not model:
-        return ""
-    return (
-        model
-        if len(model) <= MAX_MODEL_CHARS and model.isprintable()
-        else UNKNOWN_MODEL
-    )
+def valid_label(value: object, fallback: str = UNKNOWN_MODEL) -> str:
+    """A name from the wire that is safe to print, else `fallback`."""
+    printable = isinstance(value, str) and value and value.isprintable()
+    return value if printable and len(value) <= MAX_MODEL_CHARS else fallback
 
 
 def _dimensions(raw: bytes) -> tuple[int, int] | None:
@@ -383,7 +384,8 @@ def image_size(data: str) -> tuple[int, int] | None:
 def image_tokens(size: tuple[int, int] | None, model: str) -> int:
     if size is None:
         return 0
-    edge, cap = _TIERS[model_id(model) in _HIGH_RESOLUTION]
+    high = model_id(model) in HIGH_RESOLUTION
+    edge, cap = (2_576, 4_784) if high else (1_568, 1_568)
     scale = min(1.0, edge / max(size))
     width, height = (max(1, int(side * scale)) for side in size)
     return min(cap, math.ceil(width / 28) * math.ceil(height / 28))
@@ -395,11 +397,6 @@ def _base64_image(block: dict) -> str | None:
         return None
     data = source.get("data")
     return data if source.get("type") == "base64" and isinstance(data, str) else None
-
-
-def _label(name: object) -> str:
-    printable = isinstance(name, str) and name and name.isprintable()
-    return name if printable and len(name) <= MAX_MODEL_CHARS else UNKNOWN_TOOL
 
 
 def images_and_results(document: dict) -> tuple[list[str], dict]:
@@ -416,7 +413,7 @@ def images_and_results(document: dict) -> tuple[list[str], dict]:
             if (data := _base64_image(block)) is not None:
                 images.append(data)
             elif block.get("type") == "tool_use" and isinstance(block.get("id"), str):
-                names[block["id"]] = _label(block.get("name"))
+                names[block["id"]] = valid_label(block.get("name"), UNKNOWN_TOOL)
             elif block.get("type") == "tool_result":
                 inner = block.get("content")
                 size = len(inner.encode()) if isinstance(inner, str) else 0
@@ -634,8 +631,9 @@ class Exchange:
     usage_status: str = "unavailable"
     image_count: int = 0
     estimated_image_tokens: int = 0
-    # In memory only, never written or reported: a digest per distinct image
-    # (True when its size was read) and tool-result sizes by tool_use id.
+    # This request's own, for `Session.absorb`; a recorded exchange keeps none,
+    # so a long history is not copied once per request. A digest per distinct
+    # image (True when its size was read) and tool-result sizes by tool_use id.
     images: dict = field(default_factory=dict)
     tool_results: dict = field(default_factory=dict)
     duplicate_in_flight: bool = False
@@ -667,7 +665,7 @@ def inspect_request(body: bytes | bytearray, evaluate=None, memo=None) -> Exchan
         exchange.incomplete_reason = NOT_JSON
         return exchange
     if isinstance(document, dict) and isinstance(document.get("model"), str):
-        exchange.model = valid_model(document["model"]) or UNKNOWN_MODEL
+        exchange.model = valid_label(document["model"])
     exchange.sections = sections(document)
     exchange.at_files = at_files(document)
     if isinstance(document, dict):
@@ -737,6 +735,7 @@ __all__ = [
     "MAX_SCAN_LEAVES",
     "MEMOISED",
     "MEMO_LIMIT",
+    "MODEL_PATHS",
     "OTHER",
     "RESPONSE_KINDS",
     "SECTIONS",
