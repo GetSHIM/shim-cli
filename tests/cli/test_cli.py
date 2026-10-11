@@ -498,6 +498,21 @@ def test_claude_install_over_a_file_without_hooks_warns_about_none(
     assert "WARN" not in unstyle(installed.output)
 
 
+@pytest.mark.parametrize("command", ["install", "revert", "doctor"])
+def test_a_malformed_claude_settings_file_is_named_with_its_json_error(
+    monkeypatch, tmp_path: Path, command: str
+) -> None:
+    home = _claude_home(monkeypatch, tmp_path)
+    _claude(monkeypatch, tmp_path)
+    (home / ".claude" / "settings.json").write_text('{"theme": "dark",\n  "hooks": {,}\n')
+    args = [command, "claude"] + (["--yes"] if command != "doctor" else [])
+
+    said = " ".join(unstyle(runner.invoke(app, args).output).split())
+
+    assert "settings.json is not valid JSON: Expecting property name" in said
+    assert "line 2, column 13." in said
+
+
 def test_confirmation_and_doctor(monkeypatch, tmp_path: Path) -> None:
     _codex_home(monkeypatch, tmp_path)
     _codex(monkeypatch, tmp_path)
@@ -2054,10 +2069,12 @@ _ERROR_CASES: dict[str, tuple] = {
         ["install", "claude", "--yes"],
         _claude_settings(b'{"hooks":'),
         2,
-        "Claude Code hook configuration cannot be changed safely.",
+        "Claude Code hook configuration cannot be changed safely. {settings} is "
+        "not valid JSON: Expecting value at line 1, column 10.",
         "Fix {settings} by hand so it parses, then run the command again.",
         {"client": "claude", "target": "{settings}"},
-        "FAIL Claude Code hook configuration cannot be changed safely.\n"
+        "FAIL Claude Code hook configuration cannot be changed safely. {settings} "
+        "is not valid JSON: Expecting value at line 1, column 10.\n"
         "WARN Review Claude Code hooks manually; shim did not change malformed, "
         "ambiguous, or unsafe settings.\n",
     ),

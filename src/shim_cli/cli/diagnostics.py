@@ -18,6 +18,7 @@ from shim_cli.cli.integrations import (
     FIX_REINSTALL,
     client_name,
     client_plan,
+    parse_error,
     plan_status,
 )
 from shim_cli.cli.output import Check, console, emit, emit_json
@@ -280,7 +281,7 @@ def _hook_state(client: str, on_disk: bool = False) -> Check | None:
         return Check(
             "hook_configuration",
             label,
-            f"{name} hook configuration needs manual review.",
+            f"{name} hook configuration needs manual review.{parse_error(plan)}",
             code="CLIENT_SETTINGS_MALFORMED",
             fix=f"Fix {plan.target} by hand so it parses; shim install will not "
             "change it until then.",

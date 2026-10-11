@@ -175,6 +175,25 @@ def _plan_error(client: str, command: str, as_json: bool) -> NoReturn:
     )
 
 
+def parse_error(plan: Plan) -> str:
+    """Where a client settings file stops parsing, or "" when it parses.
+
+    `json`'s message names the expected token, never the file's content.
+    """
+    if plan.state.content is None:
+        return ""
+    try:
+        json.loads(plan.state.content.decode("utf-8"))
+    except UnicodeDecodeError:
+        return f" {plan.target} is not UTF-8."
+    except json.JSONDecodeError as error:
+        return (
+            f" {plan.target} is not valid JSON: {error.msg} at line "
+            f"{error.lineno}, column {error.colno}."
+        )
+    return ""
+
+
 def _plan_refused(
     plan: Plan,
     client: str,
@@ -191,7 +210,7 @@ def _plan_refused(
         emit_error(
             command,
             "CLIENT_SETTINGS_MALFORMED",
-            message,
+            message + parse_error(plan),
             f"Fix {target} by hand so it parses, then run the command again.",
             as_json=as_json,
             then=then,

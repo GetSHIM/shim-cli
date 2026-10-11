@@ -174,9 +174,11 @@ so a file you formatted by hand keeps its content but not its layout.
 
 A client settings file that does not parse, such as a `settings.json` with a
 trailing comma, is left alone: install exits `2` with `FAIL Claude Code hook
-configuration cannot be changed safely.`, naming neither the file nor the
-error, and runs once you have fixed the JSON by hand. With `--json` the same
-refusal is `CLIENT_SETTINGS_MALFORMED`, and its `fix` names the file.
+configuration cannot be changed safely.` and `~/.claude/settings.json is not
+valid JSON:`, then Python's JSON error with its line and column, and runs once
+you have fixed the JSON by hand. `revert`, `status` and `doctor` name
+the file and the error the same way. With `--json` the same refusal is
+`CLIENT_SETTINGS_MALFORMED`, and its `fix` names the file.
 
 `--json` with `--yes` writes one object: `client`, `target` (the settings
 file), `action` (`create`, `update` or `noop`), `events` (the hook events
