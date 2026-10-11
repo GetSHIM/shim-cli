@@ -513,6 +513,39 @@ def test_a_malformed_claude_settings_file_is_named_with_its_json_error(
     assert "line 2, column 13." in said
 
 
+@pytest.mark.parametrize(
+    ("client", "outcome"),
+    (
+        (
+            "claude",
+            "In Claude Code, a prompt you type like this is reported and sent "
+            "unchanged (stopped under enforce); a tool result like it reaches the "
+            "model masked.",
+        ),
+        (
+            "codex",
+            "In Codex, a prompt you type like this is reported and sent unchanged "
+            "(stopped under enforce); tool calls and results are not inspected.",
+        ),
+        (
+            "copilot",
+            "In GitHub Copilot CLI, a prompt you type like this reaches the model "
+            "masked; tool calls and results are not inspected.",
+        ),
+    ),
+)
+def test_demo_shows_the_sentence_before_and_after_and_what_the_client_does(
+    client: str, outcome: str
+) -> None:
+    result = runner.invoke(app, ["demo", client])
+    said = unstyle(result.output)
+
+    assert result.exit_code == 0
+    assert "before  Send the synthetic report to demo@example.com" in said
+    assert "after   Send the synthetic report to <EMAIL_1> using token=<SECRET_1>" in said
+    assert outcome in " ".join(said.split())
+
+
 def test_confirmation_and_doctor(monkeypatch, tmp_path: Path) -> None:
     _codex_home(monkeypatch, tmp_path)
     _codex(monkeypatch, tmp_path)

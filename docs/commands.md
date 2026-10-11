@@ -785,11 +785,10 @@ one sentence and nothing about its contents. Nothing is written.
 
 ### `shim demo <client>`
 
-Runs the detector on a synthetic sentence and shows what it finds and how it
-would be masked. The output is the same for every client: it does not show
-what your client's hook does with a finding — Codex only reports a prompt, and
-a Claude Code prompt is reported, not changed, by default. It installs
-nothing, touches no hook and records nothing, so it never appears in `shim
+Runs the detector on a synthetic sentence, shows it before and after masking,
+and says what that client's hook does by default with a prompt or a tool
+result like it. It does not run the hook: to see that work, use the check in
+the README's Install section. It installs nothing, touches no hook and records nothing, so it never appears in `shim
 report`. Nothing is read from your machine, your settings included: the input
 is fabricated. `<client>` is `claude`, `codex` or `copilot`; VS Code has no
 target.
@@ -797,7 +796,9 @@ target.
 ```console
 $ shim demo claude
 PASS Synthetic local demo detected sensitive data.
-Send the synthetic report to <EMAIL_1> using token=<SECRET_1>
+  before  Send the synthetic report to demo@example.com using token=sk_demo_1234567890.
+  after   Send the synthetic report to <EMAIL_1> using token=<SECRET_1>
+In Claude Code, a prompt you type like this is reported and sent unchanged (stopped under enforce); a tool result like it reaches the model masked.
 ```
 
 ## The settings file

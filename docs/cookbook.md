@@ -67,11 +67,11 @@ a value that is not yours:
 shim demo claude
 ```
 
-The demo runs the detector on a synthetic sentence, ignoring your settings, and
-shows what it finds and how it would be masked. The output is the same for
-every client: it does not show what your client's hook does with a finding.
-Codex only reports, and a Claude Code prompt is reported, not changed, by
-default. The demo installs nothing and touches no hook. To see the hook itself
+The demo runs the detector on a synthetic sentence, ignoring your settings,
+shows it before and after masking, and says what your client does by default
+with a prompt or a tool result like it: Claude Code reports a typed prompt and
+masks a tool result, Codex reports, GitHub Copilot CLI masks the prompt. The
+demo installs nothing and touches no hook. To see the hook itself
 work in a live session, use the check in
 [the README's Install section](../README.md#install).
 
