@@ -1,0 +1,50 @@
+name: Detection report (missed or false positive)
+description: shim missed a value it should find, or flagged one it should not.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A value shim missed is the report we value most: it is the one nobody else sees.
+
+        **Do not paste a real secret or real personal data.** Build a synthetic value with the
+        same shape: same prefix, same length, same separators, made-up digits.
+        This issue is public.
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What happened
+      options:
+        - Missed (a value that should be found was not)
+        - False positive (something that is not sensitive was flagged)
+    validations:
+      required: true
+  - type: input
+    id: entity
+    attributes:
+      label: Entity type
+      description: The type shim should or should not have reported, such as SECRET, EMAIL, IBAN, PHONE or TR_NATIONAL_ID.
+    validations:
+      required: true
+  - type: textarea
+    id: example
+    attributes:
+      label: Synthetic example
+      description: The smallest text that shows it, with a made-up value, and where it came from (a typed prompt, a file the agent read, command output).
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: Expected and seen
+      description: What you expected, and what `echo '<your example>' | shim redact` or `shim scan --json` printed.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: shim version
+      placeholder: shim 1.2.1
+    validations:
+      required: true

@@ -1,0 +1,51 @@
+name: Bug report
+description: shim-cli did something wrong, or did not do what the docs say.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Do not paste a real secret or real personal data here, not even a revoked one.**
+        Use a synthetic example instead: `AKIAIOSFODNN7EXAMPLE`, `ops@example.com`,
+        `GB82WEST12345698765432`. This issue is public.
+  - type: input
+    id: version
+    attributes:
+      label: shim version
+      description: The output of `shim --version`, or the plugin version if you use only the plugin.
+      placeholder: shim 1.2.1
+    validations:
+      required: true
+  - type: input
+    id: client
+    attributes:
+      label: Client and its version
+      placeholder: Claude Code 2.1.286, Codex CLI 0.159.0, GitHub Copilot CLI 1.0.85 or VS Code 1.140.0
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: macOS 26.4 arm64, Ubuntu 24.04 x86_64
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: shim doctor output
+      description: The output of `shim doctor <client> --json` (VS Code has no doctor target; leave this empty). It holds paths on your machine; edit your user name out if you like.
+      render: json
+  - type: textarea
+    id: steps
+    attributes:
+      label: What you did
+      description: The commands or the prompt, with synthetic values.
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: What you expected, and what happened
+    validations:
+      required: true

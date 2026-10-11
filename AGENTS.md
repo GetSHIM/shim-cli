@@ -29,6 +29,8 @@ Apply the `ponytail:ponytail` and `code-writing-guidelines` skills to every impl
   `guard/entities.py`; malformed or unsafe settings fail closed, and no
   settings field may contain prompt-derived data.
 - Never modify real user configuration in development or tests; use temporary paths.
+- Rebuild `plugins/shim-cli/bin/shim.pyz` only in a release commit: the plugin
+  installs from `main`, so a rebuilt archive ships unreleased code to its users.
 - This repository is public and much of its documentation and corpus comes from
   running the tool for real. Nothing committed may carry the machine it was
   written on — a home directory, an editor path, a scratch directory, a
