@@ -21,6 +21,19 @@ What a finding holds:
 | `remediation` | `text` in English and Turkish; `action` is `{"kind": "cli.command", "params": {"command": ...}}` when the fix is one shim command, else `null`; `reversible`; `mode` is always `suggest`, because shim-cli never applies a fix itself |
 | `playbook` | This page or the error-code table, with an anchor |
 
+**Recomputing an id.** `id` is the UUID version 5 of
+`<rule_id>|<subject.kind>|<subject.id>` in the namespace
+`753f9b9f-aab5-47d4-9ca6-bb5893974601`. The doctor finding for a missing Claude
+Code hook is always the same:
+
+```python
+import uuid
+
+namespace = uuid.UUID("753f9b9f-aab5-47d4-9ca6-bb5893974601")
+uuid.uuid5(namespace, "cli.doctor.hook_not_installed|app|claude")
+# UUID('19a357c5-2de9-5f0f-9fbe-780ca24ca24f')
+```
+
 Every sentence in a finding comes from a fixed template filled with the
 client's name and the finding's own numbers. No path, value, command line, tool
 name or check detail reaches one: the session record behind a `report:record`

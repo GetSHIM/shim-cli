@@ -996,7 +996,9 @@ def test_report_says_none_when_neither_source_has_anything() -> None:
     assert document["findings"] == []
 
 
-def test_report_json_carries_a_finding_for_a_value_a_failed_call_printed() -> None:
+def test_report_json_carries_a_finding_for_a_value_a_failed_call_printed(
+    valid_findings,
+) -> None:
     from shim_cli.session import spool
 
     spool.append("live", {"action": "mask", "entities": {"SECRET": 1}})
@@ -1013,9 +1015,13 @@ def test_report_json_carries_a_finding_for_a_value_a_failed_call_printed() -> No
         },
     )
 
+    spool.append("live", {"markers": ["HIDDEN_TEXT"], "note": "partial: 1 field"})
+
     document = json.loads(runner.invoke(app, ["report", "--json"]).output)
 
-    (finding,) = document["findings"]
+    finding, uninspected, markers = valid_findings(document)
+    assert uninspected["rule_id"] == "cli.session.not_inspected"
+    assert markers["rule_id"] == "cli.session.injection_markers"
     assert finding["rule_id"] == "cli.session.unmasked_values"
     assert finding["evidence"] == [{"kind": "cli_session", "id": "report:record:2"}]
     assert finding["measurements"] == {"events": 1, "entities_secret": 2}
@@ -2764,7 +2770,7 @@ def test_doctor_json_carries_detail_code_and_fix(monkeypatch, tmp_path: Path) ->
     ],
 )
 def test_doctor_json_on_a_healthy_install_holds_only_informational_findings(
-    client: str, expected: list[str], monkeypatch, tmp_path: Path
+    client: str, expected: list[str], monkeypatch, tmp_path: Path, valid_findings
 ) -> None:
     make_home, make_client, _events = _CLIENT_FIXTURES[client]
     make_home(monkeypatch, tmp_path)
@@ -2775,13 +2781,13 @@ def test_doctor_json_on_a_healthy_install_holds_only_informational_findings(
     payload = json.loads(result.stdout)
 
     assert result.exit_code == 0
-    assert [finding["rule_id"] for finding in payload["findings"]] == expected
+    assert [finding["rule_id"] for finding in valid_findings(payload)] == expected
     assert {finding["severity"] for finding in payload["findings"]} == {"informational"}
     assert len(payload["checks"]) > len(payload["findings"])
 
 
 def test_doctor_json_on_a_broken_install_names_each_fix(
-    monkeypatch, tmp_path: Path
+    monkeypatch, tmp_path: Path, valid_findings
 ) -> None:
     _claude_home(monkeypatch, tmp_path)
     _claude(monkeypatch, tmp_path)
@@ -2789,7 +2795,8 @@ def test_doctor_json_on_a_broken_install_names_each_fix(
 
     result = runner.invoke(app, ["doctor", "claude", "--json"])
     findings = {
-        finding["rule_id"]: finding for finding in json.loads(result.stdout)["findings"]
+        finding["rule_id"]: finding
+        for finding in valid_findings(json.loads(result.stdout))
     }
 
     assert result.exit_code == 2

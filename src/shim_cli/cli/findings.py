@@ -13,13 +13,15 @@ from typing import NamedTuple
 
 from shim_cli.events.injection import MARKERS
 from shim_cli.guard import ENTITY_TYPES
-from shim_cli.session.record import NOT_INSPECTED
-from shim_cli.session.summary import FAILED_EVENT, MODEL_OUTPUT
+from shim_cli.session import summary
 from shim_cli.watch.measure import TRUNCATED
 
 NAMESPACE = uuid.UUID("753f9b9f-aab5-47d4-9ca6-bb5893974601")
 LARGE_TOOL_RESULT_BYTES = 25_000
 MAX_EVIDENCE = 20
+# No hook event holds more: it reads at most a million characters
+# (events.payload.MAX_TEXT_CHARACTERS), so a larger count is a corrupt record.
+MAX_COUNT = 1_000_000
 NAMES = {
     "claude": "Claude Code",
     "codex": "Codex",
@@ -36,22 +38,11 @@ class Rule(NamedTuple):
     title: str
     summary: tuple[str, str]
     text: tuple[str, str]
-    severity: str
-    risk_class: str
+    severity: str = "low"
+    risk_class: str = "reliability"
     command: str | None = None
     reversible: bool = True
     playbook: str = _DOCTOR_PLAYBOOK
-
-
-def _doctor(
-    title: str,
-    summary: tuple[str, str],
-    text: tuple[str, str],
-    risk_class: str = "reliability",
-    command: str | None = None,
-    severity: str = "low",
-) -> Rule:
-    return Rule(title, summary, text, severity, risk_class, command)
 
 
 def _playbook(rule_id: str) -> str:
@@ -60,7 +51,7 @@ def _playbook(rule_id: str) -> str:
 
 # A doctor finding is `high` when its check failed; `severity` is its WARN level.
 DOCTOR = {
-    "CLIENT_NOT_FOUND": _doctor(
+    "CLIENT_NOT_FOUND": Rule(
         "Client not found on PATH",
         (
             "{name} is not on PATH, so shim cannot check it.",
@@ -72,7 +63,7 @@ DOCTOR = {
             "PATH'e ekleyin.",
         ),
     ),
-    "CLIENT_VERSION_UNKNOWN": _doctor(
+    "CLIENT_VERSION_UNKNOWN": Rule(
         "Client version unreadable",
         (
             "{name} did not report a version shim can read.",
@@ -84,7 +75,7 @@ DOCTOR = {
             "uygulamasını yeniden kurun.",
         ),
     ),
-    "CLIENT_TOO_OLD": _doctor(
+    "CLIENT_TOO_OLD": Rule(
         "Client older than supported",
         (
             "{name} is older than the oldest version shim supports.",
@@ -96,7 +87,7 @@ DOCTOR = {
             "güncelleyin.",
         ),
     ),
-    "CLIENT_NEWER_THAN_TESTED": _doctor(
+    "CLIENT_NEWER_THAN_TESTED": Rule(
         "Client newer than tested",
         (
             "{name} is newer than the version shim was tested against.",
@@ -109,7 +100,7 @@ DOCTOR = {
             "raporlanmalı.",
         ),
     ),
-    "CODEX_HOOKS_DISABLED": _doctor(
+    "CODEX_HOOKS_DISABLED": Rule(
         "Codex hooks disabled",
         (
             "Codex reports hooks as off, so no prompt reaches shim.",
@@ -121,9 +112,9 @@ DOCTOR = {
             "Codex'in config.toml dosyasında [features] altında hooks = true yapın "
             "ya da o satırı silin.",
         ),
-        "privacy",
+        risk_class="privacy",
     ),
-    "CODEX_HOOKS_UNCHECKED": _doctor(
+    "CODEX_HOOKS_UNCHECKED": Rule(
         "Codex hook support unchecked",
         (
             "codex features list could not be run, so shim cannot tell whether "
@@ -136,7 +127,7 @@ DOCTOR = {
             "codex features list komutunu çalıştırın; hooks değeri true görünmeli.",
         ),
     ),
-    "LEGACY_NAMES_PRESENT": _doctor(
+    "LEGACY_NAMES_PRESENT": Rule(
         "0.2.0 names left on disk",
         (
             "A 0.2.0 hook, settings file or ledger is still on disk for {name}.",
@@ -151,7 +142,7 @@ DOCTOR = {
             "ya da değiştirir.",
         ),
     ),
-    "HOOK_NOT_INSTALLED": _doctor(
+    "HOOK_NOT_INSTALLED": Rule(
         "Hook not installed",
         (
             "shim's hook is not in the {name} settings file, so nothing is inspected.",
@@ -161,10 +152,10 @@ DOCTOR = {
             f"Run {_INSTALL}, then start a new {{name}} session.",
             f"{_INSTALL_TR}, ardından yeni bir {{name}} oturumu başlatın.",
         ),
-        "privacy",
-        _INSTALL,
+        risk_class="privacy",
+        command=_INSTALL,
     ),
-    "DETECTION_DISABLED": _doctor(
+    "DETECTION_DISABLED": Rule(
         "Detection disabled",
         (
             "Every entity type is turned off, so shim finds nothing.",
@@ -176,9 +167,9 @@ DOCTOR = {
             "Gereken türleri shim config --enable ENTITY --yes ile yeniden açın; "
             "shim config hepsini listeler.",
         ),
-        "privacy",
+        risk_class="privacy",
     ),
-    "CUSTOM_PATTERN_UNSAFE": _doctor(
+    "CUSTOM_PATTERN_UNSAFE": Rule(
         "Custom pattern backtracks",
         (
             "A custom pattern in shim's settings backtracks and could overrun the "
@@ -193,7 +184,7 @@ DOCTOR = {
             "kaldırın.",
         ),
     ),
-    "HOOK_RUNNER_FAILED": _doctor(
+    "HOOK_RUNNER_FAILED": Rule(
         "Hook runner failed its fixtures",
         (
             "The hook did not pass its own safe and sensitive fixtures.",
@@ -204,9 +195,9 @@ DOCTOR = {
             "shim'i yeniden kurun: uv tool install --reinstall shim ya da pipx "
             "reinstall shim.",
         ),
-        "privacy",
+        risk_class="privacy",
     ),
-    "HOOK_RESOLUTION_FAILED": _doctor(
+    "HOOK_RESOLUTION_FAILED": Rule(
         "No runnable hook",
         (
             "No shim hook is runnable for {name}, so prompts pass uninspected.",
@@ -214,10 +205,10 @@ DOCTOR = {
             "denetlenmeden geçiyor.",
         ),
         (f"Run {_INSTALL}.", f"{_INSTALL_TR}."),
-        "privacy",
-        _INSTALL,
+        risk_class="privacy",
+        command=_INSTALL,
     ),
-    "ARCHIVE_VERSION_SKEW": _doctor(
+    "ARCHIVE_VERSION_SKEW": Rule(
         "Plugin archive and package differ",
         (
             "The plugin's bundled hook archive and the shim package are different "
@@ -232,7 +223,7 @@ DOCTOR = {
             "etiketine geçin.",
         ),
     ),
-    "PLUGIN_NOT_DISCOVERABLE": _doctor(
+    "PLUGIN_NOT_DISCOVERABLE": Rule(
         "Plugin install not discoverable",
         (
             "shim cannot see whether {name} also has the shim plugin installed.",
@@ -246,7 +237,7 @@ DOCTOR = {
         ),
         severity="informational",
     ),
-    "DUPLICATE_HOOKS": _doctor(
+    "DUPLICATE_HOOKS": Rule(
         "shim registered twice",
         (
             "shim is registered twice for {name}, so every event is inspected twice.",
@@ -258,9 +249,9 @@ DOCTOR = {
             "Birini bırakın: shim revert {client} --yes ayar kancasını kaldırır ya "
             "da shim doctor {client} çıktısının belirttiği eklentiyi kaldırın.",
         ),
-        "privacy",
+        risk_class="privacy",
     ),
-    "SESSION_RECORDS_UNWRITABLE": _doctor(
+    "SESSION_RECORDS_UNWRITABLE": Rule(
         "Session records unwritable",
         (
             "Session records cannot be written; masking still works but no "
@@ -274,7 +265,7 @@ DOCTOR = {
             "klasörünü 700 izniyle size ait yapın.",
         ),
     ),
-    "HOOK_EVENTS_MISSING": _doctor(
+    "HOOK_EVENTS_MISSING": Rule(
         "Hook events missing",
         (
             "Fewer {name} events are installed than shim can cover.",
@@ -284,10 +275,10 @@ DOCTOR = {
             f"Run {_INSTALL}, then start a new {{name}} session.",
             f"{_INSTALL_TR}, ardından yeni bir {{name}} oturumu başlatın.",
         ),
-        "privacy",
-        _INSTALL,
+        risk_class="privacy",
+        command=_INSTALL,
     ),
-    "HOOK_ACTIVATION_UNVERIFIED": _doctor(
+    "HOOK_ACTIVATION_UNVERIFIED": Rule(
         "Hook activation unverified",
         (
             "Whether {name} runs the hook is client state shim cannot read.",
@@ -302,7 +293,7 @@ DOCTOR = {
         ),
         severity="informational",
     ),
-    "SETTINGS_INVALID": _doctor(
+    "SETTINGS_INVALID": Rule(
         "shim settings invalid",
         (
             "shim's settings file does not parse or holds a value shim does not "
@@ -318,9 +309,9 @@ DOCTOR = {
             "dosya ayrıştırılana kadar düzeltin. Son çare olarak shim config "
             "--reset --yes baştan başlar ve tüm ayarları siler.",
         ),
-        "privacy",
+        risk_class="privacy",
     ),
-    "SETTINGS_REFUSED": _doctor(
+    "SETTINGS_REFUSED": Rule(
         "shim settings refused",
         (
             "shim's settings file was refused as unsafe, so every prompt is withheld.",
@@ -334,9 +325,9 @@ DOCTOR = {
             "bir klasörde duran normal bir dosya yapın; shim doctor {client} --json "
             "çıktısındaki fix tam komutu verir.",
         ),
-        "privacy",
+        risk_class="privacy",
     ),
-    "CLIENT_SETTINGS_UNREADABLE": _doctor(
+    "CLIENT_SETTINGS_UNREADABLE": Rule(
         "Client settings unreadable",
         (
             "The {name} settings file could not be inspected.",
@@ -347,7 +338,7 @@ DOCTOR = {
             "{name} ayar dosyasını ve klasörünü sizin okuyabileceğiniz hâle getirin.",
         ),
     ),
-    "CLIENT_SETTINGS_MALFORMED": _doctor(
+    "CLIENT_SETTINGS_MALFORMED": Rule(
         "Client settings malformed",
         (
             "The {name} settings file does not parse, so shim will not change it.",
@@ -360,7 +351,7 @@ DOCTOR = {
             "zamana kadar shim install onu değiştirmez.",
         ),
     ),
-    "CLIENT_SETTINGS_UNSAFE": _doctor(
+    "CLIENT_SETTINGS_UNSAFE": Rule(
         "Client settings unsafe",
         (
             "The {name} settings file is a link, someone else's, or otherwise unsafe.",
@@ -546,13 +537,16 @@ def _utc(moment: datetime.datetime) -> str:
 
 
 def _parsed(stamp: object) -> datetime.datetime | None:
+    """The moment a record names, in UTC; None without an offset or a reading."""
     if not isinstance(stamp, str):
         return None
     try:
         moment = datetime.datetime.fromisoformat(stamp.replace("Z", "+00:00"))
-    except ValueError:
+        if moment.utcoffset() is None:
+            return None
+        return moment.astimezone(datetime.timezone.utc)
+    except (ValueError, OverflowError):
         return None
-    return moment if moment.utcoffset() == datetime.timedelta(0) else None
 
 
 def _finding(
@@ -641,21 +635,9 @@ def from_checks(client: str, checks: list, now: datetime.datetime) -> list[dict]
     ]
 
 
-def _unmasked(record: dict) -> bool:
-    action = record.get("action")
-    return record.get("direction") != MODEL_OUTPUT and (
-        action == "unmasked"
-        or (action == "report" and record.get("event") == FAILED_EVENT)
-    )
-
-
-def _note(record: dict, prefixes: tuple) -> bool:
-    note = record.get("note")
-    return isinstance(note, str) and note.startswith(prefixes)
-
-
 def _counted(records: list, key: str, names: tuple, prefix: str) -> dict:
-    """Counts by name, for names of shim's own vocabulary only."""
+    """Counts by name, for names of shim's own vocabulary only. A count no
+    event can hold is skipped."""
     counts: dict = {}
     for record in records:
         found = record.get(key)
@@ -666,7 +648,7 @@ def _counted(records: list, key: str, names: tuple, prefix: str) -> dict:
         else:
             continue
         for name, count in pairs:
-            if name in names and type(count) is int:
+            if name in names and type(count) is int and 0 < count <= MAX_COUNT:
                 measure = f"{prefix}{name.lower()}"
                 counts[measure] = counts.get(measure, 0) + count
     return counts
@@ -675,6 +657,8 @@ def _counted(records: list, key: str, names: tuple, prefix: str) -> dict:
 def from_records(records: list, now: datetime.datetime) -> list[dict]:
     """Findings for one session's records, in spool order. `now` stands in for
     the window only when no qualifying record carries a readable timestamp."""
+    ordinals = {id(record): ordinal for ordinal, record in enumerate(records, 1)}
+    records = [record for record in records if isinstance(record, dict)]
     found = []
 
     def add(rule_id: str, chosen: list, measurements: dict, impact: dict) -> None:
@@ -682,60 +666,51 @@ def from_records(records: list, now: datetime.datetime) -> list[dict]:
             return
         moments = sorted(
             moment
-            for _, record in chosen
+            for record in chosen
             if (moment := _parsed(record.get("ts"))) is not None
         ) or [now]
-        client = chosen[0][1].get("client")
-        client = client if client in NAMES else OTHER
+        client = chosen[0].get("client")
+        client = client if isinstance(client, str) and client in NAMES else OTHER
         found.append(
             _finding(
                 rule_id,
                 {"kind": "app", "id": client},
                 (_utc(moments[0]), _utc(moments[-1])),
                 len(chosen),
-                [f"report:record:{ordinal}" for ordinal, _ in chosen],
+                [f"report:record:{ordinals[id(record)]}" for record in chosen],
                 measurements,
                 impact,
                 client=client,
             )
         )
 
-    numbered = [
-        (ordinal, record)
-        for ordinal, record in enumerate(records, 1)
-        if isinstance(record, dict)
-    ]
-    unmasked = [pair for pair in numbered if _unmasked(pair[1])]
+    acted = summary.acted_on(records)
+    unmasked = [record for record in acted if summary.action_of(record) == "unmasked"]
     add(
         "cli.session.unmasked_values",
         unmasked,
         {
             "events": len(unmasked),
-            **_counted([r for _, r in unmasked], "entities", ENTITY_TYPES, "entities_"),
+            **_counted(unmasked, "entities", ENTITY_TYPES, "entities_"),
         },
         {"requests": len(unmasked)},
     )
-    skipped = (NOT_INSPECTED, "not-inspected:")
-    partial = ("partial:", "not-inspected:")
-    uninspected = [pair for pair in numbered if _note(pair[1], skipped + partial)]
+    skipped = summary.uninspected(records)
+    partial = summary.incomplete(records)
+    either = {id(record) for record in skipped + partial}
     add(
         "cli.session.not_inspected",
-        uninspected,
-        {
-            "not_inspected": sum(_note(r, skipped) for _, r in uninspected),
-            "incomplete": sum(_note(r, partial) for _, r in uninspected),
-        },
+        [record for record in records if id(record) in either],
+        {"not_inspected": len(skipped), "incomplete": len(partial)},
         {},
     )
     markers = [
-        (ordinal, record)
-        for ordinal, record in numbered
-        if _counted([record], "markers", MARKERS, "markers_")
+        record for record in records if _counted([record], "markers", MARKERS, "")
     ]
     add(
         "cli.session.injection_markers",
         markers,
-        _counted([r for _, r in markers], "markers", MARKERS, "markers_"),
+        _counted(markers, "markers", MARKERS, "markers_"),
         {},
     )
     return found

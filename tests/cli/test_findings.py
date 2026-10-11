@@ -294,6 +294,33 @@ def test_a_record_without_a_known_client_or_a_time_is_still_a_finding() -> None:
     )
 
 
+def test_a_corrupt_spool_never_raises_and_its_counts_stay_sane() -> None:
+    records = [
+        "not a record",
+        _failed(client=["claude"], entities={"SECRET": -3, "EMAIL": 10**40}),
+        _failed(
+            client={"id": 1}, entities={"SECRET": 2}, ts="2026-10-11T23:05:00+03:00"
+        ),
+        _failed(entities={"EMAIL": True}, ts="9999-12-31T23:59:59-01:00"),
+        _failed(entities={"EMAIL": 1}, ts="2026-10-11T20:07:00"),
+    ]
+
+    (finding,) = _valid(from_records(records, NOW))
+
+    assert finding["subject"] == {"kind": "app", "id": "other"}
+    assert finding["occurrences"] == 4
+    assert finding["measurements"] == {
+        "events": 4,
+        "entities_secret": 2,
+        "entities_email": 1,
+    }
+    # Any offset is read as the moment it names; a time without one is not.
+    assert finding["window"] == {
+        "start": "2026-10-11T20:00:00Z",
+        "end": "2026-10-11T20:05:00Z",
+    }
+
+
 def test_evidence_stops_at_twenty_references() -> None:
     records = [_failed(entities={"SECRET": 1}) for _ in range(25)]
 

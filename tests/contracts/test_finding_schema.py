@@ -6,11 +6,13 @@ gives an agent a shape or a page shim does not have.
 from __future__ import annotations
 
 import ast
+import datetime
 import hashlib
 import re
 from pathlib import Path
 
-from shim_cli.cli.findings import DOCTOR, RULES
+from shim_cli.cli.findings import DOCTOR, NAMESPACE, RULES, from_checks
+from shim_cli.cli.output import Check
 
 try:
     import tomllib
@@ -62,6 +64,18 @@ def test_every_findings_heading_names_a_rule() -> None:
     assert set(headings) == {
         rule_id for rule_id in RULES if not rule_id.startswith("cli.doctor.")
     }
+
+
+def test_the_documented_id_recipe_is_the_one_in_use() -> None:
+    text = (ROOT / "docs" / "findings.md").read_text(encoding="utf-8")
+    check = Check("hook_configuration", "FAIL", "", code="HOOK_NOT_INSTALLED")
+    (finding,) = from_checks(
+        "claude", [check], datetime.datetime.now(datetime.timezone.utc)
+    )
+
+    assert f'uuid.UUID("{NAMESPACE}")' in text
+    assert '"cli.doctor.hook_not_installed|app|claude"' in text
+    assert f"UUID('{finding['id']}')" in text
 
 
 def test_every_doctor_code_has_a_rule() -> None:
