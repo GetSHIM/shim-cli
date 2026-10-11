@@ -89,6 +89,10 @@ def test_the_json_report_carries_both_directions(monkeypatch):
     assert document["response_scan"] == "known"
     assert document["stop_reasons"] == {"max_tokens": 1}
     assert document["exchanges"][0]["response_scan_status"] == "known"
+    (finding,) = document["findings"]
+    assert finding["rule_id"] == "cli.watch.output_cut_off"
+    assert finding["subject"] == {"kind": "model", "id": "claude-sonnet-5"}
+    assert finding["window"]["start"] <= finding["window"]["end"]
 
 
 @pytest.mark.parametrize("as_json", [False, True])

@@ -27,7 +27,10 @@ the text layout is not a stable interface and the JSON is. An error is an
 object with `"status": "error"`, the sentence the human output prints in
 `error`, a stable `code` and a `fix` (or `null`); read `code`, not `error`,
 whose wording may change. Every code is listed under [Error
-codes](#error-codes).
+codes](#error-codes). `doctor`, `report` and `watch` also carry `findings`:
+each problem they found in the gateway's published finding schema v1, vendored
+at [`docs/schemas/finding-v1.json`](schemas/finding-v1.json) and explained in
+[Findings](findings.md). An empty list means nothing fired.
 
 **`--yes`** skips the confirmation prompt on the commands that change or delete
 a file (`install`, `revert`, `config`, `ledger purge`). Without it they ask
@@ -243,8 +246,12 @@ Each client adds one more, such as `WARN Codex 0.160.0 is newer than tested
 `FAIL` exits `2`.
 
 `--json` writes `checks`, each with `name`, `status`, `detail`, `code` and
-`fix` ([Error codes](#error-codes)), and the `coverage` rows. An agent fixing
-an install reads `fix` from the first check whose `status` is `FAIL` or `WARN`.
+`fix` ([Error codes](#error-codes)), the `coverage` rows, and `findings`: one
+per check that is not `PASS`, with `rule_id` `cli.doctor.<code>`, and the fix
+as `remediation.action.params.command` when it is one shim command
+([Findings](findings.md)). An agent fixing an install reads `fix` from the
+first check whose `status` is `FAIL` or `WARN`. A healthy Claude Code install
+has one `informational` finding and Codex two, for the warnings above.
 
 Doctor cannot see whether the client runs the hook. To see it run:
 
@@ -367,6 +374,12 @@ Exits `1` when there is no session to show. `--json` exits `0` even then, with
 `"source": "none"`, so a script must check that field: it is `"session"` for a
 live record and `"ledger"` for a retained one.
 
+`--json` also carries `findings` ([Findings](findings.md)):
+`cli.session.unmasked_values` when a failed call printed a value,
+`cli.session.not_inspected` when something passed uninspected, and
+`cli.session.injection_markers` when a result read as instructions. Their
+`evidence` points at records by number, `report:record:2`, never at a file.
+
 ### `shim ledger show`
 
 The ledger is an opt-in record that outlives a session, kept for 30 days. It is
@@ -474,6 +487,7 @@ the last line. Three of its fields say what a figure covers:
 | `duplicates_in_flight` | top level | `count` and the `input_tokens` billed again |
 | `image_count`, `estimated_image_tokens`, `cache_rewrite`, `duplicate_in_flight` | each of `exchanges` | the same, per request |
 | `auth_route` | each of `exchanges` | `"api-key"` (an `x-api-key` header), `"subscription"` (`authorization` and no `x-api-key`), `""` (neither) |
+| `findings` | top level | one per waste line above, in [finding schema v1](findings.md): `cli.watch.cache_rewrite` and `cli.watch.output_cut_off` per model, `cli.watch.duplicate_in_flight`, `cli.watch.image_tokens`, and `cli.watch.large_tool_result` above 25,000 bytes; `evidence` names requests as `watch:exchange:<n>` |
 | `response_scan_reason` | each of `exchanges` | `""` when the response was scanned; the request's `incomplete_reason` (`"slots busy"`, `"body too large"`, `"not JSON"`, `"too many fields"`) when it was not measured; otherwise `"unavailable"` or `"partial"` |
 
 **Claude Code only.** Codex is refused with a reason: it reads its endpoint
@@ -644,7 +658,7 @@ and a partial one would be worth guessing at.
 ```console
 shim config --ledger --yes      # keep records past the session; off by default
 shim config --no-ledger --yes
-shim config --diet --yes        # shrink tool results losslessly; on by default
+shim config --diet --yes        # back to the default diet, json only; on by default
 shim config --no-diet --yes
 shim config --reset --yes       # back to defaults; discards every setting
 ```
@@ -826,8 +840,9 @@ enabled_entities = ["EMAIL", "SECRET", "DB_URI", "IBAN", "CUSTOM"]
 # Keep records past the end of a session, for 30 days. Default: false.
 ledger = false
 
-# Shrink tool results losslessly before the model sees them.
-# true, false, or a list naming individual transforms: "json", "whitespace".
+# Shrink tool results before the model sees them. true (the default, "json"
+# only), false, or a list naming transforms: "json" (lossless), "html" (a whole
+# HTML page in command or MCP output becomes text) and "whitespace".
 diet = true
 
 # Tell the model when a Claude Code tool result reads as instructions.

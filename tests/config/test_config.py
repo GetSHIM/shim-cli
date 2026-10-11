@@ -336,3 +336,27 @@ def test_the_marker_setting_is_read_written_only_when_note_and_kept(
 def test_an_unknown_marker_setting_fails_closed(value: str) -> None:
     with pytest.raises(ValueError):
         parse_settings(f"markers = {value}\n")
+
+
+@pytest.mark.parametrize(
+    "names,stored",
+    (
+        ('["html"]', ("html",)),
+        ('["html", "json"]', ("json", "html")),
+        ('["whitespace", "html", "json"]', ("json", "html", "whitespace")),
+    ),
+)
+def test_the_html_transform_is_accepted_in_canonical_order(names, stored) -> None:
+    assert parse_settings(f"diet = {names}\n")["diet"] == stored
+
+
+@pytest.mark.parametrize("names", ('["html", "pdf"]', '["HTML"]', '"html"'))
+def test_an_unknown_transform_beside_html_fails_closed(names: str) -> None:
+    with pytest.raises(ValueError, match="shim settings are invalid"):
+        parse_settings(f"diet = {names}\n")
+
+
+def test_a_named_html_transform_survives_a_settings_round_trip() -> None:
+    rendered = render_settings(("EMAIL",), diet=("json", "html")).decode()
+
+    assert parse_settings(rendered)["diet"] == ("json", "html")

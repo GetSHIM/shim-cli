@@ -46,6 +46,7 @@ shim-hook = "shim_cli.hook:main"
 
 [dependency-groups]
 dev = [
+  "jsonschema>=4.26.0,<5",
   "pytest>=9.0.3,<10",
   "ruff>=0.15.22,<0.16",
   # Vendored for Python 3.10.

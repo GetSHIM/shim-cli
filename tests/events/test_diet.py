@@ -34,6 +34,9 @@ SAMPLES = (
     "{",
     '{"unterminated": "string',
     "[1, 2, 3]" + " " * 80,
+    "<!doctype html><html><head><title>Page</title></head><body><h1>Title</h1>"
+    + "<div class='row'><p>cell</p></div>   \n" * 80
+    + "</body></html>",
 )
 
 
@@ -59,7 +62,8 @@ def test_transforms_are_deterministic_across_processes() -> None:
         "import json,sys\n"
         "from shim_cli.events import diet\n"
         "samples = json.loads(sys.stdin.read())\n"
-        "sys.stdout.write(json.dumps([diet.shrink(t) for t in samples]))\n"
+        "sys.stdout.write(json.dumps([diet.shrink(t, (n,)) "
+        "for t in samples for n in diet.TRANSFORMS]))\n"
     )
     runs = []
     for seed in ("0", "1", "12345"):
@@ -84,9 +88,20 @@ def test_transforms_are_deterministic_across_processes() -> None:
 
 @pytest.mark.parametrize("text", SAMPLES)
 def test_a_transform_never_makes_text_longer(text: str) -> None:
-    shrunk, _applied = diet.shrink(text)
+    for name in diet.TRANSFORMS:
+        shrunk, _applied = diet.shrink(text, (name,))
+        assert len(shrunk) <= len(text), name
 
-    assert len(shrunk) <= len(text)
+
+def test_html_is_opt_in_and_runs_between_json_and_whitespace() -> None:
+    page = SAMPLES[-1]
+
+    assert diet.HTML_TEXT not in diet.DEFAULT_TRANSFORMS
+    assert diet.TRANSFORMS == ("json", "html", "whitespace")
+    assert diet.shrink(page) == (page, ())
+    shrunk, applied = diet.shrink(page, diet.TRANSFORMS)
+    assert applied == (diet.HTML_TEXT,)
+    assert shrunk.split("\n")[1:4] == ["Page", "# Title", "cell"]
 
 
 def test_json_compaction_preserves_the_parsed_value() -> None:

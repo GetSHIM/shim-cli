@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 import sys
 
 import typer
@@ -53,8 +54,17 @@ def report(*, as_json: bool) -> None:
         source = "ledger" if records else "none"
 
     if as_json:
+        from shim_cli.cli.findings import from_records
+
+        now = datetime.datetime.now(datetime.timezone.utc)
         document = summary.as_json(records, truncated)
-        emit_json("report", "ok", source=source, **document)
+        emit_json(
+            "report",
+            "ok",
+            source=source,
+            findings=from_records(records, now),
+            **document,
+        )
         return
 
     if not records:

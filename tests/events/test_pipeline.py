@@ -786,3 +786,84 @@ def test_a_bash_result_under_report_is_unchanged() -> None:
     assert outcome.output == (
         b'{"systemMessage":"shim: found SECRET (1) in Bash. Not modified."}'
     )
+
+
+PAGE = (
+    "<!doctype html><html><head><title>Status</title><style>p{}</style></head>"
+    "<body><h1>Service status</h1><h2>Second heading</h2>"
+    "<p>Contact ops@example.com for access.</p>"
+    + "<div class='row'><span class='cell'>ok</span></div>\n" * 60
+    + "</body></html>"
+)
+
+
+def _bash(stdout: str) -> bytes:
+    return json.dumps(
+        {
+            "hook_event_name": "PostToolUse",
+            "session_id": "s",
+            "tool_name": "Bash",
+            "tool_input": {"command": "curl -s http://127.0.0.1:8000/page.html"},
+            "tool_response": {
+                "stdout": stdout,
+                "stderr": "",
+                "interrupted": False,
+                "isImage": False,
+                "noOutputExpected": False,
+            },
+        }
+    ).encode()
+
+
+def test_a_page_in_command_output_is_text_only_when_html_is_on() -> None:
+    default = _process(_bash(PAGE), ENFORCE, diet=DEFAULT_TRANSFORMS)
+    converted = _process(_bash(PAGE), ENFORCE, diet=("json", "html"))
+
+    emitted = json.loads(default.output)["hookSpecificOutput"]["updatedToolOutput"]
+    assert "<div" in emitted["stdout"], "masked, but the markup is kept"
+    assert default.record.transforms == ()
+    stdout = json.loads(converted.output)["hookSpecificOutput"]["updatedToolOutput"][
+        "stdout"
+    ]
+    assert stdout.startswith("[shim: converted from HTML to text;")
+    assert "<div" not in stdout
+    assert "## Second heading" in stdout
+    assert "Contact <EMAIL_1> for access." in stdout, "masked before conversion"
+    assert "ops@example.com" not in stdout
+    assert converted.record.action == MASK
+    assert converted.record.transforms == ("html",)
+    assert converted.record.out_bytes < converted.record.in_bytes // 2
+
+
+def test_a_page_in_an_mcp_text_result_is_converted_too() -> None:
+    raw = _payload(
+        "PostToolUse",
+        "mcp__fetch__fetch",
+        "tool_response",
+        [{"type": "text", "text": PAGE.replace("ops@example.com", "the team")}],
+    )
+
+    outcome = _process(raw, ENFORCE, diet=("json", "html"))
+
+    result = json.loads(outcome.output)["hookSpecificOutput"]["updatedToolOutput"]
+    assert result[0]["type"] == "text"
+    assert result[0]["text"].startswith("[shim: converted from HTML to text;")
+    assert outcome.record.transforms == ("html",)
+
+
+def test_a_page_read_from_a_file_keeps_its_markup() -> None:
+    outcome = _process(
+        _read_result("/work/page.html", PAGE.replace("ops@example.com", "the team")),
+        ENFORCE,
+        diet=("json", "html", "whitespace"),
+    )
+
+    assert outcome.output == b""
+    assert outcome.record.transforms == ()
+
+
+def test_an_observed_page_is_never_converted() -> None:
+    outcome = _process(_bash(PAGE), OBSERVE, diet=("json", "html"))
+
+    assert outcome.output == b""
+    assert outcome.record.transforms == ()
