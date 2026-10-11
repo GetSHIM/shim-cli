@@ -58,12 +58,13 @@ classification and the modes and actions built on it:
 | `settings_files/` | Guarded inspection, pure change planning, parent creation, revalidation, and atomic publication. |
 | `watch/` | Proxy forwarding, wire measurement, and watch report values. |
 | `hook.py` | Deadline, bounded stdin, envelope dispatch, visible failure behavior, temporary prompt-file lifecycle, and stdout. |
-| `cli/` | Command composition and human or JSON presentation. |
+| `cli/` | Command composition and human or JSON presentation, including findings in the gateway's schema v1 (`cli/findings.py`). |
 
 The dependency direction is deliberately small:
 
 ```text
-cli  ------> config, clients, session, settings_files, watch, guard
+cli  ------> config, clients, session, settings_files, watch, guard,
+             events/diet, events/injection (names only)
 hook ------> config, clients, events, session, guard
 config ----> policy, guard/entities, settings_files, events/diet
 clients ---> policy, events, session, settings_files

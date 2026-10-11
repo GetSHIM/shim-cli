@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 import json
 import os
 import re
@@ -691,10 +692,14 @@ def doctor(*, client: str, as_json: bool) -> None:
     else:
         status = "ok"
     if as_json:
+        from shim_cli.cli.findings import from_checks
+
+        now = datetime.datetime.now(datetime.timezone.utc)
         emit_json(
             "doctor",
             status,
             client=client,
+            findings=from_checks(client, checks, now),
             checks=[
                 {
                     "name": check.name,

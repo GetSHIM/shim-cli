@@ -31,6 +31,8 @@ ALLOWED_INTERNAL_IMPORTS = {
         "shim_cli.clients",
         "shim_cli.config",
         "shim_cli.events.diet",
+        # Findings count markers only under the detector's own ids.
+        "shim_cli.events.injection",
         "shim_cli.guard",
         "shim_cli.session",
         "shim_cli.settings_files",

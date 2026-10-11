@@ -9,6 +9,7 @@ What it cannot do: a prompt typed into Claude Code or Codex cannot be masked, be
 - [README](https://github.com/GetSHIM/shim-cli/blob/main/README.md): what shim-cli does, install, the supported clients and what each one lets shim change
 - [Command reference](https://github.com/GetSHIM/shim-cli/blob/main/docs/commands.md): every command, flag, exit code, JSON error code and settings key
 - [Cookbook](https://github.com/GetSHIM/shim-cli/blob/main/docs/cookbook.md): recipes, including letting an agent run shim, blocking a secret before it leaves, CI and scripts
+- [Findings](https://github.com/GetSHIM/shim-cli/blob/main/docs/findings.md): the `findings` list of `shim doctor`, `shim report` and `shim watch` with `--json`, every rule, what it means and what to do
 - [Privacy](https://github.com/GetSHIM/shim-cli/blob/main/docs/privacy.md): what is recorded, what leaves the machine, and the limits of a best-effort guard
 - [Compatibility](https://github.com/GetSHIM/shim-cli/blob/main/docs/compatibility.md): tested client versions, live evidence and detector parity with the gateway
 - [Architecture](https://github.com/GetSHIM/shim-cli/blob/main/docs/architecture.md): the hook, the detector and the `shim watch` proxy, and who owns what

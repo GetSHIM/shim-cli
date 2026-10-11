@@ -502,7 +502,9 @@ line of its own, because the model wrote it (the daily totals of
 ```
 
 `shim report` prints the same summary on demand, and `--json` makes it
-scriptable. It reads the newest temporary spool first; if none remains, it
+scriptable. With `--json`, `shim doctor`, `shim report` and `shim watch` also
+list `findings` in shim's published schema, each with its severity, evidence
+and fix ([Findings](https://github.com/GetSHIM/shim-cli/blob/main/docs/findings.md)). It reads the newest temporary spool first; if none remains, it
 falls back to the retained ledger, if you turned that on. Claude Code deletes
 the spool when the session ends, so run `shim report` in a second terminal
 while the session is still open, or turn the ledger on first with

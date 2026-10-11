@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 import os
 import shutil
 import signal
@@ -91,6 +92,7 @@ def watch(*, command: tuple, as_json: bool) -> None:
     environment = dict(os.environ)
     environment[variable] = running.base_url
     started = time.monotonic()
+    began = datetime.datetime.now(datetime.timezone.utc)
     try:
         process = subprocess.Popen(command, env=environment)
         try:
@@ -111,8 +113,16 @@ def watch(*, command: tuple, as_json: bool) -> None:
 
     elapsed = time.monotonic() - started
     if as_json:
+        from shim_cli.cli.findings import from_watch
+
+        document = report.as_json(running.session, elapsed)
+        ended = datetime.datetime.now(datetime.timezone.utc)
         emit_json(
-            "watch", "ok", exit_code=code, **report.as_json(running.session, elapsed)
+            "watch",
+            "ok",
+            exit_code=code,
+            findings=from_watch(document, began, ended),
+            **document,
         )
         raise typer.Exit(code)
     text = report.render(running.session, elapsed)

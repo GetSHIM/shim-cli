@@ -978,6 +978,33 @@ def test_report_says_none_when_neither_source_has_anything() -> None:
     document = json.loads(runner.invoke(app, ["report", "--json"]).output)
 
     assert document["source"] == "none"
+    assert document["findings"] == []
+
+
+def test_report_json_carries_a_finding_for_a_value_a_failed_call_printed() -> None:
+    from shim_cli.session import spool
+
+    spool.append("live", {"action": "mask", "entities": {"SECRET": 1}})
+    spool.append(
+        "live",
+        {
+            "client": "claude",
+            "event": "PostToolUseFailure",
+            "action": "report",
+            "tool_name": "Bash",
+            "target": "/work/.env",
+            "entities": {"SECRET": 2},
+            "ts": "2026-10-11T20:00:00Z",
+        },
+    )
+
+    document = json.loads(runner.invoke(app, ["report", "--json"]).output)
+
+    (finding,) = document["findings"]
+    assert finding["rule_id"] == "cli.session.unmasked_values"
+    assert finding["evidence"] == [{"kind": "cli_session", "id": "report:record:2"}]
+    assert finding["measurements"] == {"events": 1, "entities_secret": 2}
+    assert document["unmasked"]["entities"] == {"SECRET": 2}
 
 
 def test_config_shows_whether_records_are_being_kept() -> None:
@@ -2706,6 +2733,58 @@ def test_doctor_json_carries_detail_code_and_fix(monkeypatch, tmp_path: Path) ->
     missing = next(c for c in before["checks"] if c["name"] == "coverage")
     assert missing["code"] == "HOOK_EVENTS_MISSING"
     assert missing["fix"] == "Run shim install claude."
+
+
+@pytest.mark.parametrize(
+    "client,expected",
+    [
+        ("claude", ["cli.doctor.hook_activation_unverified"]),
+        (
+            "codex",
+            [
+                "cli.doctor.plugin_not_discoverable",
+                "cli.doctor.hook_activation_unverified",
+            ],
+        ),
+    ],
+)
+def test_doctor_json_on_a_healthy_install_holds_only_informational_findings(
+    client: str, expected: list[str], monkeypatch, tmp_path: Path
+) -> None:
+    make_home, make_client, _events = _CLIENT_FIXTURES[client]
+    make_home(monkeypatch, tmp_path)
+    make_client(monkeypatch, tmp_path)
+    runner.invoke(app, ["install", client, "--yes"])
+
+    result = runner.invoke(app, ["doctor", client, "--json"])
+    payload = json.loads(result.stdout)
+
+    assert result.exit_code == 0
+    assert [finding["rule_id"] for finding in payload["findings"]] == expected
+    assert {finding["severity"] for finding in payload["findings"]} == {"informational"}
+    assert len(payload["checks"]) > len(payload["findings"])
+
+
+def test_doctor_json_on_a_broken_install_names_each_fix(
+    monkeypatch, tmp_path: Path
+) -> None:
+    _claude_home(monkeypatch, tmp_path)
+    _claude(monkeypatch, tmp_path)
+    _broken_settings(monkeypatch, tmp_path)
+
+    result = runner.invoke(app, ["doctor", "claude", "--json"])
+    findings = {
+        finding["rule_id"]: finding for finding in json.loads(result.stdout)["findings"]
+    }
+
+    assert result.exit_code == 2
+    assert findings["cli.doctor.settings_invalid"]["severity"] == "high"
+    assert findings["cli.doctor.settings_invalid"]["remediation"]["action"] is None
+    assert findings["cli.doctor.hook_events_missing"]["remediation"]["action"] == {
+        "kind": "cli.command",
+        "params": {"command": "shim install claude --yes"},
+    }
+    assert str(tmp_path) not in json.dumps(list(findings.values()))
 
 
 def test_the_plate_type_is_listed_off_and_can_be_turned_on(
