@@ -16,4 +16,4 @@ What it cannot do: a prompt typed into Claude Code or Codex cannot be masked, be
 
 ## Optional
 
-- [1.2.0 release notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/1.2.0.md): the newest release
+- [1.2.1 release notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/1.2.1.md): the newest release

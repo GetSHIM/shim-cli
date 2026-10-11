@@ -202,6 +202,35 @@ tool listings). `history.jsonl`, beside `projects/`, holds one line per
 interactive prompt with the keys `display`, `pastedContents`, `project`,
 `sessionId` and `timestamp`; `sessionId` is the transcript's file name.
 
+## 1.2.1 release evidence
+
+Recorded 11 October 2026 on macOS 26.4 arm64 (8 GB), uv 0.12.5, pipx 1.11.0.
+The trials ran first on the released 1.2.0 from PyPI, which is what a visitor
+installs, and the short re-check at the end ran on the 1.2.1 candidate wheel
+and rebuilt `bin/shim.pyz`. Every trial used a scratch home (`HOME`, the XDG
+folders, uv and pipx folders, `CODEX_HOME`, `COPILOT_HOME` and `TMPDIR`
+inside it). Claude Code cannot sign in under a scratch home, so its live
+sessions used the real home for sign-in only, with
+`claude -p --setting-sources project --settings <scratch settings.json>
+--strict-mcp-config` and shim's config, state and temporary folders from the
+scratch home. Every value was synthetic.
+
+| Evidence | Recorded result |
+| --- | --- |
+| Local gate | `python scripts/check.py` green on the 1.2.1 candidate: lint, format, types, 3,384 tests, build, `git diff --check`. |
+| Install | With no Python 3.12 anywhere: `uv tool install --python 3.12 --compile-bytecode shim` fetched CPython 3.12 and installed 1.2.0 in 16 s; `pipx install --python python3.12 --fetch-missing-python shim` installed it on a standalone CPython 3.12.15 in 20 s. Upgrading 1.1.2 to 1.2.0 with `uv tool upgrade shim` and `pipx upgrade shim` left an installed Claude Code settings file unchanged. The 1.2.1 wheel installed the same way and answered `shim 1.2.1`. |
+| Python 3.10 and 3.14 | The full suite at `v1.2.0`: 3,353 passed on CPython 3.10.21 and on 3.14.3. |
+| Plugin archive on 3.9 | The 1.2.0 and the rebuilt 1.2.1 archives, run by the plugin launcher with only the stock macOS `python3` 3.9.6 on `PATH`, masked a recorded `Read` of a `.env` to `<SECRET_1>`, `<IBAN_1>`, `<EMAIL_1>` and answered a safe prompt with nothing. |
+| Downgrade | 1.1.2 refuses a settings file that holds `markers` or `diet = ["json", "html"]`, and while it does, its prompt hook withholds every prompt. |
+| Claude Code | tested: 2.1.291, run on 2.1.286. Package hook, 1.2.0: a `Read` of `.env` reached the model as `<SECRET_1>`, `<EMAIL_1>`, `<IBAN_1>`; a WebFetch of `https://httpbin.org/get?email=ops@example.com` with no allow rule was refused for want of permission, so the 1.1.1 fix holds; with `diet = ["json", "html"]` a `curl -s` of a 12,878-byte page reached the model converted, 10,494 bytes smaller, with `<EMAIL_1>` for `billing&#64;example&#46;com`. An IBAN split across two `<span>`s as `GB82 WEST 1234` and ` 5698 7654 32` reached the model as `GB82 WEST 1234 <PHONE_1>`, the same as with the default diet: the first pass masks the raw markup before the page is converted. Plugin route: `claude plugin marketplace add GetSHIM/shim-cli` and `claude plugin install shim-cli@shim-cli` in a scratch home installed 1.2.0, whose archive, loaded into a live session with no `shim-hook` on `PATH`, masked the same `.env`. 1.2.1 candidate: the `.env` read masked the same way, the WebFetch was refused the same way, and after `shim revert claude --yes` and `uv tool uninstall shim` the settings file was byte-identical to before. |
+| `shim watch` | Claude Code, 1.2.0 and the candidate: reports with exact usage, the section split, `costliest`, `largest` and `largest tool result` (`Read, 42,808 bytes`), and the IBAN round trip (`3 in request, 3 in response`). `--json` `findings` held `cli.watch.large_tool_result`, valid against `docs/schemas/finding-v1.json`. In one of three identical runs, the request that carried the tool result arrived while both inspection slots were busy and was not measured, so its IBANs were not counted. A one-line `Say hi.` session in an empty folder counted 2 EMAIL in messages that Claude Code itself added. |
+| Codex CLI | tested: 0.159.0. `shim install codex` and `shim doctor codex --json` into a scratch `CODEX_HOME`: the trust warning, and `plugin_not_discoverable` and `hook_activation_unverified`, schema-valid. Replayed prompt events: a report under `warn`, a block with a redacted copy under `enforce`. **No live session:** the only sign-in on the recording machine is a ChatGPT `auth.json`, which cannot be copied into a scratch `CODEX_HOME` without breaking it. |
+| GitHub Copilot CLI | tested: 1.0.83, run on 1.0.85. Scratch `COPILOT_HOME`, `shim install copilot`, then `copilot -p` asked to repeat a prompt holding `ops@example.com` and `AKIAIOSFODNN7EXAMPLE`: it answered `<EMAIL_1>` and `<SECRET_1>`, and `shim report` listed both as masked in the prompt. |
+| VS Code | tested: 1.137.0; 1.140.0 installed. **Not run live:** the agent chat needs a signed-in session in the GUI. Replayed prompt events gave a report and, under `enforce`, a stop with a redacted copy. |
+| Commands | `doctor`, `status`, `install`, `revert` for all three clients, `scan`, `redact`, `keys`, `config`, `report`, `audit`, `ledger show` and `watch`: their `--json` findings validated against `docs/schemas/finding-v1.json`. A Claude Code settings file in its own format was byte-identical after install and revert. |
+| Documentation | Three simulated first-time users (Claude Code, the other clients, the cookbook end to end) and a literal copy-paste of the README install and the first three recipes. What stopped or misled them in the first ten minutes is fixed in 1.2.1; nothing stopped them. |
+| Windows | Unchanged: every command still refuses with exit 2 before touching a file (`test_on_windows_every_command_refuses_before_touching_a_file`). |
+
 ## 1.2.0 release evidence
 
 Recorded 11 October 2026 on macOS 26.4 arm64, CPython 3.13.5 for the suite and
