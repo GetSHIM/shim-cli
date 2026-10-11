@@ -436,9 +436,8 @@ def test_copilot_install_status_doctor_and_revert(monkeypatch, tmp_path: Path) -
     reverted = runner.invoke(app, ["revert", "copilot", "--yes"])
 
     assert preview.exit_code == installed.exit_code == reverted.exit_code == 0
-    assert (
-        "Start a new GitHub Copilot CLI session; it has no trust step."
-        in " ".join(installed.output.split())
+    assert "Start a new GitHub Copilot CLI session; it has no trust step." in " ".join(
+        installed.output.split()
     )
     assert missing.exit_code == 1
     assert json.loads(missing.output)["state"] == "not_installed"
@@ -509,7 +508,9 @@ def test_a_malformed_claude_settings_file_is_named_with_its_json_error(
 ) -> None:
     home = _claude_home(monkeypatch, tmp_path)
     _claude(monkeypatch, tmp_path)
-    (home / ".claude" / "settings.json").write_text('{"theme": "dark",\n  "hooks": {,}\n')
+    (home / ".claude" / "settings.json").write_text(
+        '{"theme": "dark",\n  "hooks": {,}\n'
+    )
     args = [command, "claude"] + (["--yes"] if command != "doctor" else [])
 
     said = " ".join(unstyle(runner.invoke(app, args).output).split())
@@ -547,7 +548,9 @@ def test_demo_shows_the_sentence_before_and_after_and_what_the_client_does(
 
     assert result.exit_code == 0
     assert "before  Send the synthetic report to demo@example.com" in said
-    assert "after   Send the synthetic report to <EMAIL_1> using token=<SECRET_1>" in said
+    assert (
+        "after   Send the synthetic report to <EMAIL_1> using token=<SECRET_1>" in said
+    )
     assert outcome in " ".join(said.split())
 
 
