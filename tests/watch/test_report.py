@@ -43,8 +43,13 @@ def _session(*exchanges, errors: int = 0, images=None, results=()):
     return session
 
 
-def test_nothing_seen_says_nothing() -> None:
-    assert report.render(_session(), 12.0) == ""
+def test_nothing_seen_still_says_so() -> None:
+    # A client that is not signed in, or exits first, sends nothing; silence
+    # read as "watch did not work".
+    assert report.render(_session(), 12.0).splitlines() == [
+        "shim watch — 12s, 0 requests",
+        "  no request reached the model provider through the proxy",
+    ]
 
 
 def test_provider_numbers_are_marked_exact_and_shim_s_are_not() -> None:

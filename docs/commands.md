@@ -419,9 +419,9 @@ client's own traffic to the provider it was already using. Nothing is modified
 and no request body is written to disk — the report says so on its last line.
 
 The report prints when the client exits. When no request went through the
-proxy, text mode prints no report at all: you see `PASS Watching claude on
-http://127.0.0.1:…`, the client's own output and nothing after it. `--json`
-still writes one, with `"requests": 0`. A report looks like this:
+proxy, for example because the client was not signed in, it is two lines:
+`shim watch — 1s, 0 requests` and `no request reached the model provider
+through the proxy`; `--json` has `"requests": 0`. A report looks like this:
 
 ```
 shim watch — 2m 34s, 3 requests
