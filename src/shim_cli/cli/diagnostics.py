@@ -7,7 +7,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from dataclasses import dataclass
 from pathlib import Path
 
 import typer
@@ -20,7 +19,7 @@ from shim_cli.cli.integrations import (
     client_plan,
     plan_status,
 )
-from shim_cli.cli.output import console, emit, emit_json
+from shim_cli.cli.output import Check, console, emit, emit_json
 from shim_cli.cli.resolution import installed_plugins, resolve
 from shim_cli.clients.claude import settings as claude_settings
 from shim_cli.clients.claude.tool_events import coverage as claude_coverage
@@ -28,15 +27,6 @@ from shim_cli.clients.codex import settings as codex_settings
 from shim_cli.clients.copilot import settings as copilot_settings
 from shim_cli.clients.hook_settings import installed_events, interpreter_path
 from shim_cli.settings_files import StateKind, inspect_file
-
-
-@dataclass(frozen=True, slots=True)
-class Check:
-    name: str
-    status: str
-    detail: str
-    code: str | None = None
-    fix: str | None = None
 
 
 def _client_version(
@@ -305,32 +295,14 @@ def _hook_state(client: str, on_disk: bool = False) -> Check | None:
 
 
 def _entity_settings() -> Check:
-    from shim_cli.cli.configuration import (
-        FIX_SETTINGS_INVALID,
-        FIX_SETTINGS_UNSAFE,
-        settings_refused,
-    )
-    from shim_cli.config import describe_settings_error, load_entities
+    from shim_cli.cli.configuration import settings_check
+    from shim_cli.config import load_entities
     from shim_cli.guard import ENTITY_TYPES
 
     try:
         enabled = load_entities()
     except (OSError, ValueError) as error:
-        if settings_refused(error):
-            return Check(
-                "entity_settings",
-                "FAIL",
-                describe_settings_error(error),
-                code="SETTINGS_REFUSED",
-                fix=FIX_SETTINGS_UNSAFE,
-            )
-        return Check(
-            "entity_settings",
-            "FAIL",
-            describe_settings_error(error),
-            code="SETTINGS_INVALID",
-            fix=FIX_SETTINGS_INVALID,
-        )
+        return settings_check(error)
     if not enabled:
         return Check(
             "entity_settings",

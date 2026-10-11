@@ -400,14 +400,14 @@ negative, and the secret-assignment rule has prose negatives.
 
 `tests/guard/test_gateway_parity.py` runs the gateway's own case file
 (`tests/gateway/privacy/corpus/detection-v1.json` at GetSHIM/shim `ca6b2e9`,
-140 cases) through shim-cli with every type enabled. 123 agree. The other 17
+140 cases) through shim-cli with every type enabled. 125 agree. The other 15
 are pinned with shim-cli's exact output and one of four reasons; a case that
 starts agreeing fails the test until its entry is removed.
 
 | Reason | Cases | What it means |
 | --- | ---: | --- |
 | `PRECISION_FIRST` | 6 | An uncued bare number the gateway calls a phone. In coding traffic shim-cli counts it as a bare number unless it is Turkish-shaped or cued. |
-| `NOT_PORTED` | 7 | A gateway rule shim-cli does not have: tier 3's dotted phones (`0532.1234567`), space-separated secrets (`password hunter2abc`), a VKN with no tax word, the more-than-four-numbers IP rule (`1.2.3.4.5`), and the whole-URI `DB_URI` (shim-cli masks the user-info only). |
+| `NOT_PORTED` | 5 | A gateway rule shim-cli does not have: tier 3's dotted phones (`0532.1234567`), a VKN with no tax word, the more-than-four-numbers IP rule (`1.2.3.4.5`), and the whole-URI `DB_URI` (shim-cli masks the user-info only). |
 | `NO_TYPE` | 3 | `FILE_PATH`, `PERSON`, `LOCATION`: shim-cli has no such type. |
 | `CUE_VOCABULARY` | 1 | `contact` is a phone word for the gateway, not for shim-cli. |
 
@@ -420,7 +420,15 @@ Divergences outside that file, measured against the gateway's analyzer at
 - `[12 GET 200]`, `#34 PUT 201`, `PID 12 CPU 100`, `HTTP 50 ERR 503`,
   `col 12 ID 1234`, `Build 12 RC 1234`, `12 V 2000 kHz` and `34 AB 1234 KB`:
   the gateway reads a plate; shim-cli does not, because those letters and units
-  are never plates in logs and code. Both read `line 42 E 1234` as a plate.
+  are never plates in logs and code. After `plaka` or `plate`
+  (`plaka 34 get 123`) both read a plate. Both read `line 42 E 1234` as a
+  plate.
+- `numpy==1.26.4.1`: the gateway reads an address; shim-cli reads a pinned
+  requirement, because a name with a lowercase letter is glued to `==`.
+  `SERVER_IP==203.0.113.9` and `host == 10.0.0.5` are addresses for both.
+- `# rotate the token` above a line of code that holds a dot or an underscore:
+  the gateway's space-separated secret rule reads across the line break and
+  masks that line; shim-cli's stays on one line.
 
 The detector is first-party and offline. `presidio-analyzer`, its spaCy
 pipeline, and `tldextract` were removed; recognizers, checksums, and the public

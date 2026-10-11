@@ -30,11 +30,16 @@ def _exchange(**changes):
     return measure.Exchange(**values)
 
 
-def _session(*exchanges, errors: int = 0):
+def _session(*exchanges, errors: int = 0, images=None, results=()):
+    """`results` is what each request's history carried, as inspect_request
+    reads it: one `{tool_use id: (tool, bytes)}` per request."""
     session = proxy.Session()
     for exchange in exchanges:
         session.record(exchange)
     session.errors = errors
+    session.images = images or {}
+    for carried in results:
+        session.absorb(measure.Exchange(tool_results=carried))
     return session
 
 
@@ -90,7 +95,7 @@ def test_at_files_are_called_out_as_not_masked() -> None:
 def test_spend_is_priced_per_kind_of_token() -> None:
     dollars, priced, unpriced, costs = report.spend([_exchange()])
 
-    assert priced == 1
+    assert len(priced) == 1
     assert unpriced == []
     expected = (2 * 2.0 + 214 * 10.0 + 18_093 * 2.5 + 91_562 * 0.2) / 1_000_000
     assert abs(dollars - expected) < 1e-9
@@ -101,7 +106,7 @@ def test_an_unknown_model_is_named_rather_than_guessed() -> None:
     dollars, priced, unpriced, _ = report.spend([_exchange(model="some-future-model")])
 
     assert dollars == 0.0
-    assert priced == 0
+    assert priced == []
     assert unpriced == ["some-future-model"]
 
     text = report.render(_session(_exchange(model="some-future-model")), 5.0)
@@ -589,8 +594,13 @@ def _usage(read: int, written: int, uncached: int = 2) -> measure.Usage:
     )
 
 
-def _turn(model: str, size: int, read: int, written: int):
-    return _exchange(model=model, request_bytes=size, usage=_usage(read, written))
+def _turn(model: str, size: int, read: int, written: int, conversation: str = ""):
+    return _exchange(
+        model=model,
+        request_bytes=size,
+        usage=_usage(read, written),
+        conversation=conversation,
+    )
 
 
 # A session shaped like the 8 September study: a cold first request, a growing
@@ -642,18 +652,72 @@ def test_a_cold_start_or_a_smaller_side_call_is_never_a_rewrite() -> None:
     assert "  cache  " not in report.render(_session(*side_call), 9.0)
 
 
-def _with_images(digests: dict, count: int, tokens: int):
-    return _exchange(images=digests, image_count=count, estimated_image_tokens=tokens)
+def test_a_failed_request_does_not_break_the_chain() -> None:
+    errored = _exchange(
+        model="claude-opus-5-5",
+        status=429,
+        usage=measure.Usage(),
+        usage_status="unavailable",
+        request_bytes=115_000,
+    )
+    series = [
+        _turn("claude-opus-5-5", 100_000, 0, 20_000),
+        _turn("claude-opus-5-5", 110_000, 20_000, 2_000),
+        errored,
+        _turn("claude-opus-5-5", 120_000, 0, 22_000),
+    ]
+
+    assert report.cache_rewrites(series) == [3]
+
+
+def test_a_parallel_conversation_on_the_same_model_is_not_a_rewrite() -> None:
+    model = "claude-opus-5-5"
+    series = [
+        _turn(model, 100_000, 0, 20_000, "main"),
+        _turn(model, 110_000, 20_000, 2_000, "main"),
+        _turn(model, 120_000, 0, 15_000, "agent"),
+        _turn(model, 130_000, 22_000, 1_000, "main"),
+        _turn(model, 125_000, 15_000, 500, "agent"),
+    ]
+
+    assert report.cache_rewrites(series) == []
+
+
+def test_a_rewrite_inside_one_conversation_is_found_beside_another() -> None:
+    model = "claude-opus-5-5"
+    series = [
+        _turn(model, 100_000, 0, 20_000, "main"),
+        _turn(model, 110_000, 20_000, 2_000, "main"),
+        _turn(model, 90_000, 0, 15_000, "agent"),
+        _turn(model, 130_000, 5_000, 18_000, "main"),
+    ]
+
+    assert report.cache_rewrites(series) == [3]
+
+
+def _with_images(count: int, tokens: int):
+    return _exchange(image_count=count, estimated_image_tokens=tokens)
+
+
+def test_an_image_of_unknown_size_is_counted_not_priced_at_zero() -> None:
+    unknown = _with_images(1, 0)
+
+    text = report.render(_session(unknown, images={"a": False}), 9.0)
+    line = next(row for row in text.splitlines() if row.startswith("  images"))
+
+    assert line == "  images    1 distinct across 1 request; 1 of unknown size"
+    assert "~0" not in text
 
 
 def test_images_are_counted_once_however_often_history_replays_them() -> None:
-    first = _with_images({"a": True}, 1, 2_494)
-    replay = _with_images({"a": True, "b": False}, 2, 2_494)
+    first = _with_images(1, 2_494)
+    replay = _with_images(2, 2_494)
+    seen = {"a": True, "b": False}
 
-    document = report.as_json(_session(first, replay, _exchange()), 9.0)
+    document = report.as_json(_session(first, replay, _exchange(), images=seen), 9.0)
     line = next(
         row
-        for row in report.render(_session(first, replay), 9.0).splitlines()
+        for row in report.render(_session(first, replay, images=seen), 9.0).splitlines()
         if row.startswith("  images")
     )
 
@@ -664,21 +728,22 @@ def test_images_are_counted_once_however_often_history_replays_them() -> None:
         "unknown_size": 1,
     }
     assert (
-        line
-        == "  images    2 distinct, ~4,988 input tokens across 2 requests (estimated)"
+        line == "  images    2 distinct, ~4,988 input tokens across 2 requests "
+        "(estimated); 1 of unknown size"
     )
     assert [row["image_count"] for row in document["exchanges"]] == [1, 2, 0]
     assert "images" not in report.render(_session(_exchange()), 9.0)
 
 
 def test_the_largest_tool_result_is_named_with_its_replays() -> None:
-    first = _exchange(tool_results={"toolu_1": ("Bash", 40_960)})
-    later = _exchange(
-        tool_results={"toolu_1": ("Bash", 40_960), "toolu_2": ("unknown tool", 12)}
-    )
+    results = [
+        {"toolu_1": ("Bash", 40_960)},
+        {"toolu_1": ("Bash", 40_960), "toolu_2": ("unknown tool", 12)},
+    ]
+    session = _session(_exchange(), _exchange(), results=results)
 
-    document = report.as_json(_session(first, later), 9.0)
-    text = report.render(_session(first, later), 9.0)
+    document = report.as_json(session, 9.0)
+    text = report.render(session, 9.0)
 
     assert document["largest_tool_result"] == {
         "tool": "Bash",
@@ -691,6 +756,16 @@ def test_the_largest_tool_result_is_named_with_its_replays() -> None:
     )
     assert report.as_json(_session(_exchange()), 9.0)["largest_tool_result"] is None
     assert "largest tool result" not in report.render(_session(_exchange()), 9.0)
+
+
+def test_a_result_shrunk_in_later_requests_is_carried_at_full_size_once() -> None:
+    results = [{"toolu_1": ("Bash", size)} for size in (40_000, 35, 35)]
+
+    assert report.largest_tool_result(_session(results=results)) == {
+        "tool": "Bash",
+        "bytes": 40_000,
+        "requests": 1,
+    }
 
 
 def test_identical_requests_in_flight_are_counted_not_withheld() -> None:
@@ -715,13 +790,15 @@ def test_identical_requests_in_flight_are_counted_not_withheld() -> None:
 
 
 def test_no_digest_or_tool_id_reaches_the_json() -> None:
-    exchange = _exchange(
+    exchange = _exchange(image_count=1, conversation="c" * 16)
+    session = _session(
+        exchange,
         images={"f" * 64: True},
-        image_count=1,
-        tool_results={"toolu_secret_id": ("Bash", 10)},
+        results=[{"toolu_secret_id": ("Bash", 10)}],
     )
 
-    dumped = json.dumps(report.as_json(_session(exchange), 9.0))
+    dumped = json.dumps(report.as_json(session, 9.0))
 
     assert "f" * 64 not in dumped
     assert "toolu_secret_id" not in dumped
+    assert "c" * 16 not in dumped

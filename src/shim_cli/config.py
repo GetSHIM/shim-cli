@@ -19,6 +19,14 @@ except ModuleNotFoundError:
 MAX_CONFIG_BYTES = 16_384
 
 
+class SettingsRefused(ValueError):
+    """The file was refused (owner, mode, link), not misparsed; `reason` says which."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(f"shim settings cannot be read safely: {reason}")
+        self.reason = reason
+
+
 def _default_path(directory: str, home: Path | None) -> Path:
     if home is not None:
         return Path(home) / ".config" / directory / "config.toml"
@@ -234,7 +242,7 @@ def policy_from_state(state: FileState) -> policy.Policy:
         # a symlink, a hard link, another user's ownership, a size, a change
         # mid-read. Carry it: a caller that has to guess will guess wrong.
         detail = getattr(state, "reason", "") or "the file could not be read safely"
-        raise ValueError(f"shim settings cannot be read safely: {detail}")
+        raise SettingsRefused(detail)
     try:
         document = parse_settings(state.content.decode("utf-8"))
     except (UnicodeDecodeError, RecursionError) as error:
@@ -269,16 +277,15 @@ def describe_settings_error(error: BaseException) -> str:
     cause = error.__cause__
     if isinstance(cause, tomllib.TOMLDecodeError) and str(cause):
         return (
-            f"Settings at {where} are invalid: {cause}. "
-            "Run shim config --reset to start over, or edit the line above."
+            f"Settings at {where} are invalid: {cause}. Edit that line; as a last "
+            "resort, shim config --reset starts over and discards every setting."
         )
-    marker = "shim settings cannot be read safely"
-    if str(error).startswith(marker):
+    if isinstance(error, SettingsRefused):
         # Not a parse failure. Say which check refused it rather than guessing:
         # "writable by another user" and "must not be a symlink" need different
         # things done to them, and a message that names the wrong one sends
         # people to chmod a file that is already correct.
-        reason = str(error)[len(marker) :].lstrip(": ").strip()
+        reason = error.reason.strip()
         advice = (
             " shim will not read settings anything else can rewrite, because "
             "whatever can rewrite them can turn detection off."
@@ -288,7 +295,8 @@ def describe_settings_error(error: BaseException) -> str:
         return f"Settings at {where} were refused: {reason}.{advice}"
     return (
         f"Settings at {where} are invalid: they are not readable as settings. "
-        "Run shim config --reset to start over."
+        "As a last resort, shim config --reset starts over and discards every "
+        "setting."
     )
 
 

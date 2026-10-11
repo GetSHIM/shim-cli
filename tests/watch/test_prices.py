@@ -3,9 +3,11 @@ reverse, fails here; so does pricing an id by its neighbour."""
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
-from shim_cli.watch import report
+from shim_cli.watch import measure, report
 
 # platform.claude.com "Model pricing", read on this date. Each id was confirmed
 # on the model pages or by GET /v1/models. claude-opus-4-0 and claude-sonnet-4-0
@@ -108,3 +110,15 @@ def test_a_million_in_and_out_on_opus_costs_the_list_price(model, dollars) -> No
 )
 def test_an_id_not_in_the_table_is_never_priced_as_a_neighbour(model) -> None:
     assert report._price(model) is None
+
+
+def _from_4_7(model: str) -> bool:
+    found = re.search(r"-(\d+)(?:-(\d+))?$", model)
+    return bool(found) and tuple(map(int, found.groups("0"))) >= (4, 7)
+
+
+def test_every_priced_model_from_4_7_reads_images_at_the_high_resolution_tier() -> None:
+    priced = {model for model in report.PRICES if _from_4_7(model)}
+
+    assert priced == measure.HIGH_RESOLUTION
+    assert measure.image_tokens((3840, 2160), "claude-opus-4-6") == 1568

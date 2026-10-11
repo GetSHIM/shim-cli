@@ -92,3 +92,13 @@ def test_every_llms_txt_link_is_a_tracked_file_on_main() -> None:
     for link in links:
         assert link.startswith(BLOB), link
         assert link[len(BLOB) :] in tracked, link
+
+
+def test_llms_txt_names_the_newest_release_notes() -> None:
+    text = (ROOT / "llms.txt").read_text(encoding="utf-8")
+    newest = max(
+        (path.stem for path in (ROOT / "docs" / "releases").glob("*.md")),
+        key=lambda version: tuple(map(int, version.split("."))),
+    )
+
+    assert f"[{newest} release notes]({BLOB}docs/releases/{newest}.md)" in text

@@ -251,6 +251,7 @@ def process(
                 ALLOW,
                 counts,
                 fields=len(findings),
+                markers=result.markers,
                 custom=_custom_counts(findings),
                 bare_numbers=result.bare_numbers,
             ),

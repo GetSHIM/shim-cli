@@ -8,7 +8,13 @@ from typing import Any, Literal, NoReturn
 
 import typer
 
-from shim_cli.cli.output import FIX_CONFIRMATION, emit, emit_error, emit_json
+from shim_cli.cli.output import (
+    FIX_CONFIRMATION,
+    emit,
+    emit_error,
+    emit_json,
+    unwritable,
+)
 from shim_cli.clients.claude import settings as claude_settings
 from shim_cli.clients.codex import settings as codex_settings
 from shim_cli.clients.copilot import settings as copilot_settings
@@ -206,11 +212,25 @@ def _plan_refused(
     )
 
 
-def _not_changed(client: str, command: str, as_json: bool) -> NoReturn:
+def _not_changed(
+    client: str, command: str, target: Path, error: BaseException, as_json: bool
+) -> NoReturn:
+    """A write refused for good says why; only a race is worth running again."""
+    name = client_name(client)
+    if (found := unwritable(error, target)) is not None:
+        reason, fix = found
+        emit_error(
+            command,
+            "CLIENT_SETTINGS_UNWRITABLE",
+            f"{name} hook configuration was not changed: {reason}.",
+            fix,
+            as_json=as_json,
+            client=client,
+        )
     emit_error(
         command,
         "CLIENT_SETTINGS_CHANGED",
-        f"{client_name(client)} hook configuration was not changed.",
+        f"{name} hook configuration was not changed.",
         "Run the command again.",
         as_json=as_json,
         client=client,
@@ -379,8 +399,10 @@ def install(*, client: str, dry_run: bool, yes: bool, as_json: bool = False) -> 
         try:
             ensure_parent(plan.target)
             plan = client_plan(client, "install")
-        except (InstallationError, OSError, ValueError):
-            _not_changed(client, "install", as_json)
+        except ValueError:
+            _plan_error(client, "install", as_json)
+        except (InstallationError, OSError) as error:
+            _not_changed(client, "install", plan.target, error, as_json)
         if plan.action is Action.NOOP:
             if as_json:
                 emit_json("install", "ok", **{**result, "action": "noop", "events": []})
@@ -411,8 +433,8 @@ def install(*, client: str, dry_run: bool, yes: bool, as_json: bool = False) -> 
         )
     try:
         apply(plan)
-    except (InstallationError, OSError):
-        _not_changed(client, "install", as_json)
+    except (InstallationError, OSError) as error:
+        _not_changed(client, "install", plan.target, error, as_json)
     if client == "copilot" and _remove_legacy_copilot_file(as_json):
         result["replaced_legacy"] = True
     if as_json:
@@ -503,8 +525,8 @@ def revert(*, client: str, yes: bool, as_json: bool = False) -> None:
     if plan.action is not Action.NOOP:
         try:
             apply(plan)
-        except (InstallationError, OSError):
-            _not_changed(client, "revert", as_json)
+        except (InstallationError, OSError) as error:
+            _not_changed(client, "revert", plan.target, error, as_json)
     result["action"] = "remove"
     if client == "copilot":
         result["removed_legacy_file"] = _remove_legacy_copilot_file(as_json)

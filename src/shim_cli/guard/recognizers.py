@@ -43,6 +43,8 @@ _BARE_DIGITS = re.compile(r"\d+")
 _DECIMAL_LITERAL = re.compile(r"\d+\.\d+")
 _DECIMAL_POINT = re.compile(r"\d\.|\.\d")
 _TURKISH_SHAPES = re.compile(r"(?:90)?0?5\d{9}|0[2-4]\d{9}")
+_NOT_DIGIT = re.compile(r"\D")
+_PHONE_FORMAT = re.compile(r"[\s()+]")
 # `_` joins a cue to its key: `phone_number`, `"customer_phone"`.
 _PHONE_CUE = re.compile(
     r"(?<![a-z])(?P<cue>telefon|tel|phone|gsm|cep|mobile|mobil|fax|whatsapp|call"
@@ -236,10 +238,15 @@ _IP_PATTERNS = _compile(
 )
 
 
-# The gateway's version cue, plus `==` for a pinned requirement. A bare "ver"
-# after a word is the Turkish verb: "izin ver 10.0.0.5" is an address.
+# The gateway's version cue. No "v": a glued "v1.2.3.4" never matches an
+# address, and a lone one is a flag or a letter, "curl -v 203.0.113.9". A bare
+# "ver" after a word is the Turkish verb: "izin ver 10.0.0.5" is an address.
+# `==` is a pinned requirement only glued to a name holding a lowercase letter,
+# `numpy==1.26.4.1`; not `ip == "203.0.113.7"` or `SERVER_IP==203.0.113.9`.
 _VERSION_CUE = re.compile(
-    r"(?:\b(?:v|version|sürüm|ver\.)|(?<!\w\s)\bver|==)\W{0,2}\Z", re.IGNORECASE
+    r"(?:\b(?:version|sürüm|ver\.)|(?<!\w\s)\bver)\W{0,2}\Z"
+    r"|(?-i:[\w.-]*[a-z][\w.-]*)==\Z",
+    re.IGNORECASE,
 )
 _VERSION_CUE_WINDOW = 16
 
@@ -301,7 +308,11 @@ def _invalidate_ssn(text: str) -> bool:
 _TCKN_PATTERNS = _compile(
     (
         (r"\b[1-9][0-9]{10}\b", 0.3),
-        (r"\b[1-9][0-9]{2}([ -])[0-9]{3}\1[0-9]{3}\1[0-9]{2}\b", 0.3),
+        (
+            r"\b[1-9][0-9]{2}([ -])[0-9]{3}\1"
+            r"(?:[0-9]{3}\1[0-9]{2}|[0-9]{2}\1[0-9]{3})\b",
+            0.3,
+        ),
     )
 )
 
@@ -455,8 +466,11 @@ def _scan_phone(text: str) -> list[Match]:
         ):
             continue
         bare = _BARE_DIGITS.fullmatch(raw)
-        if not ((bare and _TURKISH_SHAPES.fullmatch(raw)) or _phone_cue(text, start)):
-            if _glued_to_identifier(text, start):
+        turkish = _TURKISH_SHAPES.fullmatch(_NOT_DIGIT.sub("", raw))
+        if not (turkish or _phone_cue(text, start)):
+            # Digits joined by "-", "_" or "." can end a name; a space, a
+            # bracket or a "+" makes a phone: "musteri-0532 123 45 67".
+            if _glued_to_identifier(text, start) and not _PHONE_FORMAT.search(raw):
                 continue
             if bare:
                 candidate = candidate._replace(entity_type=BARE_NUMBER)
@@ -486,6 +500,16 @@ _SECRET_ASSIGNMENT = re.compile(
     re.IGNORECASE,
 )
 _BARE_END = re.compile(r"[\s,}\]\"']")
+# The gateway's key and value with a space alone between them: the key starts a
+# word and a bare value carries a digit or a symbol, so "token budget" is prose.
+# Unlike the gateway, the space never crosses a line: "# rotate the token" over
+# a line of code is not an assignment.
+_SPACED_ASSIGNMENT = re.compile(
+    r"(?<![^\W_])(?:" + _LEGACY_KEY + r")[\"']?[ \t]+"
+    r"(?:(?P<quote>[\"'])(?P<quoted>[^\r\n]{6,}?)(?P=quote)"
+    r"|(?=[^\s,}\]\"']*[0-9!#$%&*+./;<=>?@^_|~-])(?P<bare>[^\s,}\]\"']{6,}))",
+    re.IGNORECASE,
+)
 _LEGACY_ASSIGNMENT = re.compile(
     r"(?<![\w-])[\"']?(?:" + _LEGACY_KEY + r")[\"']?\s*[=:]\s*\Z",
     re.IGNORECASE,
@@ -667,6 +691,10 @@ def _scan_secret(text: str) -> list[Match]:
         for parameter in _QUERY_PARAMETER.finditer(text, query, end):
             if _SECRET_NAME.search(parameter.group("key")):
                 results.append(Match("SECRET", *parameter.span("value"), 0.97))
+    for match in _SPACED_ASSIGNMENT.finditer(text):
+        group = "quoted" if match.group("quoted") is not None else "bare"
+        if not _not_a_secret(match.group(group), None, group == "quoted", False, ""):
+            results.append(Match("SECRET", *match.span(group), 0.97))
     position = 0
     run = (0, 0)
     while match := _SECRET_ASSIGNMENT.search(text, position):
@@ -859,10 +887,11 @@ _NOT_PLATE_LETTERS = frozenset(
     "GB MB KB TB GHZ MHZ KM KG CM MM ML LT AM PM "
     "USD EUR TRY TL GBP CHF JPY CNY CAD AUD RUB SEK NOK DKK PLN AED SAR "
     "JAN FEB MAR APR MAY JUN JUL AUG SEP OCT NOV DEC "
-    "OCA SUB NIS HAZ TEM AGU EYL EKI KAS ARA "
-    # Never a plate in logs and code; the gateway does not list these.
-    "GET PUT ERR CPU PID ID RC OK".split()
+    "OCA SUB NIS HAZ TEM AGU EYL EKI KAS ARA".split()
 )
+# Never a plate in logs and code unless a plate word says so; the gateway does
+# not list these.
+_CODE_LETTERS = frozenset("GET PUT ERR CPU PID ID RC OK".split())
 _PLATE_CUE = re.compile(r"\b(?:plaka|plate)\w*\W{0,3}\Z", re.IGNORECASE)
 
 
@@ -872,9 +901,12 @@ def _scan_plate(text: str) -> list[Match]:
     for found in _PLATE_PATTERN.finditer(text):
         start, end = found.span()
         value = found.group()
-        if "".join(filter(str.isalpha, value)).upper() in _NOT_PLATE_LETTERS:
+        letters = "".join(filter(str.isalpha, value)).upper()
+        if letters in _NOT_PLATE_LETTERS:
             continue
-        if value.isupper() or _PLATE_CUE.search(text, max(0, start - 24), start):
+        if _PLATE_CUE.search(text, max(0, start - 24), start) or (
+            value.isupper() and letters not in _CODE_LETTERS
+        ):
             results.append(Match("TR_LICENSE_PLATE", start, end, 1.0))
     return results
 

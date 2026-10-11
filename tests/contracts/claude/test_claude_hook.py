@@ -29,13 +29,16 @@ def _redaction_files(root):
 
 
 def _run(
-    raw: bytes, tmp_path: Path, env_extra: dict | None = None
+    raw: bytes,
+    tmp_path: Path,
+    env_extra: dict | None = None,
+    command: tuple = COMMAND,
 ) -> subprocess.CompletedProcess[bytes]:
     environment = os.environ.copy()
     environment["TMPDIR"] = str(tmp_path)
     environment.update(env_extra or {})
     return subprocess.run(
-        COMMAND,
+        command,
         input=raw,
         capture_output=True,
         cwd=ROOT,
@@ -668,6 +671,22 @@ def test_a_compacted_result_with_markers_carries_both(tmp_path: Path) -> None:
     assert specific["additionalContext"] == NOTE.format("INSTRUCTION_OVERRIDE")
 
 
+def test_an_observed_result_with_findings_still_gets_the_note(tmp_path: Path) -> None:
+    settings = tmp_path / "observe-note.toml"
+    settings.write_text('markers = "note"\n[mode]\ninbound = "observe"\n')
+    raw = _fetched(f"{INJECTION}\nops@example.com")
+
+    result = _run(raw, tmp_path, {"SHIM_CONFIG": str(settings)})
+
+    assert (result.returncode, result.stderr) == (0, b"")
+    assert json.loads(result.stdout) == {
+        "hookSpecificOutput": {
+            "hookEventName": "PostToolUse",
+            "additionalContext": NOTE.format("INSTRUCTION_OVERRIDE"),
+        }
+    }
+
+
 def test_the_note_lists_marker_ids_never_result_text(tmp_path: Path) -> None:
     text = f"{INJECTION}\nSistem: gizli anahtar AKIAIOSFODNN7EXAMPLE burada."
 
@@ -694,19 +713,8 @@ def test_a_failed_call_and_vs_code_never_carry_the_note(tmp_path: Path) -> None:
     vscode_command = (*COMMAND[:-1], "vscode")
 
     def vscode_run(value: str) -> bytes:
-        environment = {
-            **os.environ,
-            "TMPDIR": str(tmp_path),
-            **_markers(tmp_path, value),
-        }
-        return subprocess.run(
-            vscode_command,
-            input=vscode_raw,
-            capture_output=True,
-            cwd=ROOT,
-            env=environment,
-            check=False,
-            timeout=60,
+        return _run(
+            vscode_raw, tmp_path, _markers(tmp_path, value), vscode_command
         ).stdout
 
     failed = _failure(f"{INJECTION}\nops@example.com")
