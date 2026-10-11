@@ -7,9 +7,12 @@ from html.parser import HTMLParser
 
 from shim_cli.guard.entities import PLACEHOLDER
 
-HTML_TEXT_VERSION = 1
 HTML_MIN_CHARS = 2_048
 HTML_MAX_RATIO = 0.5
+# Claude Code keeps the first 30,000 characters of a command's output, so a long
+# page is cut wherever that falls, often inside a tag the parser then cannot
+# finish. That much unparsed markup at the end is dropped; more leaves the page.
+HTML_MAX_TAIL = 4_096
 HEADER = (
     "[shim: converted from HTML to text; markup removed. Save the page to a file "
     "and Read it to see the markup.]"
@@ -26,7 +29,6 @@ _BLOCKS = frozenset(
         "tr", "ul",
     )
 )  # fmt: skip
-_VERBATIM = frozenset(("pre", "textarea"))
 _PAGE_STARTS = ("<!doctype html", "<html")
 _WHITESPACE = re.compile(r"\s+")
 _BLANK_LINES = re.compile(r"\n{3,}")
@@ -75,7 +77,7 @@ class _Text(HTMLParser):
             self._end_line()
         if tag == "br":
             self.out.append("\n")
-        elif tag in _VERBATIM:
+        elif tag == "pre":
             self.verbatim += 1
         elif tag in ("h1", "h2", "h3", "h4", "h5", "h6"):
             self.out.append("#" * int(tag[1]) + " ")
@@ -104,7 +106,7 @@ class _Text(HTMLParser):
             return
         if self.dropped:
             return
-        if tag in _VERBATIM and self.verbatim:
+        if tag == "pre" and self.verbatim:
             self.verbatim -= 1
         elif tag == "a" and self.links:
             href = self.links.pop()
@@ -120,13 +122,18 @@ class _Text(HTMLParser):
             self._write(data)
 
 
+def _is_page(text: str) -> bool:
+    start = text.lstrip()[:512].lower()
+    if start.startswith("<?xml"):  # XHTML: an XML declaration, then the page
+        start = start[start.find("?>") + 2 :].lstrip() if "?>" in start else ""
+    return start.startswith(_PAGE_STARTS)
+
+
 def to_text(text: str) -> str:
-    """The page as text, or `text` itself when it does not parse to its end,
-    leaves a dropped element open, is not a whole page or would not be at most
-    half its size. Raises only the hook's `TimeoutError`."""
-    if len(text) < HTML_MIN_CHARS or not text.lstrip()[:14].lower().startswith(
-        _PAGE_STARTS
-    ):
+    """The page as text, or `text` itself when it is not a whole page, leaves
+    more than `HTML_MAX_TAIL` unparsed or a dropped element open, or would not
+    be at most half its size. Raises only the hook's `TimeoutError`."""
+    if len(text) < HTML_MIN_CHARS or not _is_page(text):
         return text
     try:
         parser = _Text()
@@ -136,7 +143,7 @@ def to_text(text: str) -> str:
         # `close()` re-scans an unfinished tag, comment or quote once per `<`
         # after it, quadratic on a hostile page; `feed()` alone stops there.
         # An unclosed `<svg>` would drop the rest of the page without a word.
-        if parser.dropped or parser.rawdata.strip():
+        if parser.dropped or len(parser.rawdata) > HTML_MAX_TAIL:
             return text
         title = " ".join("".join(parser.title).split())
         lines = [line.rstrip() for line in "".join(parser.out).split("\n")]
@@ -151,4 +158,4 @@ def to_text(text: str) -> str:
     return result if len(result) <= HTML_MAX_RATIO * len(text) else text
 
 
-__all__ = ["HEADER", "HTML_MAX_RATIO", "HTML_MIN_CHARS", "HTML_TEXT_VERSION", "to_text"]
+__all__ = ["HEADER", "HTML_MAX_RATIO", "HTML_MAX_TAIL", "HTML_MIN_CHARS", "to_text"]

@@ -546,15 +546,18 @@ diet = ["json", "html"]         # also turn whole HTML pages into text
 ```
 
 `html` converts only a result that is a whole page (it starts with
-`<!doctype html` or `<html`) of at least 2,048 characters, and only when the
-text is at most half the size. The model is told so in the first line, `[shim: converted from HTML to text; markup removed.
+`<!doctype html` or `<html`, after an XML declaration for XHTML) of at least
+2,048 characters, and only when the text is at most half the size. The model is
+told so in the first line, `[shim: converted from HTML to text; markup removed.
 Save the page to a file and Read it to see the markup.]`, and a masked value
 such as `<EMAIL_1>` stays as it is. The text is scanned again before the model
 reads it, because conversion can assemble a value the markup hid: an address
 written as `ops&#64;example&#46;com`, or an IBAN split across two `<span>`s, is
-masked and counted like any other. A page that does not parse to its end, or
-leaves a `<script>`, `<svg>`, `<iframe>`, `<noscript>` or `<template>` open, is
-left unchanged, because the rest of it would be dropped without a word. `shim config --diet`
+masked and counted like any other. A page cut short, as Claude Code cuts long
+command output, is converted without its last unfinished tag (up to 4,096
+characters of it); a page that leaves more unparsed, or leaves a `<script>`,
+`<svg>`, `<iframe>`, `<noscript>` or `<template>` open, is left unchanged,
+because the rest of it would be dropped without a word. `shim config --diet`
 keeps meaning the default, so it never turns `html` on.
 
 **Documents.** WebFetch already returns text: Claude Code hands the model its

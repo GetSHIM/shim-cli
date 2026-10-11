@@ -89,7 +89,7 @@ def test_whitespace_collapses_outside_pre_and_is_kept_inside() -> None:
         "<pre>  keep   this\n    indent</pre><textarea>a  b</textarea>"
     )
 
-    assert _body(page)[1:] == ["spaced out text", "  keep   this", "    indent", "a  b"]
+    assert _body(page)[1:] == ["spaced out text", "  keep   this", "    indent", "a b"]
 
 
 def test_blocks_end_lines_and_blank_lines_collapse() -> None:
@@ -180,15 +180,18 @@ def test_malformed_markup_gives_the_same_text_every_time(body: str) -> None:
 
 @pytest.mark.parametrize(
     "tail",
-    [
-        '<a x="never closed',
-        "<!-- never closed",
-        "<script>never closed",
-        "<!never closed",
-    ],
+    ['<td class="build', '<a x="never closed', "<!-- never closed", "<!never closed"],
 )
-def test_a_page_that_does_not_parse_to_its_end_is_left_unchanged(tail: str) -> None:
-    page = _page("<p>Body</p>") + tail
+def test_a_page_cut_short_is_converted_without_its_unparsed_tail(tail: str) -> None:
+    # Claude Code keeps the first 30,000 characters of a command's output, so a
+    # long page arrives cut wherever that limit falls, often inside a tag.
+    page = _page("<p>Body</p>").replace("</body></html>\n", "") + tail
+
+    assert _body(page)[1:] == ["Body"]
+
+
+def test_a_long_unparsed_tail_leaves_the_page_unchanged() -> None:
+    page = _page("<p>Body</p>") + '<a x="' + "y" * (html_text.HTML_MAX_TAIL + 1)
 
     assert to_text(page) is page
 
@@ -199,6 +202,25 @@ def test_an_unclosed_dropped_element_leaves_the_page_unchanged(tag: str) -> None
     page = _page(f"<p>Body</p><{tag}><p>the rest of the page</p>")
 
     assert to_text(page) is page
+
+
+def test_an_xhtml_page_after_its_xml_declaration_is_converted() -> None:
+    page = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" '
+        '"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">\n'
+        + _page("<p>One</p><p>two <img src='a.png' alt='logo'/></p>")
+        .split("\n", 1)[1]
+        .replace("<html lang='en'>", '<html xmlns="http://www.w3.org/1999/xhtml">')
+    )
+
+    assert _body(page) == ["Synthetic page", "One", "two [image: logo]"]
+
+
+def test_other_xml_is_left_unchanged() -> None:
+    text = '<?xml version="1.0"?>\n<feed>' + "<entry><id>1</id></entry>\n" * 200
+
+    assert to_text(text + "</feed>") == text + "</feed>"
 
 
 def test_hostile_pages_finish_in_linear_time_and_unchanged() -> None:
@@ -279,4 +301,3 @@ def test_a_converted_page_is_converted_once() -> None:
 
     assert once.startswith(HEADER + "\n")
     assert to_text(once) == once
-    assert html_text.HTML_TEXT_VERSION == 1
