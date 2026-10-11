@@ -436,6 +436,10 @@ def test_copilot_install_status_doctor_and_revert(monkeypatch, tmp_path: Path) -
     reverted = runner.invoke(app, ["revert", "copilot", "--yes"])
 
     assert preview.exit_code == installed.exit_code == reverted.exit_code == 0
+    assert (
+        "Start a new GitHub Copilot CLI session; it has no trust step."
+        in " ".join(installed.output.split())
+    )
     assert missing.exit_code == 1
     assert json.loads(missing.output)["state"] == "not_installed"
     assert json.loads(current.output)["state"] == "installed"

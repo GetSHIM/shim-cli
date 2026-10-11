@@ -305,6 +305,7 @@ FIX_REINSTALL = (
 )
 _NEXT_STEP = {
     "claude": "Start a new Claude Code session; /hooks lists shim.",
+    "copilot": "Start a new GitHub Copilot CLI session; it has no trust step.",
     "codex": (
         "Codex skips a hook you have not trusted, without warning: open "
         "/hooks in Codex, review the shim entry and enable it."
@@ -467,8 +468,8 @@ def install(*, client: str, dry_run: bool, yes: bool, as_json: bool = False) -> 
     )
     if client == "codex":
         emit("WARN", _NEXT_STEP["codex"])
-    elif client == "claude":
-        print(_NEXT_STEP["claude"])
+    else:
+        print(_NEXT_STEP[client])
 
 
 def status(*, client: str, as_json: bool) -> None:
