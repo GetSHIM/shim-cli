@@ -513,10 +513,11 @@ def test_a_malformed_claude_settings_file_is_named_with_its_json_error(
     )
     args = [command, "claude"] + (["--yes"] if command != "doctor" else [])
 
-    said = " ".join(unstyle(runner.invoke(app, args).output).split())
+    # Rich wraps a long path anywhere, so compare without whitespace.
+    said = "".join(unstyle(runner.invoke(app, args).output).split())
 
-    assert "settings.json is not valid JSON: Expecting property name" in said
-    assert "line 2, column 13." in said
+    assert "settings.jsonisnotvalidJSON:Expectingpropertyname" in said
+    assert "line2,column13." in said
 
 
 @pytest.mark.parametrize(
