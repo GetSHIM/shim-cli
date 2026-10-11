@@ -19,6 +19,14 @@ except ModuleNotFoundError:
 MAX_CONFIG_BYTES = 16_384
 
 
+class SettingsRefused(ValueError):
+    """The file was refused (owner, mode, link), not misparsed; `reason` says which."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(f"shim settings cannot be read safely: {reason}")
+        self.reason = reason
+
+
 def _default_path(directory: str, home: Path | None) -> Path:
     if home is not None:
         return Path(home) / ".config" / directory / "config.toml"
@@ -67,6 +75,7 @@ def render_settings(
     diet: tuple | None = None,
     custom: list | None = None,
     reveal: dict | None = None,
+    markers: str = "report",
 ) -> bytes:
     import tomli_w
 
@@ -93,6 +102,8 @@ def render_settings(
         document["custom"] = [dict(entry) for entry in custom]
     if reveal:
         document["reveal"] = entity_catalog.normalize_reveal(reveal)
+    if markers == "note":
+        document["markers"] = markers
     return tomli_w.dumps(document).encode()
 
 
@@ -108,6 +119,7 @@ _TOP_LEVEL = {
     "diet",
     "custom",
     "reveal",
+    "markers",
 }
 
 
@@ -183,6 +195,9 @@ def parse_settings(text: str) -> dict:
     ledger = document.get("ledger", False)
     if not isinstance(ledger, bool):
         raise ValueError("shim settings are invalid")
+    markers = document.get("markers", "report")
+    if markers not in ("report", "note"):
+        raise ValueError("shim settings are invalid")
     return {
         "enabled_entities": list(enabled),
         "mode": _modes(document),
@@ -191,6 +206,7 @@ def parse_settings(text: str) -> dict:
         "diet": _diet(document),
         "custom": _custom(document),
         "reveal": _reveal(document),
+        "markers": markers,
     }
 
 
@@ -226,7 +242,7 @@ def policy_from_state(state: FileState) -> policy.Policy:
         # a symlink, a hard link, another user's ownership, a size, a change
         # mid-read. Carry it: a caller that has to guess will guess wrong.
         detail = getattr(state, "reason", "") or "the file could not be read safely"
-        raise ValueError(f"shim settings cannot be read safely: {detail}")
+        raise SettingsRefused(detail)
     try:
         document = parse_settings(state.content.decode("utf-8"))
     except (UnicodeDecodeError, RecursionError) as error:
@@ -240,6 +256,7 @@ def policy_from_state(state: FileState) -> policy.Policy:
             document["diet"],
             entity_catalog.compile_custom(document["custom"]),
             document["reveal"],
+            document["markers"],
         )
     except ValueError as error:
         raise ValueError("shim settings are invalid") from error
@@ -260,16 +277,15 @@ def describe_settings_error(error: BaseException) -> str:
     cause = error.__cause__
     if isinstance(cause, tomllib.TOMLDecodeError) and str(cause):
         return (
-            f"Settings at {where} are invalid: {cause}. "
-            "Run shim config --reset to start over, or edit the line above."
+            f"Settings at {where} are invalid: {cause}. Edit that line; as a last "
+            "resort, shim config --reset starts over and discards every setting."
         )
-    marker = "shim settings cannot be read safely"
-    if str(error).startswith(marker):
+    if isinstance(error, SettingsRefused):
         # Not a parse failure. Say which check refused it rather than guessing:
         # "writable by another user" and "must not be a symlink" need different
         # things done to them, and a message that names the wrong one sends
         # people to chmod a file that is already correct.
-        reason = str(error)[len(marker) :].lstrip(": ").strip()
+        reason = error.reason.strip()
         advice = (
             " shim will not read settings anything else can rewrite, because "
             "whatever can rewrite them can turn detection off."
@@ -279,7 +295,8 @@ def describe_settings_error(error: BaseException) -> str:
         return f"Settings at {where} were refused: {reason}.{advice}"
     return (
         f"Settings at {where} are invalid: they are not readable as settings. "
-        "Run shim config --reset to start over."
+        "As a last resort, shim config --reset starts over and discards every "
+        "setting."
     )
 
 

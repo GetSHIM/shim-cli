@@ -19,6 +19,7 @@ Everything here runs locally. Nothing in this document sends anything anywhere.
 - [See what a whole session sent](#see-what-a-whole-session-sent)
 - [Use it in CI and in scripts](#use-it-in-ci-and-in-scripts)
 - [Know what your client can actually do](#know-what-your-client-can-actually-do)
+- [Let an agent run shim](#let-an-agent-run-shim)
 - [When something looks wrong](#when-something-looks-wrong)
 - [Leaving](#leaving)
 
@@ -323,7 +324,10 @@ shim watch -- claude -p "Read calc.py and explain it in one sentence."
 
 It binds to loopback, forwards bytes unchanged, invents no request of its own,
 and writes no request or response body to disk. It reports both directions
-separately and reads usage off the wire rather than guessing.
+separately and reads usage off the wire rather than guessing. On an API key,
+its `spend` should land close to Claude Code's own `/cost` for the same
+session; a large gap usually means a cost the requests do not carry, such as a
+web search.
 
 **Claude Code only.** Codex is refused, with the reason measured rather than
 assumed: it takes its endpoint from its own configuration, so the proxy would
@@ -369,8 +373,17 @@ kubectl logs api-7f4 | shim redact | pbcopy
 That one is worth keeping in your shell history. Pasting logs into a chat is
 how most values escape, and this makes the safe version the easy version.
 
-Add `--json` to most commands when a script is reading the output. The text
-layout is not a stable interface; the JSON is.
+Add `--json` when a script is reading the output; every command but `help`
+and `update` takes it. The text layout is not a stable interface; the JSON is.
+An error comes back as `"status": "error"` with a stable `code` and a `fix`:
+branch on `code`, not on the wording of `error`.
+
+```console
+$ shim config --reveal SECRET=4 --yes --json
+{"code":"REVEAL_INVALID","command":"config","error":"that entity cannot reveal a tail","fix":"Use --reveal IBAN=N, CREDIT_CARD=N or PHONE=N with N from 1 to 4.","schema_version":1,"status":"error"}
+```
+
+Every code is in the [command reference](commands.md#error-codes).
 
 ## Know what your client can actually do
 
@@ -411,6 +424,50 @@ outbound = "enforce"
 `outbound` is a tool call before it runs, the one place VS Code lets shim
 refuse. `inbound` is a result, which VS Code lets shim report but not change,
 so `inbound = "enforce"`, already the default, refuses nothing there.
+
+## Let an agent run shim
+
+An agent cannot answer a question, so give it the forms that never ask one.
+`--json` turns every prompt into an answer: `install`, `revert`, `config` and
+`ledger purge` refuse to change anything without `--yes`, and say so.
+
+```console
+$ shim install claude --json
+{"client":"claude","code":"CONFIRMATION_REQUIRED","command":"install","error":"--yes is required with --json","fix":"Add --yes to apply without a question.","schema_version":1,"status":"error"}
+$ shim install claude --dry-run --json       # the target file and the exact fragment; writes nothing
+$ shim install claude --yes --json
+{"action":"create","client":"claude","command":"install","events":["PostToolUse","PostToolUseFailure","PreToolUse","SessionEnd","Stop","UserPromptSubmit"],"next_step":"Start a new Claude Code session; /hooks lists shim.","preserved_hooks":false,"replaced_legacy":false,"schema_version":1,"status":"ok","target":"/home/you/.claude/settings.json","warnings":[]}
+```
+
+Branch on `code`, never on the wording of `error`, and do what `fix` says.
+Every code is listed in the [command reference](commands.md#error-codes):
+
+```console
+$ shim config --custom 'LOOP=(a+)+$' --yes --json
+{"code":"CUSTOM_PATTERN_INVALID","command":"config","error":"pattern LOOP backtracks on repeated input; simplify it","fix":"Change the pattern, or remove it with shim config --remove-custom NAME --yes.","schema_version":1,"status":"error"}
+```
+
+When something is off, `shim doctor <client> --json` comes first. Each check
+carries `status`, `code` and `fix`, so the next step is the `fix` of the first
+`FAIL` or `WARN` (a hook that is not installed is a `WARN`):
+
+```console
+$ shim doctor claude --json | jq -r '.checks[] | select(.status != "PASS") | .code + ": " + .fix'
+SETTINGS_INVALID: Edit the settings file the error names until it parses.
+```
+
+The error itself names `shim config --reset` as the last resort; it discards
+every setting, so it is one to ask about first.
+
+To let an agent see which variables a `.env` file defines without reading the
+values, point it at `shim keys` instead of `cat`:
+
+```console
+$ shim keys .env --json | jq -c '.files[0].variables[] | {name, state, entity}'
+{"name":"APP_ENV","state":"set","entity":null}
+{"name":"DATABASE_URL","state":"set","entity":"DB_URI"}
+{"name":"STRIPE_SECRET_KEY","state":"set","entity":"SECRET"}
+```
 
 ## When something looks wrong
 

@@ -10,6 +10,7 @@ client's traffic to the provider your client was already going to talk to.
 ## Contents
 
 - [Conventions](#conventions) — flags and exit codes shared by every command
+- [Error codes](#error-codes) — the `code` and `fix` of every JSON error and doctor check
 - [Setting up](#setting-up) — `install`, `status`, `doctor`, `revert`, `update`
 - [Seeing what happened](#seeing-what-happened) — `report`, `ledger`, `watch`, `audit`
 - [Changing what is detected](#changing-what-is-detected) — `config`
@@ -20,17 +21,23 @@ client's traffic to the provider your client was already going to talk to.
 
 ## Conventions
 
-**`--json`** is available on most commands and writes one JSON object to
-stdout instead of the human table. Use it in scripts; the text layout is not a
-stable interface and the JSON is.
+**`--json`** is available on every command except `help` and `update`, and
+writes one JSON object to stdout instead of the human table. Use it in scripts;
+the text layout is not a stable interface and the JSON is. An error is an
+object with `"status": "error"`, the sentence the human output prints in
+`error`, a stable `code` and a `fix` (or `null`); read `code`, not `error`,
+whose wording may change. Every code is listed under [Error
+codes](#error-codes).
 
 **`--yes`** skips the confirmation prompt on the commands that change or delete
 a file (`install`, `revert`, `config`, `ledger purge`). Without it they ask
 first, and a `no`, or no terminal to answer from, changes nothing and exits `1`.
 `config` shows the new settings before it asks; `install` asks without showing
 the change, so run `shim install <client> --dry-run` first to see the target
-file and the exact fragment. With `--json` nothing is asked: `config`, and
-`ledger purge` when something is retained, refuse with exit `2` unless you pass
+file and the exact fragment. With `--json` nothing is asked: `config`,
+`install` and `revert` when they would change a file, and `ledger purge` when
+something is retained, refuse with exit `2` and `CONFIRMATION_REQUIRED` unless
+you pass `--yes`. `install --dry-run --json` writes nothing and needs no
 `--yes`. `audit --purge`
 has no `--yes`: it always asks you to type `delete N`.
 
@@ -53,6 +60,83 @@ exits `0`, because its answer is the rewritten text, unless stdin cannot be read
 or scanned in full: then both print `Unable to process stdin.` and exit `1`.
 They print the same when shim's settings file is refused or invalid, whatever
 stdin holds; `shim config` prints the reason.
+
+## Error codes
+
+With `--json`, every error carries `code` and `fix`:
+
+```json
+{"code":"REVEAL_INVALID","command":"config","error":"that entity cannot reveal a tail","fix":"Use --reveal IBAN=N, CREDIT_CARD=N or PHONE=N with N from 1 to 4.","schema_version":1,"status":"error"}
+```
+
+`code` is stable; `error` is the sentence a person would read and may change.
+`fix` names the command or action that clears the error, with the real client
+name and file path filled in, or is `null` when there is nothing to run.
+Two objects say `"status": "error"` without a `code` of their own:
+`shim doctor --json` when a check failed, whose failing checks each carry one,
+and `shim demo --json` when its synthetic sentence found nothing, which means
+the detector is broken.
+
+| Code | Means | Emitted by | Exit | Fix |
+| --- | --- | --- | --- | --- |
+| `CONFIRMATION_REQUIRED` | The command would change a file and `--json` cannot ask | `config`, `install`, `revert`, `ledger purge` | `2` | `Add --yes to apply without a question.` |
+| `OPTIONS_CONFLICT` | Two options that cannot be used together | `config`, `audit --purge --json` | `2` | `Run the command with one of them.` |
+| `TERMINAL_REQUIRED` | `audit --purge` asks for a typed confirmation and there is no terminal | `audit` | `2` | `Run shim audit --purge in a terminal.` |
+| `SETTINGS_PATH_INVALID` | `SHIM_CONFIG` is not an absolute path | `config` | `2` | `Unset SHIM_CONFIG or set it to an absolute path.` |
+| `SETTINGS_PATH_UNSAFE` | The settings folder is writable by someone else or cannot be created safely | `config` | `2` | As for `SETTINGS_REFUSED`, or for `SETTINGS_UNWRITABLE` when the system refused to create the folder |
+| `SETTINGS_INVALID` | The settings file does not parse or holds a value shim does not accept | `config`, `audit`, `doctor` | `2` | `Edit the settings file the error names until it parses.` The error names `shim config --reset` as the last resort: it discards every setting |
+| `SETTINGS_REFUSED` | The settings file was refused: a link, someone else's, or writable by another user | `config`, `audit`, `doctor` | `2` | `chmod 700 <folder> && chmod 600 <path>` with the real paths (`SHIM_CONFIG`, or `$XDG_CONFIG_HOME/shim`); a link, a file that belongs to another user, a hard link or an oversized file gets its own fix instead |
+| `CUSTOM_PATTERN_INVALID` | A `--custom` or `--custom-literal` value is malformed or backtracks | `config` | `2` | `Change the pattern, or remove it with shim config --remove-custom NAME --yes.` |
+| `REVEAL_INVALID` | A `--reveal` names a type or length that is not allowed | `config` | `2` | `Use --reveal IBAN=N, CREDIT_CARD=N or PHONE=N with N from 1 to 4.` |
+| `SETTINGS_CHANGED` | The settings file changed, or became unsafe, while shim was writing it | `config` | `2` | `Run the command again.` |
+| `SETTINGS_UNWRITABLE` | The settings file cannot be written, and trying again will not help: permission denied, a read-only file system, a full disk | `config` | `2` | Names the folder and what to change: `chmod u+rwx <folder>`, a writable file system, or free space |
+| `CLIENT_SETTINGS_UNREADABLE` | The client's settings file could not be inspected | `install`, `status`, `revert`, `doctor` | `2` | `Run shim doctor <client>.`; in doctor, make the file and its folder readable |
+| `CLIENT_SETTINGS_MALFORMED` | The client's settings file does not parse, so shim will not change it | `install`, `status`, `revert`, `doctor` | `2` | `Fix <path> by hand so it parses, then run the command again.` |
+| `CLIENT_SETTINGS_UNSAFE` | The client's settings file is a link, someone else's, or otherwise unsafe | `install`, `status`, `revert`, `doctor` | `2` | `Make <path> a regular file owned by you, then run the command again.` |
+| `CLIENT_SETTINGS_CHANGED` | The client's settings file changed while shim was writing it | `install`, `revert` | `2` | `Run the command again.` |
+| `CLIENT_SETTINGS_UNWRITABLE` | The client's settings file cannot be written, and trying again will not help: permission denied, a read-only file system, a full disk | `install`, `revert` | `2` | As for `SETTINGS_UNWRITABLE`, with the client's folder |
+| `DETECTOR_UNAVAILABLE` | The detector could not start, so the hook would not work | `install` | `2` | `Reinstall shim: uv tool install --reinstall shim, or pipx reinstall shim.` |
+| `INVALID_DATE` | `--since` is not a `YYYY-MM-DD` date | `audit` | `2` | `Pass --since as YYYY-MM-DD.` |
+| `HISTORY_NOT_FOUND` | There is no Claude Code history folder to read | `audit` | `2` | `null` |
+| `HISTORY_UNREADABLE` | The Claude Code history could not be read | `audit` | `2` | `null` |
+| `RECORDS_UNREADABLE` | The session records could not be read | `report` | `2` | `Run shim doctor claude (or codex, copilot); its session_record line names the cause.` |
+| `LEDGER_UNREADABLE` | The ledger could not be read | `ledger show`, `ledger purge` | `2` | `Run shim doctor claude (or codex, copilot).` |
+| `FILE_NOT_FOUND` | The path does not exist | `keys` | `2` | `null` |
+| `NOT_A_FILE` | The path is not a regular file | `keys` | `2` | `null` |
+| `FILE_TOO_LARGE` | The file is larger than 1 MB | `keys` | `2` | `null` |
+| `NOT_UTF8` | The file is not UTF-8 text | `keys` | `2` | `null` |
+| `STDIN_UNPROCESSABLE` | Stdin could not be read or scanned in full, or the settings file is refused or invalid | `scan`, `redact`, `demo` | `1` | `Pipe UTF-8 text; if the settings file is refused, shim config prints why.` |
+| `NOTHING_TO_RUN` | No client follows `--` | `watch` | `2` | `shim watch -- claude` |
+| `CLIENT_UNSUPPORTED` | The client cannot run through the proxy | `watch` | `2` | `shim install <client> installs the hook, which needs no proxy.`, or `shim watch -- claude` for a command that is not a client |
+| `BASE_URL_ALREADY_SET` | `ANTHROPIC_BASE_URL` is already set | `watch` | `2` | `Unset ANTHROPIC_BASE_URL for this command.` |
+| `EXECUTABLE_NOT_FOUND` | The client is not on `PATH` | `watch` | `2` | `null` |
+| `PROXY_FAILED` | The proxy could not start; the client was not run | `watch` | `2` | `null` |
+| `CLIENT_START_FAILED` | The client could not be started | `watch` | `2` | `null` |
+
+`shim doctor --json` writes each check as `name`, `status`, `detail`, `code`
+and `fix`; `code` and `fix` are `null` on a `PASS`. A `FAIL` makes doctor exit
+`2`, a `WARN` alone exits `0`. Besides the shared codes above, its checks use:
+
+| Code | Means | Status | Fix |
+| --- | --- | --- | --- |
+| `CLIENT_NOT_FOUND` | The client executable is not on `PATH` | `FAIL` | Install the client, or add its folder to `PATH` |
+| `CLIENT_VERSION_UNKNOWN` | The client did not report a version shim can read | `FAIL` | Run `<client> --version`; reinstall the client if it fails |
+| `CLIENT_TOO_OLD` | The client is older than the oldest version shim supports | `FAIL` | Update the client to the version the detail names |
+| `CLIENT_NEWER_THAN_TESTED` | The client is newer than the version shim was tested against | `WARN` | Check shim once by hand: a prompt holding `ops@example.com` must be reported |
+| `CODEX_HOOKS_DISABLED` | `codex features list` says hooks are off | `FAIL` | Set `hooks = true` under `[features]` in Codex's `config.toml`, or delete that line |
+| `CODEX_HOOKS_UNCHECKED` | `codex features list` could not be run | `FAIL` | `Run codex features list; it must show hooks as true.` |
+| `LEGACY_NAMES_PRESENT` | A 0.2.0 hook, settings file or ledger is still on disk | `FAIL` for a 0.2.0 hook, else `WARN` | The `shim install`, `shim config` or `shim report` the detail names |
+| `HOOK_NOT_INSTALLED` | shim's hook is not in the client's settings file | `WARN` | `Run shim install <client>.` |
+| `DETECTION_DISABLED` | Every entity type is turned off | `WARN` | `Turn types back on with shim config --enable ENTITY --yes.` |
+| `CUSTOM_PATTERN_UNSAFE` | A custom pattern already in the file backtracks | `FAIL` | `Simplify the pattern, or remove it with shim config --remove-custom NAME --yes.` |
+| `HOOK_RUNNER_FAILED` | The hook did not pass its own safe and sensitive fixtures | `FAIL` | `Reinstall shim: uv tool install --reinstall shim, or pipx reinstall shim.` |
+| `HOOK_RESOLUTION_FAILED` | No hook is runnable, so prompts pass uninspected | `FAIL` | `Run shim install <client>.` |
+| `ARCHIVE_VERSION_SKEW` | The plugin's bundled archive and the package are different versions | `WARN` | `Run claude plugin update shim-cli@shim-cli and restart Claude Code; in a cloned plugin folder, check out the newest release tag.` |
+| `PLUGIN_NOT_DISCOVERABLE` | shim cannot see whether the client also has the plugin installed | `WARN` | Remove the plugin if `shim install` is also in use |
+| `DUPLICATE_HOOKS` | shim is registered twice, so every event is inspected twice | `FAIL` | The uninstall or `shim revert claude` the detail names |
+| `SESSION_RECORDS_UNWRITABLE` | Session records cannot be written; masking still works | `WARN` | Set `TMPDIR` to a folder you own, or make the `shim-session` folder in it yours with mode 700 |
+| `HOOK_EVENTS_MISSING` | Fewer events are installed than shim can cover | `WARN` | `Run shim install <client>.` |
+| `HOOK_ACTIVATION_UNVERIFIED` | Whether the client runs the hook is client UI state shim cannot read | `WARN` | Open `/hooks` in the client and check that shim is listed (and, in Codex, enabled) |
 
 ## Setting up
 
@@ -88,7 +172,17 @@ so a file you formatted by hand keeps its content but not its layout.
 A client settings file that does not parse, such as a `settings.json` with a
 trailing comma, is left alone: install exits `2` with `FAIL Claude Code hook
 configuration cannot be changed safely.`, naming neither the file nor the
-error, and runs once you have fixed the JSON by hand.
+error, and runs once you have fixed the JSON by hand. With `--json` the same
+refusal is `CLIENT_SETTINGS_MALFORMED`, and its `fix` names the file.
+
+`--json` with `--yes` writes one object: `client`, `target` (the settings
+file), `action` (`create`, `update` or `noop`), `events` (the hook events
+written, sorted), `replaced_legacy` (a 0.2.0 hook was replaced),
+`preserved_hooks` (other hooks in the file were kept), `warnings` (the `WARN`
+lines the text output prints) and `next_step` (what to do in the client, or
+`null`). `--dry-run --json` writes `client`, `target`, `action`, `events`,
+`fragment` (the exact object above), `summary` and `"dry_run": true`, and needs
+no `--yes`.
 
 **Codex needs one extra step.** From 0.151.0 Codex will not run a hook until
 you trust it, and it skips an untrusted one silently — no warning, no
@@ -148,6 +242,10 @@ Each client adds one more, such as `WARN Codex 0.160.0 is newer than tested
 0.159.0.`, when yours is newer than the version shim was tested against. A
 `FAIL` exits `2`.
 
+`--json` writes `checks`, each with `name`, `status`, `detail`, `code` and
+`fix` ([Error codes](#error-codes)), and the `coverage` rows. An agent fixing
+an install reads `fix` from the first check whose `status` is `FAIL` or `WARN`.
+
 Doctor cannot see whether the client runs the hook. To see it run:
 
 - Claude Code: start a new session after installing, run `/hooks` and find
@@ -187,9 +285,10 @@ fully:
   are not readable as settings` and names neither the key nor the line. Check
   the values against [the settings file](#the-settings-file).
 - A refused settings file gives the reason, such as `target is writable by
-  another user`, and no command. The fix is `chmod 700 ~/.config/shim && chmod
-  600 ~/.config/shim/config.toml`; `shim config --reset --yes` does not repair
-  permissions.
+  another user`, and no command; `--json` carries the fix for that reason. For
+  a mode it is `chmod 700 ~/.config/shim && chmod 600
+  ~/.config/shim/config.toml`, with your real paths; `shim config --reset
+  --yes` does not repair permissions.
 - `FAIL Codex hook support is not enabled.` comes from `codex features list`,
   and usually means Codex's own `config.toml` (in `~/.codex`, or
   `$CODEX_HOME`) turns hooks off. Set `hooks = true` under `[features]`, or
@@ -215,6 +314,10 @@ Claude Code's own format, which ends that way, comes back byte for byte, a
 hand-formatted one comes back with
 the same content in that layout, and a settings file shim itself created is
 left as `{}`.
+
+`--json` with `--yes` writes `client`, `target`, `action` (`remove` or
+`noop`), `removed_legacy_file` and `deleted_file` (the Copilot hook file it
+deleted, or `null`).
 
 This does not remove your settings (`~/.config/shim/config.toml`) or the
 ledger. See the README's Uninstall section for the full sequence.
@@ -323,17 +426,36 @@ shim watch — 2m 34s, 3 requests
             written by the model; it may repeat values it was given
   compare   EMAIL   3 in request, 2 in response (text, thinking)
             DB_URI  3 in request, 0 in response
-  spend     ~$0.69  (approximate, 2026-08-30 prices)
+  spend     ~$0.69  (approximate, 2026-10-09 prices)
+  costliest  one request ~$0.41 (claude-opus-5-5, 54,212 input tokens)
   largest   one request was 112,384 bytes, system 61% of it
+  images    2 distinct, ~4,988 input tokens across 2 requests (estimated)
+  largest tool result  Bash, 40,960 bytes (~10,240 tokens), carried by 2 requests
+  cache     1 request rewrote a prefix the previous one had cached (~18,000 tokens written again, ~$0.09); request 3
+  duplicates  1 request was sent while an identical one was still in flight (~27,640 input tokens billed again)
   nothing was modified, and no request body was written to disk
 ```
 
 `(exact)` means the provider reported that number. `(approximate)` means shim
 attributed it by byte share, and the `~` is there to keep you honest about it.
+Images are the exception: their base64 bytes say nothing about their cost, so
+each request's estimated image tokens get an `images` row of their own (and an
+`images` key in `tokens_by_section`), and the rest is split by byte share. The
+rows still add up to the exact total. An image whose size shim could not read
+has no estimate, so its bytes stay in `messages` and the `images` line counts it
+as `of unknown size` instead of pricing it at zero.
+Each request is priced by its own model and token kinds, 1-hour cache writes
+at their own rate, from a table dated in the line; a model the table does not
+name exactly is listed as `not priced`, never priced as a neighbour. Once the
+table is more than 90 days old, the line adds `older than 90 days; newer models
+and price changes are not reflected`. `costliest` names the dearest request
+when at least two were priced.
 If you sign in with a subscription, `spend` is what the same traffic would cost
 on an API key, not a bill, and the line says so. When some requests arrived
 while both inspection slots were busy, the section header adds `2 of 4 requests
 measured` and the response line gives the same reason as the inspection line.
+Such a request is still priced, and still compared for cache rewrites, under
+the model its response names.
 
 `--json` writes the same report as one object, on one line of stdout after
 the client exits, so it follows whatever the client printed there itself: read
@@ -342,6 +464,15 @@ the last line. Three of its fields say what a figure covers:
 | Field | Where | Values |
 | --- | --- | --- |
 | `spend_basis` | top level | `"api-key"`, `"subscription"`, `"mixed"`, or `"unknown"` when a priced request sent neither auth header or nothing was priced |
+| `prices_stale` | `approximate` | `true` when the price table (`priced_on`) is more than 90 days older than the run, else `false` |
+| `spend_usd` | each of `exchanges` | that request's approximate cost, or `null` when its model is not in the table |
+| `priced_as` | each of `exchanges` | the table row used (the model id without a snapshot date or `-latest`), or `null` |
+| `cache_creation_1h_input_tokens` | each of `exchanges`' `usage` | the part of `cache_creation_input_tokens` written to the 1-hour cache, priced at the 1-hour rate |
+| `images` | top level | `distinct`, `requests` that carried one, `estimated_tokens` (scaled to the model's tier, 28 px patches) and `unknown_size` (a header shim could not read) |
+| `largest_tool_result` | top level | `tool`, `bytes` and the `requests` that carried it at that size (a later request that carries it shrunk does not count), or `null` |
+| `cache_rewrites` | top level | `count`, `tokens` written again, `spend_usd` (or `null`) and the 1-based `requests`; compared within one model and one conversation, so a parallel agent on the same model is not the request before |
+| `duplicates_in_flight` | top level | `count` and the `input_tokens` billed again |
+| `image_count`, `estimated_image_tokens`, `cache_rewrite`, `duplicate_in_flight` | each of `exchanges` | the same, per request |
 | `auth_route` | each of `exchanges` | `"api-key"` (an `x-api-key` header), `"subscription"` (`authorization` and no `x-api-key`), `""` (neither) |
 | `response_scan_reason` | each of `exchanges` | `""` when the response was scanned; the request's `incomplete_reason` (`"slots busy"`, `"body too large"`, `"not JSON"`, `"too many fields"`) when it was not measured; otherwise `"unavailable"` or `"partial"` |
 
@@ -439,7 +570,7 @@ ledger and diet settings, and the file it all lives in:
 
 ```console
 $ shim config
-Current detection: 12/12 enabled
+Current detection: 12/13 enabled
  Entity           Status
  ───────────────────────
  EMAIL            ON
@@ -448,7 +579,9 @@ Ledger: off    Diet: json
 PASS File: /home/you/.config/shim/config.toml
 ```
 
-**Turning entity types on and off.** Every type is on by default.
+**Turning entity types on and off.** Every type is on by default except
+`TR_LICENSE_PLATE`, Turkish licence plates, which coding traffic imitates too
+often (`[12 GET 200]`, `01 OCT 26`) to look for unasked.
 
 ```console
 shim config --disable PHONE --yes
@@ -457,9 +590,19 @@ shim config --only SECRET --only DB_URI --yes   # exactly these two, nothing els
 ```
 
 The types are `EMAIL`, `PHONE`, `CREDIT_CARD`, `IBAN`, `IP_ADDRESS`,
-`MAC_ADDRESS`, `US_SSN`, `TR_NATIONAL_ID`, `TR_VKN`, `SECRET`, `DB_URI`,
-`CUSTOM`. Checksums are verified where they exist, so a mistyped IBAN or card
-number is not reported.
+`MAC_ADDRESS`, `US_SSN`, `TR_NATIONAL_ID`, `TR_VKN`, `TR_LICENSE_PLATE`,
+`SECRET`, `DB_URI`, `CUSTOM`. Checksums are verified where they exist, so a
+mistyped IBAN or card number is not reported.
+
+```console
+shim config --enable TR_LICENSE_PLATE --yes   # look for Turkish plates too
+```
+
+A plate is uppercase, or lowercase right after `plaka` or `plate`. HTTP methods
+and log words (`GET`, `PUT`, `ERR`, `CPU`, `PID`, `ID`, `RC`, `OK`) are plate
+letters only right after `plaka` or `plate`; months, units and currencies never
+are. `line 42 E 1234` still reads as a
+plate.
 
 **Your own terms.**
 
@@ -503,7 +646,7 @@ shim config --ledger --yes      # keep records past the session; off by default
 shim config --no-ledger --yes
 shim config --diet --yes        # shrink tool results losslessly; on by default
 shim config --no-diet --yes
-shim config --reset --yes       # back to defaults; the fix for a malformed file
+shim config --reset --yes       # back to defaults; discards every setting
 ```
 
 `--reset` discards everything in the file, including custom patterns,
@@ -533,7 +676,8 @@ PASS No supported sensitive data found.
 ```
 
 Exit `1` means it found something and `0` that it found nothing. That makes it
-usable as a gate:
+usable as a gate. `--json` writes `"status": "findings"` or `"safe"` and
+`counts`, one entry per type, with the same exit codes:
 
 ```console
 shim scan < config.env && echo "clean"
@@ -685,6 +829,10 @@ ledger = false
 # Shrink tool results losslessly before the model sees them.
 # true, false, or a list naming individual transforms: "json", "whitespace".
 diet = true
+
+# Tell the model when a Claude Code tool result reads as instructions.
+# "report" (the default) only counts them for the session summary.
+markers = "note"
 
 # Keep the last N digits. IBAN, CREDIT_CARD and PHONE only, at most 4.
 [reveal]

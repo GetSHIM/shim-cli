@@ -95,6 +95,7 @@ def test_a_version_one_file_is_a_valid_version_two_file() -> None:
         "diet": ("json",),
         "custom": [],
         "reveal": {},
+        "markers": "report",
     }
 
 
@@ -300,3 +301,38 @@ def test_a_reveal_table_survives_a_settings_round_trip() -> None:
     rendered = render_settings(DEFAULT_ENTITIES, reveal=parsed["reveal"])
 
     assert parse_settings(rendered.decode())["reveal"] == {"IBAN": 4, "PHONE": 2}
+
+
+def test_the_plate_type_is_off_until_a_settings_file_names_it(tmp_path: Path) -> None:
+    target = tmp_path / "shim" / "config.toml"
+
+    assert "TR_LICENSE_PLATE" not in load_entities(target)
+
+    target.parent.mkdir()
+    target.write_bytes(render_entities(("EMAIL", "SECRET")))
+    assert "TR_LICENSE_PLATE" not in load_entities(target)
+
+    target.write_bytes(render_entities(("EMAIL", "TR_LICENSE_PLATE")))
+    assert load_entities(target) == ("EMAIL", "TR_LICENSE_PLATE")
+
+
+def test_the_marker_setting_is_read_written_only_when_note_and_kept(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "shim" / "config.toml"
+    target.parent.mkdir()
+
+    target.write_bytes(render_settings(("EMAIL",)))
+    assert b"markers" not in target.read_bytes()
+    assert load_policy(target).markers == "report"
+
+    target.write_bytes(render_settings(("EMAIL",), markers="note"))
+    assert 'markers = "note"' in target.read_text()
+    assert load_policy(target).markers == "note"
+    assert render_settings(("EMAIL",), markers="report") == render_settings(("EMAIL",))
+
+
+@pytest.mark.parametrize("value", ['"block"', '"Note"', "true", '["note"]'])
+def test_an_unknown_marker_setting_fails_closed(value: str) -> None:
+    with pytest.raises(ValueError):
+        parse_settings(f"markers = {value}\n")

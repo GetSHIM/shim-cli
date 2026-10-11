@@ -1,0 +1,1181 @@
+{
+  "format": "shim.detection.corpus",
+  "version": 1,
+  "claim_scope": "Synthetic fixture-bound evidence only; not a real-world statistical claim.",
+  "entities": [
+    "EMAIL_ADDRESS",
+    "PHONE_NUMBER",
+    "CREDIT_CARD",
+    "IBAN_CODE",
+    "TR_NATIONAL_ID",
+    "TR_VKN",
+    "SECRET",
+    "DB_URI",
+    "FILE_PATH",
+    "IP_ADDRESS",
+    "MAC_ADDRESS",
+    "US_SSN",
+    "TR_LICENSE_PLATE",
+    "PERSON",
+    "LOCATION"
+  ],
+  "cases": [
+    {
+      "id": "email-plain",
+      "text": "Contact alice@example.com today",
+      "expect": [
+        {
+          "entity": "EMAIL_ADDRESS",
+          "value": "alice@example.com"
+        }
+      ]
+    },
+    {
+      "id": "email-long-local-part",
+      "text": "mail aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@example.com",
+      "expect": [
+        {
+          "entity": "EMAIL_ADDRESS",
+          "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@example.com"
+        }
+      ]
+    },
+    {
+      "id": "card-visa-spaced",
+      "text": "Card 4111 1111 1111 1111 on file",
+      "expect": [
+        {
+          "entity": "CREDIT_CARD",
+          "value": "4111 1111 1111 1111"
+        }
+      ]
+    },
+    {
+      "id": "phone-tr-international",
+      "text": "Ara +90 532 123 45 67 lütfen",
+      "expect": [
+        {
+          "entity": "PHONE_NUMBER",
+          "value": "+90 532 123 45 67"
+        }
+      ]
+    },
+    {
+      "id": "tckn-plain",
+      "text": "TCKN 10000000146",
+      "expect": [
+        {
+          "entity": "TR_NATIONAL_ID",
+          "value": "10000000146"
+        }
+      ]
+    },
+    {
+      "id": "vkn-plain",
+      "text": "VKN 1234567890",
+      "expect": [
+        {
+          "entity": "TR_VKN",
+          "value": "1234567890"
+        }
+      ]
+    },
+    {
+      "id": "iban-tr-spaced",
+      "text": "IBAN TR33 0006 1005 1978 6457 8413 26",
+      "expect": [
+        {
+          "entity": "IBAN_CODE",
+          "value": "TR33 0006 1005 1978 6457 8413 26"
+        }
+      ]
+    },
+    {
+      "id": "password-json-value",
+      "text": "{\"password\": \"SuperSecret123!\"}",
+      "expect": [
+        {
+          "entity": "SECRET",
+          "value": "SuperSecret123!"
+        }
+      ]
+    },
+    {
+      "id": "aws-access-key",
+      "text": "key AKIA0000000000000000",
+      "expect": [
+        {
+          "entity": "SECRET",
+          "value": "AKIA0000000000000000"
+        }
+      ]
+    },
+    {
+      "id": "github-token",
+      "text": "token ghp_000000000000000000000000000000000000",
+      "expect": [
+        {
+          "entity": "SECRET",
+          "value": "ghp_000000000000000000000000000000000000"
+        }
+      ]
+    },
+    {
+      "id": "openai-project-key",
+      "text": "OPENAI sk-proj-00000000000000000000000000000000",
+      "expect": [
+        {
+          "entity": "SECRET",
+          "value": "sk-proj-00000000000000000000000000000000"
+        }
+      ]
+    },
+    {
+      "id": "jwt-three-part",
+      "text": "Bearer eyJ00000000000000000000.eyJ00000000000000000000.00000000000000000000",
+      "expect": [
+        {
+          "entity": "SECRET",
+          "value": "eyJ00000000000000000000.eyJ00000000000000000000.00000000000000000000"
+        }
+      ]
+    },
+    {
+      "id": "slack-webhook-url",
+      "text": "hook https://hooks.slack.com/services/T0/B0/000000",
+      "expect": [
+        {
+          "entity": "SECRET",
+          "value": "https://hooks.slack.com/services/T0/B0/000000"
+        }
+      ]
+    },
+    {
+      "id": "pem-private-key",
+      "text": "key:\n-----BEGIN PRIVATE KEY-----\nMIIE000000000000000000000000000000000000000000000000000000000000\n-----END PRIVATE KEY-----",
+      "expect": [
+        {
+          "entity": "SECRET",
+          "value": "-----BEGIN PRIVATE KEY-----\nMIIE000000000000000000000000000000000000000000000000000000000000\n-----END PRIVATE KEY-----"
+        }
+      ]
+    },
+    {
+      "id": "postgres-uri",
+      "text": "db postgres://user:pw@db.internal/app",
+      "expect": [
+        {
+          "entity": "DB_URI",
+          "value": "postgres://user:pw@db.internal/app"
+        }
+      ]
+    },
+    {
+      "id": "file-path-home",
+      "text": "open /Users/alice/secrets.txt",
+      "expect": [
+        {
+          "entity": "FILE_PATH",
+          "value": "/Users/alice/secrets.txt"
+        }
+      ]
+    },
+    {
+      "id": "tckn-zero-width-space",
+      "text": "TCKN 100000​00146",
+      "expect": [
+        {
+          "entity": "TR_NATIONAL_ID",
+          "value": "100000​00146"
+        }
+      ]
+    },
+    {
+      "id": "tckn-full-width-digits",
+      "text": "TCKN １０００００００１４６",
+      "expect": [
+        {
+          "entity": "TR_NATIONAL_ID",
+          "value": "１０００００００１４６"
+        }
+      ]
+    },
+    {
+      "id": "email-percent-encoded",
+      "text": "mail alice%40example.com",
+      "expect": [
+        {
+          "entity": "EMAIL_ADDRESS",
+          "value": "alice%40example.com"
+        }
+      ]
+    },
+    {
+      "id": "tckn-turkish-suffix",
+      "text": "10000000146'nın sahibi",
+      "expect": [
+        {
+          "entity": "TR_NATIONAL_ID",
+          "value": "10000000146"
+        }
+      ]
+    },
+    {
+      "id": "google-api-key-assignment",
+      "text": "GOOGLE_API_KEY=AIza00000000000000000000000000000000000",
+      "expect": [
+        {
+          "entity": "SECRET",
+          "value": "AIza00000000000000000000000000000000000"
+        }
+      ]
+    },
+    {
+      "id": "google-api-key-bare",
+      "text": "Maps için AIza00000000000000000000000000000000000 kullan",
+      "expect": [
+        {
+          "entity": "SECRET",
+          "value": "AIza00000000000000000000000000000000000"
+        }
+      ]
+    },
+    {
+      "id": "slack-bot-token-bare",
+      "text": "Slack xoxb-0000000000-0000000000000 ile bağlan",
+      "expect": [
+        {
+          "entity": "SECRET",
+          "value": "xoxb-0000000000-0000000000000"
+        }
+      ]
+    },
+    {
+      "id": "hugging-face-token-bare",
+      "text": "Hub hf_0000000000000000000000000000000000 ile indir",
+      "expect": [
+        {
+          "entity": "SECRET",
+          "value": "hf_0000000000000000000000000000000000"
+        }
+      ]
+    },
+    {
+      "id": "gitlab-token-bare",
+      "text": "GitLab glpat-00000000000000000000 ile push",
+      "expect": [
+        {
+          "entity": "SECRET",
+          "value": "glpat-00000000000000000000"
+        }
+      ]
+    },
+    {
+      "id": "sifre-colon",
+      "text": "şifre: Gizli.Parola2026",
+      "expect": [
+        {
+          "entity": "SECRET",
+          "value": "Gizli.Parola2026"
+        }
+      ]
+    },
+    {
+      "id": "parola-colon",
+      "text": "parola: Gizli.Parola2026",
+      "expect": [
+        {
+          "entity": "SECRET",
+          "value": "Gizli.Parola2026"
+        }
+      ]
+    },
+    {
+      "id": "sifre-upper-equals",
+      "text": "ŞİFRE=Gizli.Parola2026",
+      "expect": [
+        {
+          "entity": "SECRET",
+          "value": "Gizli.Parola2026"
+        }
+      ]
+    },
+    {
+      "id": "not-secret-xoxo-prose",
+      "text": "Görüşürüz, xoxo",
+      "expect": []
+    },
+    {
+      "id": "not-secret-hf-identifier",
+      "text": "load hf_model_name from config",
+      "expect": []
+    },
+    {
+      "id": "not-secret-aiza-inside-word",
+      "text": "id XAIza00000000000000000000000000000000000",
+      "expect": []
+    },
+    {
+      "id": "not-secret-sifre-unuttum",
+      "text": "şifre unuttum, yardım eder misin",
+      "expect": []
+    },
+    {
+      "id": "not-secret-parola-degisti",
+      "text": "parola değiştirildi",
+      "expect": []
+    },
+    {
+      "id": "not-secret-token-budget",
+      "text": "token budget exceeded for this request",
+      "expect": []
+    },
+    {
+      "id": "not-secret-refresh-token-expired",
+      "text": "the refresh token expired yesterday",
+      "expect": []
+    },
+    {
+      "id": "not-secret-password-protected",
+      "text": "this file is password protected",
+      "expect": []
+    },
+    {
+      "id": "not-secret-secret-ingredient",
+      "text": "the secret ingredient is love",
+      "expect": []
+    },
+    {
+      "id": "not-secret-desifre-colon",
+      "text": "deşifre: merhaba dünya",
+      "expect": []
+    },
+    {
+      "id": "password-space-separated",
+      "text": "password hunter2abc",
+      "expect": [
+        {
+          "entity": "SECRET",
+          "value": "hunter2abc"
+        }
+      ]
+    },
+    {
+      "id": "api-key-env-space-separated",
+      "text": "export API_KEY abcdef123456",
+      "expect": [
+        {
+          "entity": "SECRET",
+          "value": "abcdef123456"
+        }
+      ]
+    },
+    {
+      "id": "sifre-glued-to-key",
+      "text": "db_şifre: abcdefg1",
+      "expect": [
+        {
+          "entity": "SECRET",
+          "value": "abcdefg1"
+        }
+      ]
+    },
+    {
+      "id": "sifreniz-colon",
+      "text": "Geçici şifreniz: Gizli.Parola2026",
+      "expect": [
+        {
+          "entity": "SECRET",
+          "value": "Gizli.Parola2026"
+        }
+      ]
+    },
+    {
+      "id": "sifresi-ascii-colon",
+      "text": "sifresi: Gizli.Parola2026",
+      "expect": [
+        {
+          "entity": "SECRET",
+          "value": "Gizli.Parola2026"
+        }
+      ]
+    },
+    {
+      "id": "card-troy",
+      "text": "Troy kartı 9792 0000 0000 0003",
+      "expect": [
+        {
+          "entity": "CREDIT_CARD",
+          "value": "9792 0000 0000 0003"
+        }
+      ]
+    },
+    {
+      "id": "card-mastercard-2-series",
+      "text": "Kart 2221 0000 0000 0009",
+      "expect": [
+        {
+          "entity": "CREDIT_CARD",
+          "value": "2221 0000 0000 0009"
+        }
+      ]
+    },
+    {
+      "id": "iban-whole-not-card",
+      "text": "Ödeme TR96 1569 9085 0078 9107 8735 82 hesabına",
+      "expect": [
+        {
+          "entity": "IBAN_CODE",
+          "value": "TR96 1569 9085 0078 9107 8735 82"
+        }
+      ]
+    },
+    {
+      "id": "card-troy-luhn-invalid",
+      "text": "Kart 9792 0000 0000 0004",
+      "expect": []
+    },
+    {
+      "id": "card-and-iban-same-sentence",
+      "text": "Kart 4111 1111 1111 1111, IBAN TR33 0006 1005 1978 6457 8413 26",
+      "expect": [
+        {
+          "entity": "CREDIT_CARD",
+          "value": "4111 1111 1111 1111"
+        },
+        {
+          "entity": "IBAN_CODE",
+          "value": "TR33 0006 1005 1978 6457 8413 26"
+        }
+      ]
+    },
+    {
+      "id": "two-ibans-one-line",
+      "text": "TR33 0006 1005 1978 6457 8413 26 ve TR96 1569 9085 0078 9107 8735 82",
+      "expect": [
+        {
+          "entity": "IBAN_CODE",
+          "value": "TR33 0006 1005 1978 6457 8413 26"
+        },
+        {
+          "entity": "IBAN_CODE",
+          "value": "TR96 1569 9085 0078 9107 8735 82"
+        }
+      ]
+    },
+    {
+      "id": "order-number",
+      "text": "Sipariş numarası 4829104455",
+      "expect": []
+    },
+    {
+      "id": "dated-model-id",
+      "text": "model claude-sonnet-4-5-20250929 kullan",
+      "expect": []
+    },
+    {
+      "id": "json-timestamp-and-amount",
+      "text": "{\"created\": 1757496600, \"amount\": 2000}",
+      "expect": []
+    },
+    {
+      "id": "order-id-date-like",
+      "text": "order_id 2026091012",
+      "expect": []
+    },
+    {
+      "id": "version-quad",
+      "text": "version 1.2.3.4",
+      "expect": []
+    },
+    {
+      "id": "epoch-seconds-json",
+      "text": "{\"ts\": 1757496600}",
+      "expect": []
+    },
+    {
+      "id": "epoch-milliseconds",
+      "text": "created_at_ms 1757496600123",
+      "expect": []
+    },
+    {
+      "id": "elapsed-decimal",
+      "text": "Elapsed: 0.0376118499 s",
+      "expect": []
+    },
+    {
+      "id": "mean-decimal",
+      "text": "mean=0.1234567890",
+      "expect": []
+    },
+    {
+      "id": "int32-overflow",
+      "text": "value 2147483648 overflowed",
+      "expect": []
+    },
+    {
+      "id": "cost-decimal-json",
+      "text": "{\"total_cost_usd\": 0.03761184999}",
+      "expect": []
+    },
+    {
+      "id": "sku-glued-to-name",
+      "text": "stok SKU-ABC-4829104455 tükendi",
+      "expect": []
+    },
+    {
+      "id": "build-id-glued",
+      "text": "artifact build_7.20250929 hazır",
+      "expect": []
+    },
+    {
+      "id": "version-prefixed-v",
+      "text": "release v1.2.3.4 yayında",
+      "expect": []
+    },
+    {
+      "id": "ip-with-cue",
+      "text": "IP 1.2.3.4 engellendi",
+      "expect": [
+        {
+          "entity": "IP_ADDRESS",
+          "value": "1.2.3.4"
+        }
+      ]
+    },
+    {
+      "id": "ip-private-range",
+      "text": "sunucu 192.168.1.10 cevap vermiyor",
+      "expect": [
+        {
+          "entity": "IP_ADDRESS",
+          "value": "192.168.1.10"
+        }
+      ]
+    },
+    {
+      "id": "ip-ten-network",
+      "text": "gateway 10.0.0.1 down",
+      "expect": [
+        {
+          "entity": "IP_ADDRESS",
+          "value": "10.0.0.1"
+        }
+      ]
+    },
+    {
+      "id": "ip-single-digit-quad",
+      "text": "DNS server 8.8.8.8 is down",
+      "expect": [
+        {
+          "entity": "IP_ADDRESS",
+          "value": "8.8.8.8"
+        }
+      ]
+    },
+    {
+      "id": "ip-after-release-word",
+      "text": "release 10.20.30.40 failed",
+      "expect": [
+        {
+          "entity": "IP_ADDRESS",
+          "value": "10.20.30.40"
+        }
+      ]
+    },
+    {
+      "id": "not-ip-five-parts",
+      "text": "1.2.3.4.5",
+      "expect": []
+    },
+    {
+      "id": "not-ip-after-ver",
+      "text": "ver 1.2.3.4",
+      "expect": []
+    },
+    {
+      "id": "ip-sentence-final-dot",
+      "text": "Server at 10.0.0.1.",
+      "expect": [
+        {
+          "entity": "IP_ADDRESS",
+          "value": "10.0.0.1"
+        }
+      ]
+    },
+    {
+      "id": "vkn-shaped-order-number",
+      "text": "Fatura numarası 1234567890",
+      "expect": []
+    },
+    {
+      "id": "not-vkn-after-invoice",
+      "text": "invoice 1234567890",
+      "expect": []
+    },
+    {
+      "id": "not-vkn-created-at",
+      "text": "created_at 1700000003",
+      "expect": []
+    },
+    {
+      "id": "vkn-after-fatura-label",
+      "text": "Fatura VKN: 1234567890",
+      "expect": [
+        {
+          "entity": "TR_VKN",
+          "value": "1234567890"
+        }
+      ]
+    },
+    {
+      "id": "vkn-vergi-numarasi",
+      "text": "Firma vergi numarası 1234567890",
+      "expect": [
+        {
+          "entity": "TR_VKN",
+          "value": "1234567890"
+        }
+      ]
+    },
+    {
+      "id": "vkn-bare",
+      "text": "1700000003",
+      "expect": [
+        {
+          "entity": "TR_VKN",
+          "value": "1700000003"
+        }
+      ]
+    },
+    {
+      "id": "phone-tr-mobile-after-order-no",
+      "text": "Sipariş no 5321234564",
+      "expect": [
+        {
+          "entity": "PHONE_NUMBER",
+          "value": "5321234564"
+        }
+      ]
+    },
+    {
+      "id": "phone-json-us",
+      "text": "{\"phone\": \"4155552671\"}",
+      "expect": [
+        {
+          "entity": "PHONE_NUMBER",
+          "value": "4155552671"
+        }
+      ]
+    },
+    {
+      "id": "phone-tr-mobile-bare",
+      "text": "Telefon 5321234567",
+      "expect": [
+        {
+          "entity": "PHONE_NUMBER",
+          "value": "5321234567"
+        }
+      ]
+    },
+    {
+      "id": "phone-tr-mobile-csv",
+      "text": "ad,telefon\nAli,05321234567",
+      "expect": [
+        {
+          "entity": "PHONE_NUMBER",
+          "value": "05321234567"
+        }
+      ]
+    },
+    {
+      "id": "phone-tr-landline",
+      "text": "Tel: 0212 555 12 34",
+      "expect": [
+        {
+          "entity": "PHONE_NUMBER",
+          "value": "0212 555 12 34"
+        }
+      ]
+    },
+    {
+      "id": "phone-de-international",
+      "text": "Ruf +49 172 5955200 an",
+      "expect": [
+        {
+          "entity": "PHONE_NUMBER",
+          "value": "+49 172 5955200"
+        }
+      ]
+    },
+    {
+      "id": "phone-tr-mobile-prose",
+      "text": "Bana 5321234567 numarasından ulaşın",
+      "expect": [
+        {
+          "entity": "PHONE_NUMBER",
+          "value": "5321234567"
+        }
+      ]
+    },
+    {
+      "id": "phone-fr-dotted",
+      "text": "Appelez le 01.23.45.67.89",
+      "expect": [
+        {
+          "entity": "PHONE_NUMBER",
+          "value": "01.23.45.67.89"
+        }
+      ]
+    },
+    {
+      "id": "phone-us-dashed",
+      "text": "Call 415-555-2671 today",
+      "expect": [
+        {
+          "entity": "PHONE_NUMBER",
+          "value": "415-555-2671"
+        }
+      ]
+    },
+    {
+      "id": "phone-after-an-unrelated-word",
+      "text": "casino 4155552671",
+      "expect": [
+        {
+          "entity": "PHONE_NUMBER",
+          "value": "4155552671"
+        }
+      ]
+    },
+    {
+      "id": "phone-without-cue-us",
+      "text": "John Smith 2125551234 New York",
+      "expect": [
+        {
+          "entity": "PHONE_NUMBER",
+          "value": "2125551234"
+        }
+      ]
+    },
+    {
+      "id": "phone-without-cue-de-mobile",
+      "text": "Kunde Hans, 01725955200, wartet",
+      "expect": [
+        {
+          "entity": "PHONE_NUMBER",
+          "value": "01725955200"
+        }
+      ]
+    },
+    {
+      "id": "phone-number-phrase",
+      "text": "my number is 4155552671",
+      "expect": [
+        {
+          "entity": "PHONE_NUMBER",
+          "value": "4155552671"
+        }
+      ]
+    },
+    {
+      "id": "not-phone-after-invoice-cue",
+      "text": "Invoice 4829104455 is paid",
+      "expect": []
+    },
+    {
+      "id": "not-phone-duration-value",
+      "text": "{\"duration_ms\": 4155552671}",
+      "expect": []
+    },
+    {
+      "id": "phone-json-number-with-phone-key",
+      "text": "{\"customer_phone\": 4155552671}",
+      "expect": [
+        {
+          "entity": "PHONE_NUMBER",
+          "value": "4155552671"
+        }
+      ]
+    },
+    {
+      "id": "phone-word-beats-code-word",
+      "text": "contact code 4155552671",
+      "expect": [
+        {
+          "entity": "PHONE_NUMBER",
+          "value": "4155552671"
+        }
+      ]
+    },
+    {
+      "id": "phone-whatsapp-link-us",
+      "text": "https://wa.me/4155552671",
+      "expect": [
+        {
+          "entity": "PHONE_NUMBER",
+          "value": "4155552671"
+        }
+      ]
+    },
+    {
+      "id": "phone-cue-glued-with-dot",
+      "text": "Tel.05321234567",
+      "expect": [
+        {
+          "entity": "PHONE_NUMBER",
+          "value": "05321234567"
+        }
+      ]
+    },
+    {
+      "id": "phone-tr-mobile-after-hyphen",
+      "text": "GSM-05321234567",
+      "expect": [
+        {
+          "entity": "PHONE_NUMBER",
+          "value": "05321234567"
+        }
+      ]
+    },
+    {
+      "id": "phone-tr-dotted-area-code",
+      "text": "0532.1234567",
+      "expect": [
+        {
+          "entity": "PHONE_NUMBER",
+          "value": "0532.1234567"
+        }
+      ]
+    },
+    {
+      "id": "phone-tr-dotted-after-word",
+      "text": "Ara: 0532.1234567",
+      "expect": [
+        {
+          "entity": "PHONE_NUMBER",
+          "value": "0532.1234567"
+        }
+      ]
+    },
+    {
+      "id": "phone-whatsapp-link",
+      "text": "https://wa.me/905321234567",
+      "expect": [
+        {
+          "entity": "PHONE_NUMBER",
+          "value": "905321234567"
+        }
+      ]
+    },
+    {
+      "id": "phone-json-key-name",
+      "text": "{\"phone_number\": \"4155552671\"}",
+      "expect": [
+        {
+          "entity": "PHONE_NUMBER",
+          "value": "4155552671"
+        }
+      ]
+    },
+    {
+      "id": "phone-two-word-cue-tr",
+      "text": "Telefon numarası: 2125551234",
+      "expect": [
+        {
+          "entity": "PHONE_NUMBER",
+          "value": "2125551234"
+        }
+      ]
+    },
+    {
+      "id": "number-after-no-cue-is-masked",
+      "text": "Sipariş no: 4829104455",
+      "expect": [
+        {
+          "entity": "PHONE_NUMBER",
+          "value": "4829104455"
+        }
+      ]
+    },
+    {
+      "id": "ip-after-turkish-ver",
+      "text": "izin ver 10.0.0.5",
+      "expect": [
+        {
+          "entity": "IP_ADDRESS",
+          "value": "10.0.0.5"
+        }
+      ]
+    },
+    {
+      "id": "phone-shape-beats-glued-id",
+      "text": "ORD-5321234567 iptal",
+      "expect": [
+        {
+          "entity": "PHONE_NUMBER",
+          "value": "5321234567"
+        }
+      ]
+    },
+    {
+      "id": "tckn-spaced-groups",
+      "text": "TCKN 100 000 001 46",
+      "expect": [
+        {
+          "entity": "TR_NATIONAL_ID",
+          "value": "100 000 001 46"
+        }
+      ]
+    },
+    {
+      "id": "tckn-dashed-groups",
+      "text": "TCKN 100-000-001-46",
+      "expect": [
+        {
+          "entity": "TR_NATIONAL_ID",
+          "value": "100-000-001-46"
+        }
+      ]
+    },
+    {
+      "id": "iban-lowercase",
+      "text": "IBAN tr330006100519786457841326",
+      "expect": [
+        {
+          "entity": "IBAN_CODE",
+          "value": "tr330006100519786457841326"
+        }
+      ]
+    },
+    {
+      "id": "email-at-in-brackets",
+      "text": "mail jane[at]example.com",
+      "expect": [
+        {
+          "entity": "EMAIL_ADDRESS",
+          "value": "jane[at]example.com"
+        }
+      ]
+    },
+    {
+      "id": "iban-line-broken",
+      "text": "IBAN TR33 0006 1005 1978\n6457 8413 26",
+      "expect": [
+        {
+          "entity": "IBAN_CODE",
+          "value": "TR33 0006 1005 1978\n6457 8413 26"
+        }
+      ]
+    },
+    {
+      "id": "not-tckn-spaced-date",
+      "text": "Tarih 2026 10 07 olarak girildi",
+      "expect": []
+    },
+    {
+      "id": "not-tckn-spaced-amount",
+      "text": "Tutar 100 000 TL ödendi",
+      "expect": []
+    },
+    {
+      "id": "phone-spaced-not-tckn",
+      "text": "Ara 532 123 45 67",
+      "expect": [
+        {
+          "entity": "PHONE_NUMBER",
+          "value": "532 123 45 67"
+        }
+      ]
+    },
+    {
+      "id": "not-email-at-in-prose",
+      "text": "Toplantı notu: [at] etiketi taslakta kaldı",
+      "expect": []
+    },
+    {
+      "id": "not-iban-lowercase-bad-checksum",
+      "text": "sipariş tr330006100519786457841327 iptal",
+      "expect": []
+    },
+    {
+      "id": "plate-three-letters",
+      "text": "Plaka 34 ABC 123",
+      "expect": [
+        {
+          "entity": "TR_LICENSE_PLATE",
+          "value": "34 ABC 123"
+        }
+      ]
+    },
+    {
+      "id": "plate-two-letters",
+      "text": "Araç 06 AB 1234 ile geldi",
+      "expect": [
+        {
+          "entity": "TR_LICENSE_PLATE",
+          "value": "06 AB 1234"
+        }
+      ]
+    },
+    {
+      "id": "not-plate-storage",
+      "text": "16 GB 512 depolama",
+      "expect": []
+    },
+    {
+      "id": "not-plate-currency-year",
+      "text": "10 USD 2024 fiyatı",
+      "expect": []
+    },
+    {
+      "id": "plate-written-together",
+      "text": "34ABC123 plakalı araç",
+      "expect": [
+        {
+          "entity": "TR_LICENSE_PLATE",
+          "value": "34ABC123"
+        }
+      ]
+    },
+    {
+      "id": "plate-one-letter",
+      "text": "Araç 06 A 1234 otoparkta",
+      "expect": [
+        {
+          "entity": "TR_LICENSE_PLATE",
+          "value": "06 A 1234"
+        }
+      ]
+    },
+    {
+      "id": "not-plate-distance",
+      "text": "34 KM 120 hızla gitti",
+      "expect": []
+    },
+    {
+      "id": "not-plate-no-digits",
+      "text": "2 x 34 ABC sipariş",
+      "expect": []
+    },
+    {
+      "id": "not-plate-glued-id",
+      "text": "ID 34ABC1234567",
+      "expect": []
+    },
+    {
+      "id": "not-plate-line-broken",
+      "text": "Plaka 34 ABC\n123",
+      "expect": []
+    },
+    {
+      "id": "not-plate-uppercase-date",
+      "text": "Uçuş tarihi 07 OCT 26",
+      "expect": []
+    },
+    {
+      "id": "not-plate-voltage",
+      "text": "Adaptör 12 V 2000 mA",
+      "expect": []
+    },
+    {
+      "id": "not-plate-amperage",
+      "text": "Sigorta 16 A 3500 W",
+      "expect": []
+    },
+    {
+      "id": "not-plate-clock-time",
+      "text": "Saat 10 PM 2024-10-07",
+      "expect": []
+    },
+    {
+      "id": "not-plate-product-name",
+      "text": "APPLE IPHONE 15 PRO 256 GB",
+      "expect": []
+    },
+    {
+      "id": "plate-one-letter-five-digits",
+      "text": "34 A 12345",
+      "expect": [
+        {
+          "entity": "TR_LICENSE_PLATE",
+          "value": "34 A 12345"
+        }
+      ]
+    },
+    {
+      "id": "plate-dashed",
+      "text": "34-ABC-123",
+      "expect": [
+        {
+          "entity": "TR_LICENSE_PLATE",
+          "value": "34-ABC-123"
+        }
+      ]
+    },
+    {
+      "id": "plate-written-together-bare",
+      "text": "34ABC123",
+      "expect": [
+        {
+          "entity": "TR_LICENSE_PLATE",
+          "value": "34ABC123"
+        }
+      ]
+    },
+    {
+      "id": "plate-lowercase-after-cue",
+      "text": "plaka: 34 abc 123",
+      "expect": [
+        {
+          "entity": "TR_LICENSE_PLATE",
+          "value": "34 abc 123"
+        }
+      ]
+    },
+    {
+      "id": "not-plate-three-letters-four-digits",
+      "text": "34 ABC 1234",
+      "expect": []
+    },
+    {
+      "id": "not-plate-lowercase-duration",
+      "text": "15 dk 30",
+      "expect": []
+    },
+    {
+      "id": "not-plate-lowercase-months",
+      "text": "12 ay 24",
+      "expect": []
+    },
+    {
+      "id": "not-plate-currency-amount",
+      "text": "50 GBP 100",
+      "expect": []
+    },
+    {
+      "id": "person-name",
+      "text": "Ahmet Yılmaz aradı",
+      "expect": [
+        {
+          "entity": "PERSON",
+          "value": "Ahmet Yılmaz"
+        }
+      ],
+      "known_gap": "tier 4, no PRD",
+      "known_actual": []
+    },
+    {
+      "id": "street-address",
+      "text": "Atatürk Cad. No 5 Kadıköy adresinde",
+      "expect": [
+        {
+          "entity": "LOCATION",
+          "value": "Atatürk Cad. No 5 Kadıköy"
+        }
+      ],
+      "known_gap": "tier 4, no PRD",
+      "known_actual": []
+    }
+  ]
+}

@@ -6,7 +6,7 @@ import signal
 import threading
 from collections.abc import Iterable, Iterator
 
-from .entities import ENTITY_TYPES, normalize_entities
+from .entities import DEFAULT_ENTITIES, normalize_entities
 from .models import Finding
 from .normalize import normalize
 from .recognizers import BARE_NUMBER, ENTITY_MAP, Match, analyze_text
@@ -23,6 +23,7 @@ _PRIORITY = {
     "MAC_ADDRESS": 50,
     "IP_ADDRESS": 40,
     "EMAIL": 30,
+    "TR_LICENSE_PLATE": 25,
     "PHONE": 20,
     "CUSTOM": 10,
 }
@@ -170,7 +171,7 @@ def _unclaimed(bare: list[Match], findings: list[Finding]) -> int:
 
 def analyze(
     text: str,
-    enabled_entities: Iterable[str] = ENTITY_TYPES,
+    enabled_entities: Iterable[str] = DEFAULT_ENTITIES,
     custom: tuple = (),
 ) -> tuple[Finding, ...]:
     return analyze_counting(text, enabled_entities, custom)[0]
@@ -178,7 +179,7 @@ def analyze(
 
 def analyze_counting(
     text: str,
-    enabled_entities: Iterable[str] = ENTITY_TYPES,
+    enabled_entities: Iterable[str] = DEFAULT_ENTITIES,
     custom: tuple = (),
 ) -> tuple[tuple[Finding, ...], int]:
     enabled = frozenset(normalize_entities(enabled_entities))

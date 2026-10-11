@@ -5,8 +5,16 @@ import sys
 import typer
 
 from shim_cli.cli import migration
-from shim_cli.cli.output import emit, emit_json, terminal_text
+from shim_cli.cli.output import (
+    FIX_CONFIRMATION,
+    emit,
+    emit_error,
+    emit_json,
+    terminal_text,
+)
 from shim_cli.session import spool, summary
+
+_FIX_LEDGER = "Run shim doctor claude (or codex, copilot)."
 
 
 def _retained() -> list:
@@ -30,11 +38,14 @@ def report(*, as_json: bool) -> None:
         records = spool.entries_for_stem(stem) if stem else []
         truncated = spool.capped_for_stem(stem) if stem else False
     except (spool.SpoolError, OSError):
-        if as_json:
-            emit_json("report", "error", error="session records could not be read")
-        else:
-            emit("FAIL", "Session records could not be read.", error=True)
-        raise typer.Exit(2) from None
+        emit_error(
+            "report",
+            "RECORDS_UNREADABLE",
+            "Session records could not be read.",
+            "Run shim doctor claude (or codex, copilot); its session_record line "
+            "names the cause.",
+            as_json=as_json,
+        )
 
     source = "session"
     if not records:
@@ -73,11 +84,13 @@ def purge(*, yes: bool, as_json: bool) -> None:
     try:
         existing = ledger.files()
     except (ledger.LedgerError, OSError):
-        if as_json:
-            emit_json("ledger-purge", "error", error="ledger could not be read")
-        else:
-            emit("FAIL", "The ledger could not be read.", error=True)
-        raise typer.Exit(2) from None
+        emit_error(
+            "ledger-purge",
+            "LEDGER_UNREADABLE",
+            "The ledger could not be read.",
+            _FIX_LEDGER,
+            as_json=as_json,
+        )
 
     if not existing:
         if as_json:
@@ -92,8 +105,13 @@ def purge(*, yes: bool, as_json: bool) -> None:
             emit("WARN", "Nothing was deleted.")
             raise typer.Exit(1)
     if as_json and not yes:
-        emit_json("ledger-purge", "error", error="--yes is required with --json")
-        raise typer.Exit(2)
+        emit_error(
+            "ledger-purge",
+            "CONFIRMATION_REQUIRED",
+            "--yes is required with --json",
+            FIX_CONFIRMATION,
+            as_json=True,
+        )
 
     removed = ledger.purge()
     if as_json:
@@ -116,11 +134,13 @@ def show_ledger(*, as_json: bool) -> None:
     try:
         entries = ledger.entries()
     except (ledger.LedgerError, OSError):
-        if as_json:
-            emit_json("ledger-show", "error", error="ledger could not be read")
-        else:
-            emit("FAIL", "The ledger could not be read.", error=True)
-        raise typer.Exit(2) from None
+        emit_error(
+            "ledger-show",
+            "LEDGER_UNREADABLE",
+            "The ledger could not be read.",
+            _FIX_LEDGER,
+            as_json=as_json,
+        )
 
     if not entries:
         if as_json:

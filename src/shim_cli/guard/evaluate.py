@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Iterator
 
 from .analyze import _resolve_overlaps, analyze_counting
-from .entities import ENTITY_TYPES
+from .entities import DEFAULT_ENTITIES
 from .models import Finding, GuardDecision
 from .normalize import MAX_SOURCE_CHARACTERS, InputTooLarge
 
@@ -87,7 +87,7 @@ def _findings_in_pieces(
 
 def evaluate(
     text: str,
-    enabled_entities: Iterable[str] = ENTITY_TYPES,
+    enabled_entities: Iterable[str] = DEFAULT_ENTITIES,
     custom: tuple = (),
     reveal: dict | None = None,
 ) -> GuardDecision:

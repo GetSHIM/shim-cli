@@ -25,8 +25,9 @@ Apply the `ponytail:ponytail` and `code-writing-guidelines` skills to every impl
   of the inspector, not a handled error, so it does not block. A verified
   tool event that cannot be inspected must pass through unchanged and report
   the failure without denying already-created work.
-- Entity settings default to all public types; malformed or unsafe settings fail
-  closed, and no settings field may contain prompt-derived data.
+- Entity settings default to every built-in type except the opt-in types in
+  `guard/entities.py`; malformed or unsafe settings fail closed, and no
+  settings field may contain prompt-derived data.
 - Never modify real user configuration in development or tests; use temporary paths.
 - This repository is public and much of its documentation and corpus comes from
   running the tool for real. Nothing committed may carry the machine it was

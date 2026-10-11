@@ -69,6 +69,9 @@ class Policy:
     diet: tuple = ()
     custom: tuple = ()
     reveal: dict = field(default_factory=dict)
+    # "report" counts injection markers; "note" also tells the model, beside
+    # the tool result, that it holds text that reads as instructions.
+    markers: str = "report"
 
     def mode_for(self, direction: str, tool: str = "", event: str = "") -> str:
         for key in (tool, event, direction):
