@@ -202,6 +202,24 @@ tool listings). `history.jsonl`, beside `projects/`, holds one line per
 interactive prompt with the keys `display`, `pastedContents`, `project`,
 `sessionId` and `timestamp`; `sessionId` is the transcript's file name.
 
+## 1.2.0 release evidence
+
+Recorded 11 October 2026 on macOS 26.4 arm64, CPython 3.13.5 for the suite and
+3.14.3 for the hook, uv 0.12.5, on the 1.2.0 candidate with the rebuilt
+`bin/shim.pyz`. With default settings the hook answers as in 1.1.2 apart from
+the detector changes; the new `html` diet is opt in. Every value was synthetic.
+
+| Evidence | Recorded result |
+| --- | --- |
+| Local gate | `python scripts/check.py` green: lint, format, types, 3,353 tests, build, `git diff --check`. |
+| Claude Code | tested: 2.1.291, run on 2.1.286, the version on the recording machine. Scratch home, `diet = ["json", "html"]` and `ledger = true` in its settings file, the plugin loaded with `--plugin-dir plugins/shim-cli` and no `shim-hook` on `PATH`, so the archive ran under CPython 3.14.3. `claude -p` (Opus 5.5) ran `curl -s` of a 14,632-byte synthetic page served on 127.0.0.1 holding `billing&#64;example&#46;com` and an IBAN split across two `<span>`s. The tool result the model read was 3,502 characters, began with the `[shim: converted from HTML to text; ...]` line, held no markup, and read `Billing questions go to <EMAIL_1>.` and `Refunds are paid to <IBAN_1>.`; the model named the second heading and said both values were masked. `shim report --json` from the ledger: one `mask` event with `EMAIL` 1 and `IBAN` 1 from `Bash`, `bytes_saved` 12,098. `shim doctor claude --json` before `shim install claude --yes` gave `cli.doctor.hook_not_installed` and `cli.doctor.hook_events_missing` (action `shim install claude --yes`) and the informational `hook_activation_unverified`; after it, only `hook_activation_unverified`. Every finding from these runs and from `shim doctor codex --json` validated against `docs/schemas/finding-v1.json` (gateway d000beb). Not run: the `Read` of `page.html` and the MCP echo with `html` on, an agent repairing a broken install from findings alone, and `shim watch --json` against a live session. |
+| Plugin archive as a hook | The rebuilt archive fed a recorded Claude `PostToolUse` Bash event, five runs each, CPython 3.14.3: the 14,632-byte page converted to 3,502 characters with `<EMAIL_1>` and `<IBAN_1>`, 286 ms median end to end including interpreter start; with the default diet the same event, 245 ms, produced no output. A 39,128-byte page cut at Claude Code's 30,000 characters, mid-row, converted to 6,929 characters with `<EMAIL_1>` (368 ms); with the default diet it was masked and kept its markup (296 ms). The same converted answer from CPython 3.9.25. |
+| Hostile HTML | `"<svg>"*N + "</iframe>"*N`: 11.0 s at 560 KB and 26.8 s at 1 MB before the fix, 0.10 s and 0.17 s after; nested `<svg><iframe><noscript><template>` and their end tags: 33.9 s at 2.8 MB before, 0.46 s after. |
+| Codex CLI | tested: 0.159.0. `shim install codex --yes` and `shim doctor codex --json` into a scratch `CODEX_HOME`: the two informational findings, `plugin_not_discoverable` and `hook_activation_unverified`, and no other. The hook was not re-run: no Codex result can be rewritten, so `html` never applies. |
+| GitHub Copilot CLI | tested: 1.0.83, installed 1.0.85. Not re-run. |
+| VS Code | tested: 1.137.0. Not re-run: no VS Code on the recording machine. |
+| Windows | Unchanged: every command still refuses with exit 2 before touching a file (`test_on_windows_every_command_refuses_before_touching_a_file`). |
+
 ## 1.1.2 release evidence
 
 Recorded 6 October 2026 on Linux 6.18 x86_64, CPython 3.13.16, uv 0.12.23, on
