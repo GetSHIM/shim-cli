@@ -390,7 +390,10 @@ def _why_incomplete(exchanges) -> str:
 def render(session, seconds: float) -> str:
     exchanges = [e for e in session.exchanges if e.path.endswith(MODEL_PATHS)]
     if not exchanges and not session.errors:
-        return ""
+        return (
+            f"shim watch — {_duration(seconds)}, 0 requests\n"
+            "  no request reached the model provider through the proxy"
+        )
     plural = "" if len(exchanges) == 1 else "s"
     lines = [f"shim watch — {_duration(seconds)}, {len(exchanges)} request{plural}"]
 

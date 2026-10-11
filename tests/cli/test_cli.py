@@ -231,6 +231,7 @@ def test_privacy_stdin_json_and_no_color(monkeypatch) -> None:
     safe = runner.invoke(app, ["scan"], input="plain synthetic text")
     finding = runner.invoke(app, ["scan", "--json"], input="email alice@example.com")
     redacted = runner.invoke(app, ["redact"], input="email alice@example.com")
+    redacted_file = runner.invoke(app, ["redact"], input="email alice@example.com\n")
     redacted_json = runner.invoke(
         app, ["redact", "--json"], input="Contact alice@example.invalid"
     )
@@ -243,7 +244,8 @@ def test_privacy_stdin_json_and_no_color(monkeypatch) -> None:
     assert "alice@example.com" not in finding.output
     assert json.loads(finding.output)["schema_version"] == 1
     assert redacted.exit_code == 0
-    assert redacted.output == "email <EMAIL_1>\n"
+    assert redacted.output == "email <EMAIL_1>"
+    assert redacted_file.output == "email <EMAIL_1>\n"
     assert "alice@example.invalid" not in redacted_json.output
     assert "redacted_text" not in json.loads(redacted_json.output)
     assert "redacted_text" not in json.loads(demo.output)
@@ -434,6 +436,9 @@ def test_copilot_install_status_doctor_and_revert(monkeypatch, tmp_path: Path) -
     reverted = runner.invoke(app, ["revert", "copilot", "--yes"])
 
     assert preview.exit_code == installed.exit_code == reverted.exit_code == 0
+    assert "Start a new GitHub Copilot CLI session; it has no trust step." in " ".join(
+        installed.output.split()
+    )
     assert missing.exit_code == 1
     assert json.loads(missing.output)["state"] == "not_installed"
     assert json.loads(current.output)["state"] == "installed"
@@ -469,6 +474,85 @@ def test_copilot_doctor_names_no_trust_step_and_no_double_inspection(
     )
     assert "/hooks" not in said
     assert checks["hook_activation"] == checks["duplicate_hooks"] == "PASS"
+
+
+def test_claude_doctor_with_nothing_installed_claims_no_hook_path(
+    monkeypatch, tmp_path: Path
+) -> None:
+    _claude_home(monkeypatch, tmp_path)
+    _claude(monkeypatch, tmp_path)
+
+    said = " ".join(unstyle(runner.invoke(app, ["doctor", "claude"]).output).split())
+
+    assert "Exactly one shim hook path" not in said
+    assert "PASS No shim hook is installed, so nothing is inspected twice." in said
+
+
+def test_claude_install_over_a_file_without_hooks_warns_about_none(
+    monkeypatch, tmp_path: Path
+) -> None:
+    home = _claude_home(monkeypatch, tmp_path)
+    _claude(monkeypatch, tmp_path)
+    (home / ".claude" / "settings.json").write_text('{"theme": "dark"}\n')
+
+    installed = runner.invoke(app, ["install", "claude", "--yes"])
+
+    assert installed.exit_code == 0
+    assert "WARN" not in unstyle(installed.output)
+    assert "Start a new Claude Code session; /hooks lists shim." in installed.output
+
+
+@pytest.mark.parametrize("command", ["install", "revert", "doctor"])
+def test_a_malformed_claude_settings_file_is_named_with_its_json_error(
+    monkeypatch, tmp_path: Path, command: str
+) -> None:
+    home = _claude_home(monkeypatch, tmp_path)
+    _claude(monkeypatch, tmp_path)
+    (home / ".claude" / "settings.json").write_text(
+        '{"theme": "dark",\n  "hooks": {,}\n'
+    )
+    args = [command, "claude"] + (["--yes"] if command != "doctor" else [])
+
+    # Rich wraps a long path anywhere, so compare without whitespace.
+    said = "".join(unstyle(runner.invoke(app, args).output).split())
+
+    assert "settings.jsonisnotvalidJSON:Expectingpropertyname" in said
+    assert "line2,column13." in said
+
+
+@pytest.mark.parametrize(
+    ("client", "outcome"),
+    (
+        (
+            "claude",
+            "In Claude Code, a prompt you type like this is reported and sent "
+            "unchanged (stopped under enforce); a tool result like it reaches the "
+            "model masked.",
+        ),
+        (
+            "codex",
+            "In Codex, a prompt you type like this is reported and sent unchanged "
+            "(stopped under enforce); tool calls and results are not inspected.",
+        ),
+        (
+            "copilot",
+            "In GitHub Copilot CLI, a prompt you type like this reaches the model "
+            "masked; tool calls and results are not inspected.",
+        ),
+    ),
+)
+def test_demo_shows_the_sentence_before_and_after_and_what_the_client_does(
+    client: str, outcome: str
+) -> None:
+    result = runner.invoke(app, ["demo", client])
+    said = unstyle(result.output)
+
+    assert result.exit_code == 0
+    assert "before  Send the synthetic report to demo@example.com" in said
+    assert (
+        "after   Send the synthetic report to <EMAIL_1> using token=<SECRET_1>" in said
+    )
+    assert outcome in " ".join(said.split())
 
 
 def test_confirmation_and_doctor(monkeypatch, tmp_path: Path) -> None:
@@ -2027,10 +2111,12 @@ _ERROR_CASES: dict[str, tuple] = {
         ["install", "claude", "--yes"],
         _claude_settings(b'{"hooks":'),
         2,
-        "Claude Code hook configuration cannot be changed safely.",
+        "Claude Code hook configuration cannot be changed safely. {settings} is "
+        "not valid JSON: Expecting value at line 1, column 10.",
         "Fix {settings} by hand so it parses, then run the command again.",
         {"client": "claude", "target": "{settings}"},
-        "FAIL Claude Code hook configuration cannot be changed safely.\n"
+        "FAIL Claude Code hook configuration cannot be changed safely. {settings} "
+        "is not valid JSON: Expecting value at line 1, column 10.\n"
         "WARN Review Claude Code hooks manually; shim did not change malformed, "
         "ambiguous, or unsafe settings.\n",
     ),

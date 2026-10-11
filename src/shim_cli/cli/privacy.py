@@ -11,6 +11,16 @@ MAX_STDIN_BYTES = 1_000_000
 _DEMO_TEXT = (
     "Send the synthetic report to demo@example.com using token=sk_demo_1234567890."
 )
+# What each client's hook does with that sentence by default (README, Supported clients).
+_DEMO_OUTCOME = {
+    "claude": "In Claude Code, a prompt you type like this is reported and sent "
+    "unchanged (stopped under enforce); a tool result like it reaches the model "
+    "masked.",
+    "codex": "In Codex, a prompt you type like this is reported and sent unchanged "
+    "(stopped under enforce); tool calls and results are not inspected.",
+    "copilot": "In GitHub Copilot CLI, a prompt you type like this reaches the "
+    "model masked; tool calls and results are not inspected.",
+}
 
 
 def read_stdin() -> str:
@@ -75,7 +85,8 @@ def redact(*, as_json: bool) -> None:
             counts=dict(decision.counts),
         )
     else:
-        print(terminal_text(decision.redacted_text, sys.stdout, "\n\t"))
+        # The input's own line ending, so `shim redact < f > g` changes only values.
+        sys.stdout.write(terminal_text(decision.redacted_text, sys.stdout, "\n\t"))
 
 
 def demo(*, client: str, as_json: bool) -> None:
@@ -94,7 +105,9 @@ def demo(*, client: str, as_json: bool) -> None:
         )
     elif decision.blocked:
         emit("PASS", "Synthetic local demo detected sensitive data.")
-        print(decision.redacted_text)
+        print(f"  before  {_DEMO_TEXT}")
+        print(f"  after   {decision.redacted_text}")
+        print(_DEMO_OUTCOME[client])
     else:
         emit("FAIL", "Synthetic local demo did not detect its test data.", error=True)
     if not decision.blocked:

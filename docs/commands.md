@@ -174,9 +174,11 @@ so a file you formatted by hand keeps its content but not its layout.
 
 A client settings file that does not parse, such as a `settings.json` with a
 trailing comma, is left alone: install exits `2` with `FAIL Claude Code hook
-configuration cannot be changed safely.`, naming neither the file nor the
-error, and runs once you have fixed the JSON by hand. With `--json` the same
-refusal is `CLIENT_SETTINGS_MALFORMED`, and its `fix` names the file.
+configuration cannot be changed safely.` and `~/.claude/settings.json is not
+valid JSON:`, then Python's JSON error with its line and column, and runs once
+you have fixed the JSON by hand. `revert`, `status` and `doctor` name
+the file and the error the same way. With `--json` the same refusal is
+`CLIENT_SETTINGS_MALFORMED`, and its `fix` names the file.
 
 `--json` with `--yes` writes one object: `client`, `target` (the settings
 file), `action` (`create`, `update` or `noop`), `events` (the hook events
@@ -419,9 +421,9 @@ client's own traffic to the provider it was already using. Nothing is modified
 and no request body is written to disk — the report says so on its last line.
 
 The report prints when the client exits. When no request went through the
-proxy, text mode prints no report at all: you see `PASS Watching claude on
-http://127.0.0.1:…`, the client's own output and nothing after it. `--json`
-still writes one, with `"requests": 0`. A report looks like this:
+proxy, for example because the client was not signed in, it is two lines:
+`shim watch — 1s, 0 requests` and `no request reached the model provider
+through the proxy`; `--json` has `"requests": 0`. A report looks like this:
 
 ```
 shim watch — 2m 34s, 3 requests
@@ -706,13 +708,12 @@ read at all and while shim's settings file is refused or invalid.
 Same input, but writes the rewritten text to stdout.
 
 ```console
-$ printf 'key AKIAIOSFODNN7EXAMPLE' | shim redact
+$ echo 'key AKIAIOSFODNN7EXAMPLE' | shim redact
 key <SECRET_1>
 ```
 
-shim adds one newline to the end of the output, whatever the input ended with,
-so a file that already ends with one comes back from `shim redact < file` with
-a blank line at the end.
+The output ends the way the input did, so `shim redact < file > copy` changes
+only the values.
 
 Exits `0`, or `1` with `Unable to process stdin.` when stdin cannot be read or
 scanned in full, or the settings file is refused or invalid.
@@ -784,11 +785,10 @@ one sentence and nothing about its contents. Nothing is written.
 
 ### `shim demo <client>`
 
-Runs the detector on a synthetic sentence and shows what it finds and how it
-would be masked. The output is the same for every client: it does not show
-what your client's hook does with a finding — Codex only reports a prompt, and
-a Claude Code prompt is reported, not changed, by default. It installs
-nothing, touches no hook and records nothing, so it never appears in `shim
+Runs the detector on a synthetic sentence, shows it before and after masking,
+and says what that client's hook does by default with a prompt or a tool
+result like it. It does not run the hook: to see that work, use the check in
+the README's Install section. It installs nothing, touches no hook and records nothing, so it never appears in `shim
 report`. Nothing is read from your machine, your settings included: the input
 is fabricated. `<client>` is `claude`, `codex` or `copilot`; VS Code has no
 target.
@@ -796,7 +796,9 @@ target.
 ```console
 $ shim demo claude
 PASS Synthetic local demo detected sensitive data.
-Send the synthetic report to <EMAIL_1> using token=<SECRET_1>
+  before  Send the synthetic report to demo@example.com using token=sk_demo_1234567890.
+  after   Send the synthetic report to <EMAIL_1> using token=<SECRET_1>
+In Claude Code, a prompt you type like this is reported and sent unchanged (stopped under enforce); a tool result like it reaches the model masked.
 ```
 
 ## The settings file

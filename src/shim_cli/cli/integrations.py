@@ -175,6 +175,25 @@ def _plan_error(client: str, command: str, as_json: bool) -> NoReturn:
     )
 
 
+def parse_error(plan: Plan) -> str:
+    """Where a client settings file stops parsing, or "" when it parses.
+
+    `json`'s message names the expected token, never the file's content.
+    """
+    if plan.state.content is None:
+        return ""
+    try:
+        json.loads(plan.state.content.decode("utf-8"))
+    except UnicodeDecodeError:
+        return f" {plan.target} is not UTF-8."
+    except json.JSONDecodeError as error:
+        return (
+            f" {plan.target} is not valid JSON: {error.msg} at line "
+            f"{error.lineno}, column {error.colno}."
+        )
+    return ""
+
+
 def _plan_refused(
     plan: Plan,
     client: str,
@@ -191,7 +210,7 @@ def _plan_refused(
         emit_error(
             command,
             "CLIENT_SETTINGS_MALFORMED",
-            message,
+            message + parse_error(plan),
             f"Fix {target} by hand so it parses, then run the command again.",
             as_json=as_json,
             then=then,
@@ -286,6 +305,7 @@ FIX_REINSTALL = (
 )
 _NEXT_STEP = {
     "claude": "Start a new Claude Code session; /hooks lists shim.",
+    "copilot": "Start a new GitHub Copilot CLI session; it has no trust step.",
     "codex": (
         "Codex skips a hook you have not trusted, without warning: open "
         "/hooks in Codex, review the shim entry and enable it."
@@ -344,7 +364,7 @@ def install(*, client: str, dry_run: bool, yes: bool, as_json: bool = False) -> 
     if action is Action.UPDATE:
         if legacy_hook and not as_json:
             emit("PASS", "Replaced the 0.2.0 hook line with the current one.")
-        if foreign_hooks or not legacy_hook:
+        if foreign_hooks:
             warnings.append(
                 f"Existing {name} hooks will be preserved; shim will be appended last."
             )
@@ -448,6 +468,8 @@ def install(*, client: str, dry_run: bool, yes: bool, as_json: bool = False) -> 
     )
     if client == "codex":
         emit("WARN", _NEXT_STEP["codex"])
+    else:
+        print(_NEXT_STEP[client])
 
 
 def status(*, client: str, as_json: bool) -> None:

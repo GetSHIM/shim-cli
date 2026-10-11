@@ -67,11 +67,11 @@ a value that is not yours:
 shim demo claude
 ```
 
-The demo runs the detector on a synthetic sentence, ignoring your settings, and
-shows what it finds and how it would be masked. The output is the same for
-every client: it does not show what your client's hook does with a finding.
-Codex only reports, and a Claude Code prompt is reported, not changed, by
-default. The demo installs nothing and touches no hook. To see the hook itself
+The demo runs the detector on a synthetic sentence, ignoring your settings,
+shows it before and after masking, and says what your client does by default
+with a prompt or a tool result like it: Claude Code reports a typed prompt and
+masks a tool result, Codex reports, GitHub Copilot CLI masks the prompt. The
+demo installs nothing and touches no hook. To see the hook itself
 work in a live session, use the check in
 [the README's Install section](../README.md#install).
 
@@ -208,7 +208,7 @@ you meant is a pattern that masks half your file.
 Check it before you trust it:
 
 ```console
-$ printf 'deploy ATLAS-1874 to db-core-01' | shim redact
+$ echo 'deploy ATLAS-1874 to db-core-01' | shim redact
 deploy <CUSTOM_1> to <CUSTOM_2>
 ```
 
@@ -257,7 +257,7 @@ A connection string keeps its scheme, host, port and database and loses its
 user and password, so the agent can still tell production from staging:
 
 ```console
-$ printf 'postgresql://app:synthetic-password@db-prod.internal:5432/kasa' | shim redact
+$ echo 'postgresql://app:synthetic-password@db-prod.internal:5432/kasa' | shim redact
 postgresql://<DB_URI_1>@db-prod.internal:5432/kasa
 ```
 
@@ -266,7 +266,7 @@ your host names are sensitive in themselves, teach shim their shape:
 
 ```console
 $ shim config --custom 'DB_HOST=\bdb-[a-z-]+\.internal\b' --yes
-$ printf 'postgresql://app:synthetic-password@db-prod.internal:5432/kasa' | shim redact
+$ echo 'postgresql://app:synthetic-password@db-prod.internal:5432/kasa' | shim redact
 postgresql://<DB_URI_1>@<CUSTOM_1>:5432/kasa
 ```
 
