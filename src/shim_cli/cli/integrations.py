@@ -344,7 +344,7 @@ def install(*, client: str, dry_run: bool, yes: bool, as_json: bool = False) -> 
     if action is Action.UPDATE:
         if legacy_hook and not as_json:
             emit("PASS", "Replaced the 0.2.0 hook line with the current one.")
-        if foreign_hooks or not legacy_hook:
+        if foreign_hooks:
             warnings.append(
                 f"Existing {name} hooks will be preserved; shim will be appended last."
             )

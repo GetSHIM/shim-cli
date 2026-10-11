@@ -471,6 +471,31 @@ def test_copilot_doctor_names_no_trust_step_and_no_double_inspection(
     assert checks["hook_activation"] == checks["duplicate_hooks"] == "PASS"
 
 
+def test_claude_doctor_with_nothing_installed_claims_no_hook_path(
+    monkeypatch, tmp_path: Path
+) -> None:
+    _claude_home(monkeypatch, tmp_path)
+    _claude(monkeypatch, tmp_path)
+
+    said = " ".join(unstyle(runner.invoke(app, ["doctor", "claude"]).output).split())
+
+    assert "Exactly one shim hook path" not in said
+    assert "PASS No shim hook is installed, so nothing is inspected twice." in said
+
+
+def test_claude_install_over_a_file_without_hooks_warns_about_none(
+    monkeypatch, tmp_path: Path
+) -> None:
+    home = _claude_home(monkeypatch, tmp_path)
+    _claude(monkeypatch, tmp_path)
+    (home / ".claude" / "settings.json").write_text('{"theme": "dark"}\n')
+
+    installed = runner.invoke(app, ["install", "claude", "--yes"])
+
+    assert installed.exit_code == 0
+    assert "WARN" not in unstyle(installed.output)
+
+
 def test_confirmation_and_doctor(monkeypatch, tmp_path: Path) -> None:
     _codex_home(monkeypatch, tmp_path)
     _codex(monkeypatch, tmp_path)

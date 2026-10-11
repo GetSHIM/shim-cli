@@ -523,6 +523,12 @@ def _duplicate_check(client: str, installed: frozenset) -> Check:
             code="DUPLICATE_HOOKS",
             fix="Run shim revert claude, or uninstall the plugin.",
         )
+    if not plugins and not installed:
+        return Check(
+            "duplicate_hooks",
+            "PASS",
+            "No shim hook is installed, so nothing is inspected twice.",
+        )
     return Check("duplicate_hooks", "PASS", "Exactly one shim hook path is installed.")
 
 
