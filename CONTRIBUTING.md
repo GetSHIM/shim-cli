@@ -28,4 +28,5 @@ private advisory, as [SECURITY.md](SECURITY.md) describes, never an issue.
 `scripts/build_zipapp.py`. The Claude Code marketplace installs the plugin from
 `main`, so an archive rebuilt between releases would ship unreleased code to
 plugin users while PyPI still serves the last release. A pull request that is
-not a release leaves the archive alone.
+not a release leaves the archive alone; CI fails one that changes the archive
+without changing the version in `pyproject.toml`.

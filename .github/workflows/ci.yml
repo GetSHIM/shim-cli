@@ -129,3 +129,28 @@ jobs:
               <(answer '${{ steps.floor.outputs.python-path }}' "$fixture") \
               <(answer '${{ steps.current.outputs.python-path }}' "$fixture")
           done
+  archive-follows-version:
+    # The marketplace installs the plugin from main, so a shim.pyz rebuilt
+    # without a release ships unreleased code to plugin users.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: The plugin archive changes only with the version
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -eu
+          if git diff --quiet "$BASE" HEAD -- plugins/shim-cli/bin/shim.pyz; then
+            exit 0
+          fi
+          if git diff "$BASE" HEAD -- pyproject.toml | grep -q '^+version = '; then
+            exit 0
+          fi
+          echo "plugins/shim-cli/bin/shim.pyz changed without a version change in pyproject.toml."
+          echo "Only a release commit rebuilds the archive (CONTRIBUTING.md, The plugin archive)."
+          exit 1
