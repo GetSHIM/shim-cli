@@ -37,7 +37,9 @@ class _Text(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.out: list = []
         self.title: list = []
-        self.dropped: list = []
+        # Open dropped elements by tag, as depths: a stack searched on every end
+        # tag made nested hostile markup quadratic.
+        self.dropped: dict = {}
         self.verbatim = 0
         self.links: list = []
         self.cells = 0
@@ -59,12 +61,12 @@ class _Text(HTMLParser):
 
     def handle_starttag(self, tag, attrs) -> None:
         if tag == "body" and "head" in self.dropped:
-            del self.dropped[self.dropped.index("head") :]
-        if tag == "title" and not self.title and set(self.dropped) <= {"head"}:
+            self.dropped.clear()
+        if tag == "title" and not self.title and self.dropped.keys() <= {"head"}:
             self.in_title = True
             return
         if tag in _DROPPED:
-            self.dropped.append(tag)
+            self.dropped[tag] = self.dropped.get(tag, 0) + 1
             return
         if self.dropped:
             return
@@ -95,9 +97,10 @@ class _Text(HTMLParser):
             self.in_title = False
             return
         if tag in _DROPPED:
-            if tag in self.dropped:
-                index = len(self.dropped) - 1 - self.dropped[::-1].index(tag)
-                del self.dropped[index:]
+            if self.dropped.get(tag) == 1:
+                del self.dropped[tag]
+            elif tag in self.dropped:
+                self.dropped[tag] -= 1
             return
         if self.dropped:
             return
@@ -118,8 +121,9 @@ class _Text(HTMLParser):
 
 
 def to_text(text: str) -> str:
-    """The page as text, or `text` itself when it is not a whole page, does not
-    parse to its end, or would not be at most half its size. Never raises."""
+    """The page as text, or `text` itself when it does not parse to its end,
+    leaves a dropped element open, is not a whole page or would not be at most
+    half its size. Raises only the hook's `TimeoutError`."""
     if len(text) < HTML_MIN_CHARS or not text.lstrip()[:14].lower().startswith(
         _PAGE_STARTS
     ):
@@ -131,12 +135,15 @@ def to_text(text: str) -> str:
         parser.feed(PLACEHOLDER.sub(lambda m: "&lt;" + m.group(0)[1:-1] + "&gt;", text))
         # `close()` re-scans an unfinished tag, comment or quote once per `<`
         # after it, quadratic on a hostile page; `feed()` alone stops there.
-        if parser.rawdata.strip():
+        # An unclosed `<svg>` would drop the rest of the page without a word.
+        if parser.dropped or parser.rawdata.strip():
             return text
         title = " ".join("".join(parser.title).split())
         lines = [line.rstrip() for line in "".join(parser.out).split("\n")]
         body = _BLANK_LINES.sub("\n\n", "\n".join(lines)).strip("\n")
-    except Exception:
+    except TimeoutError:
+        raise
+    except Exception:  # the parser's own errors differ by Python version
         return text
     if not title and not body:
         return text

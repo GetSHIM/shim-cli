@@ -193,6 +193,14 @@ def test_a_page_that_does_not_parse_to_its_end_is_left_unchanged(tail: str) -> N
     assert to_text(page) is page
 
 
+@pytest.mark.parametrize("tag", ["script", "svg", "iframe", "noscript", "template"])
+def test_an_unclosed_dropped_element_leaves_the_page_unchanged(tag: str) -> None:
+    # Everything after it would be dropped without a word.
+    page = _page(f"<p>Body</p><{tag}><p>the rest of the page</p>")
+
+    assert to_text(page) is page
+
+
 def test_hostile_pages_finish_in_linear_time_and_unchanged() -> None:
     head = "<!doctype html>"
     pages = [
@@ -214,6 +222,44 @@ def test_hostile_pages_finish_in_linear_time_and_unchanged() -> None:
     assert all(
         result is page for result, page in zip(results[:5], pages[:5], strict=True)
     )
+
+
+def _seconds(page: str) -> float:
+    started = time.perf_counter()
+    to_text(page)
+    return time.perf_counter() - started
+
+
+@pytest.mark.parametrize(
+    ("opening", "closing"),
+    [
+        ("<svg>", "</iframe>"),
+        ("<iframe>", "</svg>"),
+        ("<noscript><template>", "</template></noscript>"),
+        ("<svg><iframe><noscript><template>", "</template></noscript></iframe></svg>"),
+        ("<template>", "</noscript>"),
+    ],
+)
+def test_nested_dropped_elements_take_linear_time(opening: str, closing: str) -> None:
+    count = 1_000_000 // len(opening + closing)
+    hostile = "<!doctype html><html><body>" + opening * count + closing * count
+    # The same page with ordinary tags in place of the dropped ones.
+    benign = hostile
+    for name in ("noscript", "template", "iframe", "svg"):
+        benign = benign.replace(name, "div")
+
+    # Each end tag used to search every element still open: 17.9 s at 560 KB.
+    assert _seconds(hostile) < 3 * _seconds(benign) + 0.2
+
+
+def test_the_hook_deadline_is_not_swallowed(monkeypatch) -> None:
+    def expired(self, data):
+        raise TimeoutError("shim hook deadline exceeded")
+
+    monkeypatch.setattr(html_text._Text, "handle_data", expired)
+
+    with pytest.raises(TimeoutError):
+        to_text(_page("<p>Body</p>"))
 
 
 def test_an_error_inside_the_parser_leaves_the_text_unchanged(monkeypatch) -> None:

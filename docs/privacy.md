@@ -374,8 +374,13 @@ every line, removing a Markdown hard line break since that break *is* two
 trailing spaces. It never changes a line count. `html` is opt in because it is
 not lossless: a result that is a whole HTML page reaches the model as text, its
 markup, scripts and styles dropped and a header line saying so. Masking runs
-first, and a placeholder stays a placeholder. Like every transform, the record
-keeps only its name and the sizes before and after, never the page.
+first, and a placeholder stays a placeholder. The converted text is then scanned
+again, because decoding entities and joining text split across tags can
+assemble a value the first scan could not see (`ops&#64;example&#46;com`, an IBAN
+split across `<span>`s); what it finds is masked and counted, and if that scan
+fails the page is left unconverted. Injection markers are read from the
+converted text too. Like every transform, the record keeps only its name and
+the sizes before and after, never the page.
 
 JSON is compacted by a lexer rather than by parsing and re-serialising:
 re-serialising rewrites number literals (`1.10` becomes `1.1`, a long decimal
