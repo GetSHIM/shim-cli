@@ -467,6 +467,8 @@ def install(*, client: str, dry_run: bool, yes: bool, as_json: bool = False) -> 
     )
     if client == "codex":
         emit("WARN", _NEXT_STEP["codex"])
+    elif client == "claude":
+        print(_NEXT_STEP["claude"])
 
 
 def status(*, client: str, as_json: bool) -> None:

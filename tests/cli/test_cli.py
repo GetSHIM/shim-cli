@@ -496,6 +496,7 @@ def test_claude_install_over_a_file_without_hooks_warns_about_none(
 
     assert installed.exit_code == 0
     assert "WARN" not in unstyle(installed.output)
+    assert "Start a new Claude Code session; /hooks lists shim." in installed.output
 
 
 @pytest.mark.parametrize("command", ["install", "revert", "doctor"])
