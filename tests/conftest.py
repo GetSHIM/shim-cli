@@ -1,8 +1,30 @@
 from __future__ import annotations
 
+import json
 import tempfile
+from pathlib import Path
 
 import pytest
+
+FINDING_SCHEMA = Path(__file__).resolve().parents[1] / "docs/schemas/finding-v1.json"
+
+
+@pytest.fixture
+def valid_findings():
+    """A command's `findings`, each validated against the vendored schema v1."""
+    from jsonschema import Draft202012Validator
+
+    validator = Draft202012Validator(
+        json.loads(FINDING_SCHEMA.read_text(encoding="utf-8")),
+        format_checker=Draft202012Validator.FORMAT_CHECKER,
+    )
+
+    def check(document: dict) -> list:
+        for finding in document["findings"]:
+            validator.validate(finding)
+        return document["findings"]
+
+    return check
 
 
 @pytest.fixture(autouse=True)

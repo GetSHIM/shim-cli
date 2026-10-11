@@ -123,7 +123,7 @@ def _carrying(records: list, marker: str) -> list:
     ]
 
 
-def _uninspected(records: list) -> list:
+def uninspected(records: list) -> list:
     from .record import NOT_INSPECTED
 
     return [
@@ -131,6 +131,14 @@ def _uninspected(records: list) -> list:
         for record in records
         if isinstance(record.get("note"), str)
         and record["note"].startswith((NOT_INSPECTED, "not-inspected:"))
+    ]
+
+
+def incomplete(records: list) -> list:
+    return [
+        record
+        for record in records
+        if str(record.get("note", "")).startswith(("partial:", "not-inspected:"))
     ]
 
 
@@ -146,13 +154,13 @@ def _custom_totals(records: list) -> list:
     return sorted(counts.items(), key=lambda pair: (-pair[1], pair[0]))
 
 
-def _action(record: dict) -> object:
+def action_of(record: dict) -> object:
     if record.get("event") == FAILED_EVENT and record.get("action") == "report":
         return "unmasked"
     return record.get("action")
 
 
-def _acted(records: list) -> list:
+def acted_on(records: list) -> list:
     return [
         record
         for record in records
@@ -180,10 +188,10 @@ def _model_output(records: list) -> list:
 
 
 def render(records: list, capped: bool = False) -> str:
-    acted = _acted(records)
+    acted = acted_on(records)
     saved = _saved(records)
     markers = _marker_totals(records)
-    skipped = _uninspected(records)
+    skipped = uninspected(records)
     partial = [
         record
         for record in records
@@ -191,7 +199,7 @@ def render(records: list, capped: bool = False) -> str:
     ]
     lines: list = []
     for action, label in ACTION_LABELS:
-        matching = [record for record in acted if _action(record) == action]
+        matching = [record for record in acted if action_of(record) == action]
         if not matching:
             continue
         first = True
@@ -207,7 +215,7 @@ def render(records: list, capped: bool = False) -> str:
             lines.append(f"  {column:<9} {count} {entity}{_where(relevant)}")
     bare = _bare(records)
     if bare:
-        warned = any(_action(record) == "report" for record in acted)
+        warned = any(action_of(record) == "report" for record in acted)
         column = "" if warned else "warned"
         total = sum(record["bare_numbers"] for record in bare)
         lines.append(f"  {column:<9} {total} {BARE_NUMBERS}{_where(bare)}")
@@ -259,11 +267,11 @@ def render(records: list, capped: bool = False) -> str:
 
 
 def as_json(records: list, capped: bool = False) -> dict:
-    acted = _acted(records)
+    acted = acted_on(records)
     median, p95 = _overhead(records)
     actions: dict = {}
     for action, _label in ACTION_LABELS:
-        matching = [record for record in acted if _action(record) == action]
+        matching = [record for record in acted if action_of(record) == action]
         if matching:
             actions[action] = {
                 "entities": dict(_totals(matching)),
@@ -280,11 +288,8 @@ def as_json(records: list, capped: bool = False) -> dict:
         "overhead_ms": {"median": median, "p95": p95},
         "bytes_saved": saved,
         "tokens_saved_approx": saved // BYTES_PER_TOKEN,
-        "not_inspected": len(_uninspected(records)),
-        "incomplete": sum(
-            str(record.get("note", "")).startswith(("partial:", "not-inspected:"))
-            for record in records
-        ),
+        "not_inspected": len(uninspected(records)),
+        "incomplete": len(incomplete(records)),
         "markers": {
             marker: {"count": count, "sources": _sources(_carrying(records, marker))}
             for marker, count in _marker_totals(records)
@@ -296,4 +301,4 @@ def as_json(records: list, capped: bool = False) -> dict:
     }
 
 
-__all__ = ["as_json", "render"]
+__all__ = ["acted_on", "action_of", "as_json", "incomplete", "render", "uninspected"]

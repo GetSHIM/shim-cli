@@ -52,18 +52,19 @@ classification and the modes and actions built on it:
 | `guard/` | Entity catalog, normalization, recognizers, findings, spans, and typed redaction. |
 | `policy.py` | Directions, modes, actions, defaults, `Policy`, classification, and action selection. |
 | `config.py` | Config path, TOML parsing/rendering, validation at file ingress, and loading a `Policy`. |
-| `events/` | Deterministic tool-payload traversal, context diet, injection markers, and the shared tool-event pipeline. |
+| `events/` | Deterministic tool-payload traversal, context diet (`html_text` turns a whole HTML page into text when `html` is on), injection markers, and the shared tool-event pipeline. |
 | `clients/<client>/` | Native prompt codecs, verified tool codecs, settings fragments, capabilities, and coexistence rules for that client. |
 | `session/` | `Record`, timestamps, best-effort `remember()`, spool, ledger, cleanup, and summaries. |
 | `settings_files/` | Guarded inspection, pure change planning, parent creation, revalidation, and atomic publication. |
 | `watch/` | Proxy forwarding, wire measurement, and watch report values. |
 | `hook.py` | Deadline, bounded stdin, envelope dispatch, visible failure behavior, temporary prompt-file lifecycle, and stdout. |
-| `cli/` | Command composition and human or JSON presentation. |
+| `cli/` | Command composition and human or JSON presentation, including findings in the gateway's schema v1 (`cli/findings.py`). |
 
 The dependency direction is deliberately small:
 
 ```text
-cli  ------> config, clients, session, settings_files, watch, guard
+cli  ------> config, clients, session, settings_files, watch, guard,
+             events/diet, events/injection (names only)
 hook ------> config, clients, events, session, guard
 config ----> policy, guard/entities, settings_files, events/diet
 clients ---> policy, events, session, settings_files
@@ -123,7 +124,8 @@ a replacement. Diet runs only on rewrite-capable inbound results outside
 `observe`, and never on a view of a local file whose exact bytes a later edit
 may need. Lossless JSON compaction is the default; trailing-whitespace removal
 is available only through explicit configuration because it can change
-Markdown hard breaks.
+Markdown hard breaks, and so is HTML-to-text, which drops markup; its parser,
+stdlib `html.parser`, is imported only when `html` is enabled.
 
 Twelve entity types are built in; `TR_LICENSE_PLATE` is opt-in
 (`OPT_IN_TYPES` in `guard/entities.py`), so the default set leaves it out and

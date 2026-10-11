@@ -220,6 +220,51 @@ def test_workspace_files_carry_only_synthetic_values(tmp_path: Path) -> None:
         "docker-compose.yml",
         "dotenv-sample.txt",
         "notes.md",
+        "page.html",
+    ]
+
+
+def test_the_probe_page_is_a_whole_page_of_about_40_kb() -> None:
+    from shim_cli.events.html_text import HEADER, to_text
+
+    page = probe.page_html()
+    text = to_text(page).split("\n")
+
+    assert 38_000 < len(page.encode()) < 42_000
+    assert text[:5] == [
+        HEADER,
+        "Release status",
+        "# Release status",
+        "Questions go to ops@example.com.",
+        "## Build history",
+    ]
+    assert text[-2:] == [
+        "## Links",
+        "Runbook (https://example.com/runbook) and "
+        "dashboard (https://example.com/dashboard).",
+    ]
+    assert len("\n".join(text)) < len(page) // 2
+
+
+def test_mcp_server_returns_a_named_page_as_one_text_block(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "page.html").write_text("<!doctype html><p>x</p>", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    request = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {
+            "name": "probe_echo",
+            "arguments": {"customer_email": "ops@example.com", "page": "../page.html"},
+        },
+    }
+
+    response = mcp_echo_server.respond(request)
+
+    assert response["result"]["content"] == [
+        {"type": "text", "text": "<!doctype html><p>x</p>"}
     ]
 
 

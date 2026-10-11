@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -31,6 +32,8 @@ ALLOWED_INTERNAL_IMPORTS = {
         "shim_cli.clients",
         "shim_cli.config",
         "shim_cli.events.diet",
+        # Findings count markers only under the detector's own ids.
+        "shim_cli.events.injection",
         "shim_cli.guard",
         "shim_cli.session",
         "shim_cli.settings_files",
@@ -76,6 +79,7 @@ ALLOWED_INTERNAL_EXCEPTIONS = frozenset(
 _PROBE = """
 import importlib.util
 import json
+import os
 import sys
 
 from shim_cli import hook
@@ -232,3 +236,45 @@ def test_the_hook_path_never_imports_the_watch_proxy(client: str) -> None:
     watch = [name for name in observed["shim"] if name.startswith("shim_cli.watch")]
 
     assert not watch, f"{client}: the hook path imported {watch}"
+
+
+_HTML_PROBE = """
+import json, sys
+from shim_cli import hook
+page = "<!doctype html><html><body>" + "<div class='row'>ok</div>" * 200 + "</body></html>"
+payload = json.dumps({
+    "hook_event_name": "PostToolUse",
+    "tool_name": "Bash",
+    "tool_input": {"command": "curl -s http://127.0.0.1/page.html"},
+    "tool_response": {"stdout": page},
+}).encode()
+output = hook._output(payload, "claude")
+sys.stdout.write(json.dumps({
+    "converted": b"converted from HTML" in output,
+    "loaded": "shim_cli.events.html_text" in sys.modules,
+}))
+"""
+
+
+@pytest.mark.parametrize(
+    "settings,expected", (("", False), ('diet = ["json", "html"]\n', True))
+)
+def test_the_html_parser_loads_only_when_html_is_enabled(
+    settings: str, expected: bool, tmp_path: Path
+) -> None:
+    folder = tmp_path / "settings"
+    folder.mkdir(mode=0o700)
+    config = folder / "config.toml"
+    config.write_text(settings, encoding="utf-8")
+    config.chmod(0o600)
+
+    result = subprocess.run(
+        (sys.executable, "-I", "-B", "-c", _HTML_PROBE),
+        capture_output=True,
+        check=False,
+        env=os.environ | {"SHIM_CONFIG": str(config), "TMPDIR": str(tmp_path)},
+        timeout=120,
+    )
+
+    assert result.returncode == 0, result.stderr.decode()
+    assert json.loads(result.stdout) == {"converted": expected, "loaded": expected}

@@ -31,6 +31,7 @@ INCLUDED = (
     "clients/vscode/tool_events.py",
     "events/__init__.py",
     "events/diet.py",
+    "events/html_text.py",
     "events/injection.py",
     "events/payload.py",
     "events/pipeline.py",

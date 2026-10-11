@@ -182,6 +182,7 @@ def test_archive_is_self_contained_and_within_budget(archive: Path) -> None:
         assert not any(f"phonenumbers/{excluded}/" in name for name in names)
     assert "shim_cli/guard/suffixes.py" in names
     assert "tomli/_parser.py" in names
+    assert "shim_cli/events/html_text.py" in names
 
 
 def test_archive_refuses_an_unsupported_interpreter_without_blocking(
@@ -229,6 +230,21 @@ FIXTURES = {
         '{"hook_event_name":"Stop","session_id":"s1",'
         '"last_assistant_message":"bitti \u2014 alice@example.com"}'
     ).encode("utf-8"),
+    "tool-html": json.dumps(
+        {
+            "hook_event_name": "PostToolUse",
+            "tool_name": "Bash",
+            "tool_input": {"command": "curl -s http://127.0.0.1/page.html"},
+            "tool_response": {
+                "stdout": "<!doctype html><html><head><title>Durum \u2014 sayfa"
+                "</title></head><body><h2>\u0130kinci ba\u015fl\u0131k</h2>"
+                "<p>Yaz: alice@example.com &amp; <a href='/x'>ba\u011flant\u0131</a>"
+                "</p><table><tr><td>a</td><td>1</td></tr></table>"
+                + "<div class='row'><span>sat\u0131r</span></div>" * 80
+                + "</body></html>"
+            },
+        }
+    ).encode("utf-8"),
 }
 
 
@@ -241,7 +257,8 @@ def test_the_archive_answers_identically_on_39_and_the_current_interpreter(
         pytest.skip("python3.9 is not installed")
     config = tmp_path / "c.toml"
     config.write_text(
-        'enabled_entities = ["EMAIL", "IBAN", "PHONE", "SECRET"]\n\n'
+        'enabled_entities = ["EMAIL", "IBAN", "PHONE", "SECRET"]\n'
+        'diet = ["json", "html"]\n\n'
         '[mode]\nuser-prompt = "enforce"\n',
         encoding="utf-8",
     )
@@ -281,6 +298,14 @@ def test_the_archive_answers_identically_on_39_and_the_current_interpreter(
     output = json.loads(answers["tool-json"][1])["hookSpecificOutput"]
     document = json.loads(output["updatedToolOutput"]["content"])
     assert (document["created"], document["telefon"]) == (1757496600, "<PHONE_1>")
+    page = json.loads(answers["tool-html"][1])["hookSpecificOutput"]
+    assert page["updatedToolOutput"]["stdout"].split("\n")[:4] == [
+        "[shim: converted from HTML to text; markup removed. Save the page to a "
+        "file and Read it to see the markup.]",
+        "Durum \u2014 sayfa",
+        "## \u0130kinci ba\u015fl\u0131k",
+        "Yaz: <EMAIL_1> & ba\u011flant\u0131 (/x)",
+    ]
 
 
 def _archive_members(path: Path) -> dict[str, bytes]:

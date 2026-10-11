@@ -510,17 +510,22 @@ while the session is still open, or turn the ledger on first with
 nothing to read, not that nothing was found. The report shows the most recent
 session from any client and does not name the client.
 
+With `--json`, `shim doctor`, `shim report` and `shim watch` also list
+`findings` in shim's published schema, each with its severity, evidence and fix
+([Findings](https://github.com/GetSHIM/shim-cli/blob/main/docs/findings.md)).
+
 ## Shrink tool results
 
 At Claude's verified `PostToolUse` event, shim compacts eligible tool results
 before the model reads them, so the context window fills more slowly. Nothing
 is ever truncated or summarised, and a result that cannot be shrunk safely is
-left unchanged by the diet. Two transforms ship; only lossless JSON compaction
-is on by default:
+left unchanged by the diet. Three transforms ship; only lossless JSON
+compaction is on by default:
 
 | Transform | What it does |
 | --- | --- |
 | `json` | Removes the whitespace *between* JSON tokens. Every number literal, duplicate key and string survives byte-for-byte, because this is a lexer rather than a parse and re-serialise. Lossless. |
+| `html` | Turns a whole HTML page in command or MCP output into text. Not lossless: markup, scripts and styles are dropped; links keep their address. Opt in. |
 | `whitespace` | Strips trailing spaces and tabs from the end of each line. Line count is never changed. Not byte-for-byte: a Markdown hard line break is two trailing spaces, and it does not survive this. |
 
 It applies to tool *results* only — never to a tool's arguments, never to
@@ -539,7 +544,34 @@ Markdown hard line break:
 
 ```toml
 diet = ["json", "whitespace"]   # or false to disable entirely
+diet = ["json", "html"]         # also turn whole HTML pages into text
 ```
+
+`html` converts only a result that is a whole page (it starts with
+`<!doctype html` or `<html`, after an XML declaration for XHTML) of at least
+2,048 characters, and only when the text is at most half the size. The model is
+told so in the first line, `[shim: converted from HTML to text; markup removed.
+Save the page to a file and Read it to see the markup.]`, and a masked value
+such as `<EMAIL_1>` stays as it is. The text is scanned again before the model
+reads it, because conversion can assemble a value the markup hid: an address
+written as `ops&#64;example&#46;com`, or an IBAN split across two `<span>`s, is
+masked and counted like any other. A page cut short, as Claude Code cuts long
+command output, is converted without its last unfinished tag (up to 4,096
+characters of it); a page that leaves more unparsed, or leaves a `<script>`,
+`<svg>`, `<iframe>`, `<noscript>` or `<template>` open, is left unchanged,
+because the rest of it would be dropped without a word. `shim config --diet`
+keeps meaning the default, so it never turns `html` on.
+
+**Documents.** WebFetch already returns text: Claude Code hands the model its
+own summary of the page, not the HTML. A PDF or Word file you `Read` is a file
+view and is never converted: the model receives the document as Claude Code
+sends it, a PDF as the document itself and a `.docx` not at all (Claude Code
+refuses to read it). An HTML file you `cat` through Bash, or a page an MCP
+server returns, is converted when `html` is on, while `Read` of the same file
+shows the markup. Claude Code keeps only the first 30,000 characters of a
+command's output and shows the model a 2 KB preview of anything longer, so a
+long page fetched through Bash reaches the model as the start of its text; an
+MCP result arrives whole.
 
 While reading results shim also flags text that is trying to give the model
 orders, in English or Turkish — "ignore all previous instructions", "önceki tüm

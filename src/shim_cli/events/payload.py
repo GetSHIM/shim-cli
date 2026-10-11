@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from dataclasses import replace as evolve
 from typing import Any, Literal
 
 # Matches the hook's own MAX_INPUT_BYTES: anything that got past that refusal
@@ -119,6 +120,42 @@ def _replace(value: Any, path: Path, replacements: dict) -> Any:
     return value
 
 
+def _past_deadline(error: Exception) -> bool:
+    # The detector wraps its own timeout in a ValueError; the hook's is bare.
+    return isinstance(error, TimeoutError) or isinstance(error.__cause__, TimeoutError)
+
+
+def _shrink(masked: str, decision, transforms: tuple, shrink, evaluate) -> tuple:
+    """`masked` shrunk, and `decision` widened by what the shrinking revealed.
+
+    Converting a page decodes entities and closes up text split across tags,
+    so the text the model will read can hold a value the first pass could not
+    see. It is scanned again, and left unconverted if that scan fails.
+    Raises only past the deadline.
+    """
+    # ponytail: the second scan numbers its placeholders from 1 again, so
+    # `<EMAIL_1>` can name two values on one page; offset them if that misleads.
+    shrunk, names = shrink(masked, transforms)
+    if "html" not in names:
+        return shrunk, names, decision
+    try:
+        again = evaluate(shrunk)
+    except (ValueError, TimeoutError) as error:
+        if _past_deadline(error):
+            raise
+        return masked, (), decision
+    if again.partial:
+        return masked, (), decision
+    if not again.findings:
+        return shrunk, names, decision
+    widened = evolve(
+        decision,
+        findings=decision.findings + again.findings,
+        redacted_text=again.redacted_text,
+    )
+    return again.redacted_text, names, widened
+
+
 @dataclass(frozen=True)
 class Inspection:
     value: Any
@@ -163,10 +200,8 @@ def inspect(
         try:
             decision = evaluate(text)
         except (ValueError, TimeoutError) as error:
-            # The detector wraps timeouts; do not consume the hook deadline and continue.
-            if isinstance(error, TimeoutError) or isinstance(
-                error.__cause__, TimeoutError
-            ):
+            # Do not consume the hook deadline and continue.
+            if _past_deadline(error):
                 found.skipped += len(found.leaves) - index
                 found.reasons.add("deadline")
                 break
@@ -179,17 +214,26 @@ def inspect(
             # A piece of an oversized leaf failed; the rest is masked below.
             found.skipped += 1
             found.reasons.add("piece-failed")
-        current = text
+        current = decision.redacted_text if decision.findings else text
+        late = False
+        if apply_diet is not None:
+            try:
+                current, names, decision = _shrink(
+                    current, decision, transforms, apply_diet, evaluate
+                )
+                applied.update(names)
+            except (ValueError, TimeoutError):
+                late = True  # past the deadline: this leaf is masked, not shrunk
+        if scan_injection is not None:  # what the model will read
+            markers.update(scan_injection(current))
         if decision.findings:
             findings.append((path, decision))
-            current = decision.redacted_text
-        if scan_injection is not None:
-            markers.update(scan_injection(current))
-        if apply_diet is not None:
-            current, names = apply_diet(current, transforms)
-            applied.update(names)
         if current != text:
             replacements[path] = current
+        if late:
+            found.skipped += len(found.leaves) - index - 1
+            found.reasons.add("deadline")
+            break
     ordered_transforms = tuple(name for name in transform_order if name in applied)
     ordered_markers = tuple(name for name in marker_order if name in markers)
     status = "complete"
