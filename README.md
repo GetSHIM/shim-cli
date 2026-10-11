@@ -31,6 +31,34 @@ detector add no network destination, account, API key, or telemetry. The opt-in
        alt="A terminal: the agent runs Read on a .env file holding an AWS key, an IBAN and an email; the model is handed AWS_ACCESS_KEY_ID=&lt;SECRET_1&gt;, BILLING_IBAN=&lt;IBAN_1&gt; and OWNER_EMAIL=&lt;EMAIL_1&gt; instead.">
 </p>
 
+## Quickstart
+
+```console
+uv tool install --python 3.12 --compile-bytecode shim
+shim demo claude       # a synthetic sentence, masked, and what Claude Code does with it
+shim install claude    # then start a new Claude Code session
+```
+
+The package and the command are both `shim`. In the new session, ask Claude to
+read a `.env` holding `AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE`: the model gets
+`<SECRET_1>`, and the turn ends with shim's summary. Codex and GitHub Copilot
+CLI use `shim install codex` or `copilot`; [Install](https://github.com/GetSHIM/shim-cli/blob/main/README.md#install) has pipx, the plugin and VS Code.
+
+## What it cannot do
+
+- **A prompt you type into Claude Code or Codex is not masked:** neither client
+  lets a hook rewrite it. shim reports it, or stops it under `enforce`. GitHub
+  Copilot CLI is the exception: the model gets the masked prompt.
+- **Codex and GitHub Copilot CLI tool traffic is not inspected at all.**
+- **VS Code masks nothing:** it reports, and under `enforce` stops a prompt or
+  a tool call before it runs. A tool result can only be reported.
+- **In Claude Code, shell commands and file writes are reported or denied, not
+  masked;** the output of a failed command is reported, not masked; a file
+  attached with `@` is read and reported, not masked.
+- **Windows is not supported.** macOS and Linux are; WSL is not yet verified.
+
+Detection is best-effort and misses some values. [Privacy](https://github.com/GetSHIM/shim-cli/blob/main/docs/privacy.md) lists every limit.
+
 Two commands, two different questions:
 
 | Command | Answers |
@@ -54,11 +82,12 @@ shim watch -- claude -p "explain this repo"
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/GetSHIM/shim-cli/main/docs/assets/shots/shim-watch.png" width="880"
-       alt="shim watch — 16s, 2 requests. Input 257,661 tokens, 46% cache read; output 281. Where the input went: tools ~226,781 (88%), system 3%, messages 9%. Request 3 IBAN and 2 EMAIL in messages; response 3 IBAN in model text. Spend ~$2.82. Nothing was modified, and no request body was written to disk.">
+       alt="shim watch — 7s, 3 requests. Input 123,201 tokens, 77% cache read; output 296. Where the input went: tools ~90,975 (74%), system 5%, messages 21%. Request 4 EMAIL and 3 IBAN in messages; response 3 IBAN in model text. Spend ~$0.13. Largest tool result: Read, 42,808 bytes, carried by 1 request. Nothing was modified, and no request body was written to disk.">
 </p>
 
-On the session above, **the tools array was 88% of the input tokens** — before
-a single line of the user's own code. That is one session on one repository.
+On the session above, **the tools array was 74% of the input tokens**; the
+conversation, the 40 KB file the agent read included, was 21%. That is one
+session on one repository.
 Claude Code's `/context` shows the same split for the session in front of you;
 `shim watch` adds what was in each part and what came back.
 
@@ -176,8 +205,8 @@ own, after `cleanupPeriodDays` in its settings (30 by default).
 | Client | Your typed prompt | Tool input and results |
 | --- | --- | --- |
 | [Claude Code](https://github.com/anthropics/claude-code) | Reports what it found and lets it through; blocks under `enforce` | Eligible structured arguments and inbound results are masked, and a call with masked arguments still goes through your permission rules; commands and local writes are report-or-deny only; the output of a failed call is reported, not masked |
-| [Codex CLI](https://github.com/openai/codex) | Reports what it found and lets it through; blocks under `enforce` | Not installed — no verified native tool-event adapter |
-| [GitHub Copilot CLI](https://github.com/github/copilot-cli) | Replaces the model-facing prompt with the redacted text | Not installed — no verified native tool-event adapter |
+| [Codex CLI](https://github.com/openai/codex) | Reports what it found and lets it through; blocks under `enforce` | Not inspected: shim never sees a tool call or its result (no verified native tool-event adapter) |
+| [GitHub Copilot CLI](https://github.com/github/copilot-cli) | Replaces the model-facing prompt with the redacted text | Not inspected: shim never sees a tool call or its result (no verified native tool-event adapter) |
 | [VS Code](https://code.visualstudio.com/docs/agent-customization/agent-plugins) | Reports what it found and lets it through; stops the prompt before it is sent under `enforce` | A call is reported, and denied under `enforce`, before it runs. A **result** can only be reported: by then the model has it, and nothing takes it back. Never masked |
 
 Tool coverage is verified against a running client, not derived from
@@ -259,12 +288,12 @@ already says 3.10 or newer, `pipx install shim` is enough.
 Preview and install the hook for your client:
 
 ```console
-shim install codex --dry-run
-shim install codex
-shim doctor codex
+shim install claude --dry-run
+shim install claude
+shim doctor claude
 ```
 
-Replace `codex` with `claude` or `copilot` as needed. Run `shim help` for all
+Replace `claude` with `codex` or `copilot` as needed. Run `shim help` for all
 commands. `--dry-run` shows the target file and the exact fragment; without it,
 `shim install` asks before writing but does not show the change.
 
@@ -749,7 +778,7 @@ Every figure here was measured on the released build, not estimated.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/GetSHIM/shim-cli/main/docs/assets/shots/shim-doctor.png" width="880"
-       alt="shim doctor claude: eleven checks, ten PASS and one WARN — Claude Code 2.1.286 is the tested version, the hook group is present, no 0.2.0 names are left, 12 of 12 entities are enabled, the runner protected a sensitive fixture, and coverage is 6 of 6 events, with a table of what each event sees and can mask.">
+       alt="shim doctor claude: eleven checks, ten PASS and one WARN — Claude Code 2.1.286 is the tested version, the hook group is present, no 0.2.0 names are left, 12 of 13 entities are enabled, the runner protected a sensitive fixture, and coverage is 6 of 6 events, with a table of what each event sees and can mask.">
 </p>
 
 Hook output is asserted byte for byte, not by shape: a safe event must produce

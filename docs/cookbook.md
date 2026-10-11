@@ -121,7 +121,9 @@ your umask:
 shim config --reset --yes
 ```
 
-Then add:
+`--reset` starts the file over, so it also turns off a ledger you turned on
+above; skip it if the file exists, or run `shim config --ledger --yes` again
+afterwards. Then add:
 
 ```toml
 [mode]
@@ -130,7 +132,8 @@ user-prompt = "enforce"
 
 Now a prompt with a finding is withheld, and shim writes the redacted version
 to a `0600` file in your temporary directory and tells you the path. Paste the
-line it gives you and carry on — your prompt reaches the model with
+line it gives you (Claude Code asks once to read a file outside the project)
+and carry on — your prompt reaches the model with
 `<SECRET_1>` where the key was.
 
 `shim config` does not show `[mode]`, and a misspelled key is ignored without a
@@ -285,6 +288,11 @@ direction without touching the rest:
 Bash = "enforce"
 ```
 
+If the file already has a `[mode]` table, from
+[Stop a secret before it leaves](#stop-a-secret-before-it-leaves) for example,
+add the line under it: a second `[mode]` header makes the whole file invalid,
+and shim withholds every prompt until it is merged.
+
 For a command or a local write, `enforce` means the call is refused rather than
 rewritten, because silently editing a command the model is about to run would
 change what it does. shim tells you what it found and stops there.
@@ -321,6 +329,11 @@ it would have cost — run the client through the measuring proxy:
 ```console
 shim watch -- claude -p "Read calc.py and explain it in one sentence."
 ```
+
+Any file of yours will do in place of `calc.py`. Claude Code adds context of
+its own to the conversation: a one-line `Say hi.` session in an empty folder
+counted `request 2 EMAIL in messages` on the recording machine, though nobody
+typed an address.
 
 It binds to loopback, forwards bytes unchanged, invents no request of its own,
 and writes no request or response body to disk. It reports both directions
