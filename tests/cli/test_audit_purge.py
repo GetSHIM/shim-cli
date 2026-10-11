@@ -208,10 +208,15 @@ def test_purge_cannot_be_combined_with_json(
     result = runner.invoke(app, ["audit", "--purge", "--json"], input="delete 1\n")
 
     assert result.exit_code == 2
-    assert result.stdout == ""
-    assert result.stderr == (
-        "shim: --purge cannot be combined with --json; nothing was deleted.\n"
-    )
+    assert result.stderr == ""
+    assert json.loads(result.stdout) == {
+        "schema_version": 1,
+        "command": "audit",
+        "status": "error",
+        "error": "--purge cannot be combined with --json; nothing was deleted",
+        "code": "OPTIONS_CONFLICT",
+        "fix": "Run the command with one of them.",
+    }
 
 
 @pytest.mark.parametrize("changed", ("transcript", "sub-agent"))

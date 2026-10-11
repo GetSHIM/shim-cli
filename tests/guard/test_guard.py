@@ -566,7 +566,8 @@ PHONE_SPANS = (
     ('"ts": 5321234567', [[6, 16]]),
     ("hotel 1757496600", []),
     ("Intel 4155552671", []),
-    ("order_no: 4155552671", [[10, 20]]),
+    # A number word after "order" names an order number, not a phone.
+    ("order_no: 4155552671", []),
     ("phone number: 4155552671", [[14, 24]]),
     ("Telefon numarası 4155552671", [[17, 27]]),
     ("Reference number 1234567890", []),
@@ -1367,3 +1368,35 @@ def test_a_long_base64_block_across_a_cut_is_masked_whole(prefix: str) -> None:
 
     assert len(decision.redacted_text) == len(prefix) + len("<SECRET_1>\n")
     assert decision.redacted_text == f"{prefix}<SECRET_1>\n"
+
+
+def test_a_plate_is_looked_for_only_where_the_settings_enable_it() -> None:
+    from shim_cli.guard import DEFAULT_ENTITIES
+
+    text = "Plaka 34 ABC 123"
+
+    assert "TR_LICENSE_PLATE" not in DEFAULT_ENTITIES
+    assert evaluate(text).findings == ()
+    assert evaluate(text, DEFAULT_ENTITIES).findings == ()
+    assert [f.entity_type for f in evaluate(text, ("TR_LICENSE_PLATE",)).findings] == [
+        "TR_LICENSE_PLATE"
+    ]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        ("a." * 20_000 + "[at]") * 3,
+        "x@" + "a." * 20_000 + "com",
+        "[at]" * 25_000,
+        "tr12 " + "abcd " * 20_000,
+        "34 " * 30_000 + "ABC",
+        "Tr12-" * 20_000,
+    ],
+    ids=["written-at", "long-domain", "bare-at", "iban", "plate", "iban-dashed"],
+)
+def test_the_ported_shapes_scan_in_linear_time(text: str) -> None:
+    started = time.perf_counter()
+    evaluate(text, ("EMAIL", "IBAN", "TR_LICENSE_PLATE"))
+
+    assert time.perf_counter() - started < 2

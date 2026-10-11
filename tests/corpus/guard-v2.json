@@ -13,6 +13,7 @@
     "US_SSN",
     "TR_NATIONAL_ID",
     "TR_VKN",
+    "TR_LICENSE_PLATE",
     "SECRET",
     "DB_URI"
   ],
@@ -1152,6 +1153,476 @@
       "text": "https://***@example.com/path",
       "categories": [],
       "expected_output": "https://***@example.com/path"
+    },
+    {
+      "id": "tr-license-plate-positive",
+      "text": "Plaka 34 ABC 123 otoparkta",
+      "categories": [
+        "TR_LICENSE_PLATE"
+      ],
+      "expected_output": "Plaka <TR_LICENSE_PLATE_1> otoparkta"
+    },
+    {
+      "id": "tr-license-plate-two-letters",
+      "text": "Car 06 AB 1234 parked",
+      "categories": [
+        "TR_LICENSE_PLATE"
+      ],
+      "expected_output": "Car <TR_LICENSE_PLATE_1> parked"
+    },
+    {
+      "id": "tr-license-plate-one-letter-five-digits",
+      "text": "Car 34 A 12345 parked",
+      "categories": [
+        "TR_LICENSE_PLATE"
+      ],
+      "expected_output": "Car <TR_LICENSE_PLATE_1> parked"
+    },
+    {
+      "id": "tr-license-plate-dashed",
+      "text": "plate 34-ABC-123",
+      "categories": [
+        "TR_LICENSE_PLATE"
+      ],
+      "expected_output": "plate <TR_LICENSE_PLATE_1>"
+    },
+    {
+      "id": "tr-license-plate-together",
+      "text": "34ABC123 at the gate",
+      "categories": [
+        "TR_LICENSE_PLATE"
+      ],
+      "expected_output": "<TR_LICENSE_PLATE_1> at the gate"
+    },
+    {
+      "id": "tr-license-plate-lowercase-after-cue",
+      "text": "plaka: 34 abc 123",
+      "categories": [
+        "TR_LICENSE_PLATE"
+      ],
+      "expected_output": "plaka: <TR_LICENSE_PLATE_1>"
+    },
+    {
+      "id": "tr-license-plate-safe-negative",
+      "text": "see 34 abc 123 here",
+      "categories": [],
+      "expected_output": "see 34 abc 123 here"
+    },
+    {
+      "id": "tr-license-plate-province-out-of-range",
+      "text": "Car 82 ABC 123 parked",
+      "categories": [],
+      "expected_output": "Car 82 ABC 123 parked"
+    },
+    {
+      "id": "tr-license-plate-mixed-separators",
+      "text": "Car 34 ABC-123 parked",
+      "categories": [],
+      "expected_output": "Car 34 ABC-123 parked"
+    },
+    {
+      "id": "tr-license-plate-http-method",
+      "text": "[12 GET 200]",
+      "categories": [],
+      "expected_output": "[12 GET 200]"
+    },
+    {
+      "id": "tr-license-plate-http-put",
+      "text": "#34 PUT 201",
+      "categories": [],
+      "expected_output": "#34 PUT 201"
+    },
+    {
+      "id": "tr-license-plate-process-line",
+      "text": "PID 12 CPU 100",
+      "categories": [],
+      "expected_output": "PID 12 CPU 100"
+    },
+    {
+      "id": "tr-license-plate-error-code",
+      "text": "HTTP 50 ERR 503",
+      "categories": [],
+      "expected_output": "HTTP 50 ERR 503"
+    },
+    {
+      "id": "tr-license-plate-column-id",
+      "text": "col 12 ID 1234",
+      "categories": [],
+      "expected_output": "col 12 ID 1234"
+    },
+    {
+      "id": "tr-license-plate-release-candidate",
+      "text": "Build 12 RC 1234",
+      "categories": [],
+      "expected_output": "Build 12 RC 1234"
+    },
+    {
+      "id": "tr-license-plate-month",
+      "text": "01 OCT 26",
+      "categories": [],
+      "expected_output": "01 OCT 26"
+    },
+    {
+      "id": "tr-license-plate-unit",
+      "text": "12 V 2000 mA",
+      "categories": [],
+      "expected_output": "12 V 2000 mA"
+    },
+    {
+      "id": "tr-license-plate-gigabytes",
+      "text": "APPLE IPHONE 15 PRO 256 GB",
+      "categories": [],
+      "expected_output": "APPLE IPHONE 15 PRO 256 GB"
+    },
+    {
+      "id": "tr-license-plate-known-false-positive",
+      "text": "line 42 E 1234",
+      "categories": [
+        "TR_LICENSE_PLATE"
+      ],
+      "expected_output": "line <TR_LICENSE_PLATE_1>",
+      "note": "Plate-shaped and accepted by the gateway's shape too; kept as the known remaining false positive."
+    },
+    {
+      "id": "phone-underscore-key",
+      "text": "phone_number: 4155552671",
+      "categories": [
+        "PHONE"
+      ],
+      "expected_output": "phone_number: <PHONE_1>"
+    },
+    {
+      "id": "phone-underscore-json-key",
+      "text": "{\"phone_number\": \"4155552671\"}",
+      "categories": [
+        "PHONE"
+      ],
+      "expected_output": "{\"phone_number\": \"<PHONE_1>\"}"
+    },
+    {
+      "id": "phone-underscore-prefixed-key",
+      "text": "\"customer_phone\": \"4155552671\"",
+      "categories": [
+        "PHONE"
+      ],
+      "expected_output": "\"customer_phone\": \"<PHONE_1>\""
+    },
+    {
+      "id": "phone-order-number-negative",
+      "text": "order no 4155552671",
+      "categories": [],
+      "expected_output": "order no 4155552671"
+    },
+    {
+      "id": "phone-siparis-number-negative",
+      "text": "sipariş no: 4155552671",
+      "categories": [],
+      "expected_output": "sipariş no: 4155552671",
+      "expected_spans": []
+    },
+    {
+      "id": "phone-invoice-number-negative",
+      "text": "Fatura no 4155552671",
+      "categories": [],
+      "expected_output": "Fatura no 4155552671"
+    },
+    {
+      "id": "phone-dated-model-id-negative",
+      "text": "model claude-sonnet-4-5-20250929 kullan",
+      "categories": [],
+      "expected_output": "model claude-sonnet-4-5-20250929 kullan"
+    },
+    {
+      "id": "phone-identifier-tail-negative",
+      "text": "ref ORD_4155552671x",
+      "categories": [],
+      "expected_output": "ref ORD_4155552671x"
+    },
+    {
+      "id": "phone-cue-before-dot",
+      "text": "Tel.05321234567",
+      "categories": [
+        "PHONE"
+      ],
+      "expected_output": "Tel.<PHONE_1>"
+    },
+    {
+      "id": "phone-cue-before-hyphen",
+      "text": "GSM-05321234567",
+      "categories": [
+        "PHONE"
+      ],
+      "expected_output": "GSM-<PHONE_1>"
+    },
+    {
+      "id": "card-troy",
+      "text": "Kart 9792 0000 0000 0003",
+      "categories": [
+        "CREDIT_CARD"
+      ],
+      "expected_output": "Kart <CREDIT_CARD_1>"
+    },
+    {
+      "id": "card-troy-bad-checksum",
+      "text": "Kart 9792 0000 0000 0004",
+      "categories": [],
+      "expected_output": "Kart 9792 0000 0000 0004"
+    },
+    {
+      "id": "card-mastercard-2-series",
+      "text": "card 2221 0000 0000 0009",
+      "categories": [
+        "CREDIT_CARD"
+      ],
+      "expected_output": "card <CREDIT_CARD_1>"
+    },
+    {
+      "id": "card-mastercard-2-series-bad-checksum",
+      "text": "card 2221 0000 0000 0008",
+      "categories": [],
+      "expected_output": "card 2221 0000 0000 0008"
+    },
+    {
+      "id": "iban-spaced-whole-not-card",
+      "text": "Pay TR96 1569 9085 0078 9107 8735 82 now",
+      "categories": [
+        "IBAN"
+      ],
+      "expected_output": "Pay <IBAN_1> now"
+    },
+    {
+      "id": "iban-lowercase",
+      "text": "IBAN tr330006100519786457841326",
+      "categories": [
+        "IBAN"
+      ],
+      "expected_output": "IBAN <IBAN_1>"
+    },
+    {
+      "id": "iban-lowercase-bad-checksum",
+      "text": "iban tr330006100519786457841327",
+      "categories": [],
+      "expected_output": "iban tr330006100519786457841327"
+    },
+    {
+      "id": "iban-line-broken",
+      "text": "IBAN TR33 0006 1005 1978\n6457 8413 26",
+      "categories": [
+        "IBAN"
+      ],
+      "expected_output": "IBAN <IBAN_1>"
+    },
+    {
+      "id": "iban-next-line-not-pulled-in",
+      "text": "IBAN TR33 0006 1005 1978 6457 8413 26\nABCD is the code",
+      "categories": [
+        "IBAN"
+      ],
+      "expected_output": "IBAN <IBAN_1>\nABCD is the code"
+    },
+    {
+      "id": "tckn-spaced-groups",
+      "text": "TCKN 100 000 001 46",
+      "categories": [
+        "TR_NATIONAL_ID"
+      ],
+      "expected_output": "TCKN <TR_NATIONAL_ID_1>"
+    },
+    {
+      "id": "tckn-dashed-groups",
+      "text": "TCKN 100-000-001-46",
+      "categories": [
+        "TR_NATIONAL_ID"
+      ],
+      "expected_output": "TCKN <TR_NATIONAL_ID_1>"
+    },
+    {
+      "id": "tckn-groups-bad-checksum",
+      "text": "TCKN 100 000 001 47",
+      "categories": [],
+      "expected_output": "TCKN 100 000 001 47"
+    },
+    {
+      "id": "tckn-groups-date-negative",
+      "text": "on 2026 10 07 at noon",
+      "categories": [],
+      "expected_output": "on 2026 10 07 at noon"
+    },
+    {
+      "id": "tckn-groups-amount-negative",
+      "text": "paid 100 000 TL",
+      "categories": [],
+      "expected_output": "paid 100 000 TL"
+    },
+    {
+      "id": "email-written-at-brackets",
+      "text": "mail jane[at]example.com",
+      "categories": [
+        "EMAIL"
+      ],
+      "expected_output": "mail <EMAIL_1>"
+    },
+    {
+      "id": "email-written-at-parentheses",
+      "text": "mail jane(at)example.com today",
+      "categories": [
+        "EMAIL"
+      ],
+      "expected_output": "mail <EMAIL_1> today"
+    },
+    {
+      "id": "email-written-at-prose-negative",
+      "text": "meet [at] noon in the lobby",
+      "categories": [],
+      "expected_output": "meet [at] noon in the lobby"
+    },
+    {
+      "id": "email-written-at-no-domain-negative",
+      "text": "jane[at]localhost",
+      "categories": [],
+      "expected_output": "jane[at]localhost"
+    },
+    {
+      "id": "ip-after-version-negative",
+      "text": "version 1.2.3.4",
+      "categories": [],
+      "expected_output": "version 1.2.3.4"
+    },
+    {
+      "id": "ip-after-v-negative",
+      "text": "v1.2.3.4",
+      "categories": [],
+      "expected_output": "v1.2.3.4"
+    },
+    {
+      "id": "ip-after-ver-negative",
+      "text": "ver 1.2.3.4",
+      "categories": [],
+      "expected_output": "ver 1.2.3.4"
+    },
+    {
+      "id": "ip-pinned-requirement-negative",
+      "text": "numpy==1.26.4.1",
+      "categories": [],
+      "expected_output": "numpy==1.26.4.1"
+    },
+    {
+      "id": "ip-after-release",
+      "text": "release 10.20.30.40",
+      "categories": [
+        "IP_ADDRESS"
+      ],
+      "expected_output": "release <IP_ADDRESS_1>"
+    },
+    {
+      "id": "ip-after-ip-word",
+      "text": "IP 1.2.3.4",
+      "categories": [
+        "IP_ADDRESS"
+      ],
+      "expected_output": "IP <IP_ADDRESS_1>"
+    },
+    {
+      "id": "ip-after-turkish-verb",
+      "text": "izin ver 10.0.0.5",
+      "categories": [
+        "IP_ADDRESS"
+      ],
+      "expected_output": "izin ver <IP_ADDRESS_1>"
+    },
+    {
+      "id": "secret-sifre-colon",
+      "text": "şifre: Gizli.Parola2026",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "şifre: <SECRET_1>",
+      "expected_spans": [
+        [
+          7,
+          23,
+          "SECRET"
+        ]
+      ]
+    },
+    {
+      "id": "secret-sifre-upper-equals",
+      "text": "ŞİFRE=Gizli.Parola2026",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "ŞİFRE=<SECRET_1>",
+      "expected_spans": [
+        [
+          6,
+          22,
+          "SECRET"
+        ]
+      ]
+    },
+    {
+      "id": "secret-sifreniz",
+      "text": "Geçici şifreniz: Gizli.Parola2026",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "Geçici şifreniz: <SECRET_1>",
+      "expected_spans": [
+        [
+          17,
+          33,
+          "SECRET"
+        ]
+      ]
+    },
+    {
+      "id": "secret-sifresi-ascii",
+      "text": "sifresi: Gizli.Parola2026",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "sifresi: <SECRET_1>"
+    },
+    {
+      "id": "secret-parola-colon",
+      "text": "parola: Gizli.Parola2026",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "parola: <SECRET_1>"
+    },
+    {
+      "id": "secret-sifre-prose-negative",
+      "text": "şifre unuttum, yardım eder misin",
+      "categories": [],
+      "expected_output": "şifre unuttum, yardım eder misin",
+      "expected_spans": []
+    },
+    {
+      "id": "secret-parola-prose-negative",
+      "text": "parola değiştirildi",
+      "categories": [],
+      "expected_output": "parola değiştirildi",
+      "expected_spans": []
+    },
+    {
+      "id": "secret-desifre-negative",
+      "text": "deşifre: Gizli.Parola2026",
+      "categories": [],
+      "expected_output": "deşifre: Gizli.Parola2026",
+      "expected_spans": []
+    },
+    {
+      "id": "tr-license-plate-kilohertz",
+      "text": "12 V 2000 kHz",
+      "categories": [],
+      "expected_output": "12 V 2000 kHz"
+    },
+    {
+      "id": "tr-license-plate-kilobytes",
+      "text": "34 AB 1234 KB",
+      "categories": [],
+      "expected_output": "34 AB 1234 KB"
     }
   ],
   "generated_cases": [

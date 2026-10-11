@@ -370,26 +370,57 @@ could pass. It has been superseded by:
 
 | Corpus | Cases | Contract |
 | --- | ---: | --- |
-| `guard-v2.json` | 146 | Exact redacted output for every case, plus source spans for normalization-sensitive cases. |
+| `guard-v2.json` | 210 | Exact redacted output for every case, with every built-in type enabled, plus source spans for normalization-sensitive cases. |
 | `guard-tools-v1.json` | 24 | Exact output at 25 scanned paths in captured tool payloads, per event and policy direction. |
 | `parity-v1.json` | 475 | Exact findings, spans, scores, and redacted output from the previous Presidio implementation. |
 | `custom-v1.json` | 10 | Exact output with your own patterns, including where they overlap a built-in type. |
 | `reveal-v1.json` | 8 | Exact output with the last digits kept by `[reveal]`. |
+| `gateway-detection-v1.json` | 140 | The gateway's own case file, copied byte for byte; see [Gateway parity](#gateway-parity). |
 
-Of the 475 parity cases, 430 remain byte-identical. Eight are deliberately
+Of the 475 parity cases, 408 remain byte-identical. Eight are deliberately
 left unmasked: `0.0.0.0` and `::1`, which identify no person or remote host and
 whose masking erased a meaningful bind-address distinction; five bare ids the
 phone recognizer used to claim; and a connection string with no credentials in
 it. Thirty-seven still mask, over fewer characters: thirty-six connection
 strings lose only their user and password, and one address no longer runs into
-a query string. All of them live in `DELIBERATE_DIVERGENCES` or `NARROWED_SPANS`
-with reasons and tightly pinned new output. The parity corpus is generated
-migration evidence and must never be regenerated to make a test pass.
+a query string. Twenty-two mask more than they did, ported from the gateway:
+twenty lowercase IBANs with a valid checksum, and two spaced IBANs that read
+as one IBAN instead of a card over their middle digits. All of them live in
+`DELIBERATE_DIVERGENCES`, `NARROWED_SPANS` or `TIGHTENED` with reasons and
+tightly pinned new output; a tightened case must cover every span the frozen
+build masked. The parity corpus is generated migration evidence and must never
+be regenerated to make a test pass.
 
 The fixture-bound metrics report 100% synthetic precision, recall, and exact
 output. That is deterministic contract evidence, not a real-world statistical
 guarantee. Every implementation category has a positive and a targeted safe
 negative, and the secret-assignment rule has prose negatives.
+
+### Gateway parity
+
+`tests/guard/test_gateway_parity.py` runs the gateway's own case file
+(`tests/gateway/privacy/corpus/detection-v1.json` at GetSHIM/shim `ca6b2e9`,
+140 cases) through shim-cli with every type enabled. 123 agree. The other 17
+are pinned with shim-cli's exact output and one of four reasons; a case that
+starts agreeing fails the test until its entry is removed.
+
+| Reason | Cases | What it means |
+| --- | ---: | --- |
+| `PRECISION_FIRST` | 6 | An uncued bare number the gateway calls a phone. In coding traffic shim-cli counts it as a bare number unless it is Turkish-shaped or cued. |
+| `NOT_PORTED` | 7 | A gateway rule shim-cli does not have: tier 3's dotted phones (`0532.1234567`), space-separated secrets (`password hunter2abc`), a VKN with no tax word, the more-than-four-numbers IP rule (`1.2.3.4.5`), and the whole-URI `DB_URI` (shim-cli masks the user-info only). |
+| `NO_TYPE` | 3 | `FILE_PATH`, `PERSON`, `LOCATION`: shim-cli has no such type. |
+| `CUE_VOCABULARY` | 1 | `contact` is a phone word for the gateway, not for shim-cli. |
+
+Divergences outside that file, measured against the gateway's analyzer at
+`ca6b2e9`:
+
+- `order no 4155552671`, `sipariş no: 4155552671` and `Fatura no 4155552671`:
+  the gateway masks the number as a phone; shim-cli leaves an order, invoice or
+  code number alone.
+- `[12 GET 200]`, `#34 PUT 201`, `PID 12 CPU 100`, `HTTP 50 ERR 503`,
+  `col 12 ID 1234`, `Build 12 RC 1234`, `12 V 2000 kHz` and `34 AB 1234 KB`:
+  the gateway reads a plate; shim-cli does not, because those letters and units
+  are never plates in logs and code. Both read `line 42 E 1234` as a plate.
 
 The detector is first-party and offline. `presidio-analyzer`, its spaCy
 pipeline, and `tldextract` were removed; recognizers, checksums, and the public

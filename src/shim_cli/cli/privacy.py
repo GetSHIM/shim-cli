@@ -5,7 +5,7 @@ from typing import NoReturn
 
 import typer
 
-from shim_cli.cli.output import emit, emit_json, terminal_text
+from shim_cli.cli.output import emit, emit_error, emit_json, terminal_text
 
 MAX_STDIN_BYTES = 1_000_000
 _DEMO_TEXT = (
@@ -42,11 +42,14 @@ def _read_and_evaluate(command: str, as_json: bool):
 
 
 def _privacy_error(command: str, as_json: bool) -> NoReturn:
-    if as_json:
-        emit_json(command, "error", error="unable to process stdin")
-    else:
-        emit("FAIL", "Unable to process stdin.", error=True)
-    raise typer.Exit(1)
+    emit_error(
+        command,
+        "STDIN_UNPROCESSABLE",
+        "Unable to process stdin.",
+        "Pipe UTF-8 text; if the settings file is refused, shim config prints why.",
+        as_json=as_json,
+        exit_code=1,
+    )
 
 
 def scan(*, as_json: bool) -> None:

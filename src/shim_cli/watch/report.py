@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import datetime
+
 from . import measure
-from .measure import OTHER, RESPONSE_KINDS, SECTIONS, TRUNCATED, Usage
+from .measure import OTHER, RESPONSE_KINDS, SECTIONS, TRUNCATED, Usage, model_id
 
 SECTION_WORDS = {
     "system": "system prompt",
@@ -12,45 +14,177 @@ BESIDES = ("system", "tools", OTHER)
 KIND_WORDS = {"text": "model text", "thinking": "thinking"}
 NOT_LEAKS = "written by the model; it may repeat values it was given"
 
-PRICES = (
-    ("claude-opus-4", (15.0, 75.0, 18.75, 1.5)),
-    ("claude-opus-5", (15.0, 75.0, 18.75, 1.5)),
-    ("claude-sonnet-4", (3.0, 15.0, 3.75, 0.3)),
-    ("claude-sonnet-5", (3.0, 15.0, 3.75, 0.3)),
-    ("claude-haiku-4", (1.0, 5.0, 1.25, 0.1)),
-    ("claude-3-5-haiku", (0.8, 4.0, 1.0, 0.08)),
-)
-PRICED_ON = "2026-08-30"
+# USD per million tokens: input, 5-minute cache write, 1-hour cache write,
+# cache read, output. Read from the Claude pricing page on PRICED_ON; every id
+# was confirmed there or by GET /v1/models. An id not listed is unpriced: a
+# neighbouring row priced Opus 4.5 to 5.5 at Opus 4 rates, up to 7.5 times over.
+_FABLE_5_1 = (10.0, 12.5, 20.0, 0.25, 50.0)
+_FABLE_5 = (10.0, 12.5, 20.0, 1.0, 50.0)
+_OPUS_4_5 = (5.0, 6.25, 10.0, 0.5, 25.0)
+_OPUS_4 = (15.0, 18.75, 30.0, 1.5, 75.0)
+_SONNET_4 = (3.0, 3.75, 6.0, 0.3, 15.0)
+PRICES = {
+    "claude-fable-5-1": _FABLE_5_1,
+    "claude-mythos-5-1": _FABLE_5_1,
+    "claude-fable-5": _FABLE_5,
+    "claude-mythos-5": _FABLE_5,
+    "claude-opus-5-5": (4.0, 5.0, 8.0, 0.2, 20.0),
+    "claude-opus-5": _OPUS_4_5,
+    "claude-opus-4-8": _OPUS_4_5,
+    "claude-opus-4-7": _OPUS_4_5,
+    "claude-opus-4-6": _OPUS_4_5,
+    "claude-opus-4-5": _OPUS_4_5,
+    "claude-opus-4-1": _OPUS_4,
+    "claude-opus-4": _OPUS_4,
+    "claude-sonnet-5-5": (2.0, 2.5, 4.0, 0.1, 10.0),
+    "claude-sonnet-5": (2.0, 2.5, 4.0, 0.2, 10.0),
+    "claude-sonnet-4-6": _SONNET_4,
+    "claude-sonnet-4-5": _SONNET_4,
+    "claude-sonnet-4": _SONNET_4,
+    "claude-haiku-5-5": (0.1, 0.125, 0.2, 0.01, 0.5),
+    "claude-haiku-4-5": (1.0, 1.25, 2.0, 0.1, 5.0),
+    "claude-3-5-haiku": (0.8, 1.0, 1.6, 0.08, 4.0),
+}
+# A prompt (input, cache writes and cache reads together) above the threshold
+# pays the second row on every component of that request.
+LONG_PROMPT = {"claude-haiku-5-5": (100_000, (0.5, 0.625, 1.0, 0.05, 2.5))}
+PRICED_ON = "2026-10-09"
+STALE_AFTER_DAYS = 90
 _PER = 1_000_000
 
 
-def _price(model: str):
-    for prefix, rates in PRICES:
-        if model.startswith(prefix):
-            return rates
-    return None
+def _price(model: str, prompt_tokens: int = 0):
+    key = model_id(model)
+    threshold, long_rates = LONG_PROMPT.get(key, (0, None))
+    if long_rates is not None and prompt_tokens > threshold:
+        return long_rates
+    return PRICES.get(key)
+
+
+def _today() -> datetime.date:
+    return datetime.date.today()
+
+
+def prices_stale() -> bool:
+    age = _today() - datetime.date.fromisoformat(PRICED_ON)
+    return age.days > STALE_AFTER_DAYS
+
+
+def exchange_spend(exchange) -> float | None:
+    usage = exchange.usage
+    rates = _price(exchange.model or "", usage.total_input)
+    if rates is None:
+        return None
+    fresh, five_minutes, one_hour, read, output = rates
+    hour_writes = usage.cache_creation_1h_input_tokens
+    return (
+        usage.input_tokens * fresh
+        + (usage.cache_creation_input_tokens - hour_writes) * five_minutes
+        + hour_writes * one_hour
+        + usage.cache_read_input_tokens * read
+        + usage.output_tokens * output
+    ) / _PER
 
 
 def spend(exchanges: list) -> tuple:
-    total = 0.0
-    priced = 0
-    unpriced = set()
+    """Session total, priced count, unpriced model names, and each exchange's cost."""
+    costs = [exchange_spend(exchange) for exchange in exchanges]
+    unpriced = {
+        exchange.model
+        for exchange, cost in zip(exchanges, costs, strict=True)
+        if cost is None and exchange.model
+    }
+    priced = [cost for cost in costs if cost is not None]
+    return sum(priced), len(priced), sorted(unpriced), costs
+
+
+def image_totals(exchanges: list) -> dict:
+    distinct: dict = {}
     for exchange in exchanges:
-        rates = _price(exchange.model or "")
-        if rates is None:
-            if exchange.model:
-                unpriced.add(exchange.model)
-            continue
-        fresh, output, write, read = rates
+        distinct.update(exchange.images)
+    return {
+        "distinct": len(distinct),
+        "requests": sum(bool(exchange.image_count) for exchange in exchanges),
+        "estimated_tokens": sum(e.estimated_image_tokens for e in exchanges),
+        "unknown_size": sum(not known for known in distinct.values()),
+    }
+
+
+def largest_tool_result(exchanges: list) -> dict | None:
+    """A result replayed in a later request's history is the same result."""
+    largest = None
+    for exchange in exchanges:
+        for key, (tool, size) in exchange.tool_results.items():
+            if largest is None or size > largest[0]:
+                largest = (size, tool, key)
+    if largest is None:
+        return None
+    size, tool, key = largest
+    carried = sum(key in exchange.tool_results for exchange in exchanges)
+    return {"tool": tool, "bytes": size, "requests": carried}
+
+
+def cache_rewrites(exchanges: list) -> list:
+    """Requests that wrote again a prefix the one before them had cached.
+
+    Per model, in session order. A request smaller than the one before it
+    starts a new chain (Claude Code's closing side call shares only the system
+    prompt and tools), and a chain's leading requests that read no cache are a
+    cold start. After that, a read below 90 percent of the previous request's
+    whole input, with something written, is a rewrite.
+    """
+    found = []
+    chains: dict = {}
+    for index, exchange in enumerate(exchanges):
         usage = exchange.usage
-        total += (
-            usage.input_tokens * fresh
-            + usage.output_tokens * output
-            + usage.cache_creation_input_tokens * write
-            + usage.cache_read_input_tokens * read
-        ) / _PER
-        priced += 1
-    return total, priced, sorted(unpriced)
+        previous, warm = chains.get(model_id(exchange.model or ""), (None, False))
+        if previous is not None and exchange.request_bytes < previous.request_bytes:
+            previous, warm = None, False
+        if (
+            warm
+            and previous is not None
+            and usage.cache_read_input_tokens < 0.9 * previous.usage.total_input
+            and usage.cache_creation_input_tokens
+        ):
+            found.append(index)
+        reads = usage.cache_read_input_tokens > 0
+        chains[model_id(exchange.model or "")] = (exchange, warm or reads)
+    return found
+
+
+def _write_cost(exchange) -> float | None:
+    usage = exchange.usage
+    rates = _price(exchange.model or "", usage.total_input)
+    if rates is None:
+        return None
+    hour = usage.cache_creation_1h_input_tokens
+    five = usage.cache_creation_input_tokens - hour
+    return (five * rates[1] + hour * rates[2]) / _PER
+
+
+def cache_rewrite_totals(exchanges: list, rewrites: list) -> dict:
+    costs = [_write_cost(exchanges[index]) for index in rewrites]
+    priced = [cost for cost in costs if cost is not None]
+    return {
+        "count": len(rewrites),
+        "tokens": sum(
+            exchanges[index].usage.cache_creation_input_tokens for index in rewrites
+        ),
+        "spend_usd": round(sum(priced), 6) if priced else None,
+        "requests": [index + 1 for index in rewrites],
+    }
+
+
+def duplicate_totals(exchanges: list) -> dict:
+    duplicates = [exchange for exchange in exchanges if exchange.duplicate_in_flight]
+    return {
+        "count": len(duplicates),
+        "input_tokens": sum(exchange.usage.total_input for exchange in duplicates),
+    }
+
+
+def _plural(count: int, word: str) -> str:
+    return f"{count} {word}" + ("" if count == 1 else "s")
 
 
 def spend_basis(exchanges: list) -> str:
@@ -72,6 +206,10 @@ def totals(exchanges: list) -> Usage:
             ),
             cache_read_input_tokens=(
                 combined.cache_read_input_tokens + usage.cache_read_input_tokens
+            ),
+            cache_creation_1h_input_tokens=(
+                combined.cache_creation_1h_input_tokens
+                + usage.cache_creation_1h_input_tokens
             ),
         )
     return combined
@@ -362,7 +500,7 @@ def render(session, seconds: float) -> str:
     for index, line in enumerate(_compared(by_section, by_kind)):
         lines.append(f"  compare   {line}" if not index else f"            {line}")
 
-    dollars, priced, unpriced = spend(exchanges)
+    dollars, priced, unpriced, costs = spend(exchanges)
     if priced:
         basis = spend_basis(exchanges)
         if basis == "subscription":
@@ -376,8 +514,27 @@ def render(session, seconds: float) -> str:
                 if _price(e.model or "")
             )
             on = f"; {subscribed} of {priced} requests on a subscription"
+        stale = (
+            f", older than {STALE_AFTER_DAYS} days; newer models and price changes "
+            "are not reflected"
+            if prices_stale()
+            else ""
+        )
         lines.append(
-            f"  spend     ~${dollars:,.2f}  (approximate, {PRICED_ON} prices{on})"
+            f"  spend     ~${dollars:,.2f}  (approximate, {PRICED_ON} prices{stale}{on})"
+        )
+    if priced >= 2:
+        cost, costliest = max(
+            (
+                (cost, exchange)
+                for cost, exchange in zip(costs, exchanges, strict=True)
+                if cost is not None
+            ),
+            key=lambda pair: pair[0],
+        )
+        lines.append(
+            f"  costliest  one request ~${cost:,.2f} ({costliest.model}, "
+            f"{_thousands(costliest.usage.total_input)} input tokens)"
         )
     if unpriced:
         lines.append(f"  spend     not priced for {', '.join(unpriced)}")
@@ -390,6 +547,42 @@ def render(session, seconds: float) -> str:
                 f"  largest   one request was {_thousands(biggest.request_bytes)} "
                 f"bytes, {largest[0]} {round(100 * largest[1] / biggest.request_bytes)}% of it"
             )
+
+    images = image_totals(exchanges)
+    if images["requests"]:
+        lines.append(
+            f"  images    {images['distinct']} distinct, "
+            f"~{_thousands(images['estimated_tokens'])} input tokens across "
+            f"{_plural(images['requests'], 'request')} (estimated)"
+        )
+    result = largest_tool_result(exchanges)
+    if result and result["bytes"]:
+        lines.append(
+            f"  largest tool result  {result['tool']}, "
+            f"{_thousands(result['bytes'])} bytes "
+            f"(~{_thousands(result['bytes'] // 4)} tokens), carried by "
+            f"{_plural(result['requests'], 'request')}"
+        )
+    rewrites = cache_rewrite_totals(exchanges, cache_rewrites(exchanges))
+    if rewrites["count"]:
+        cost = rewrites["spend_usd"]
+        priced = f", ~${cost:,.2f}" if cost is not None else ""
+        shown = ", ".join(map(str, rewrites["requests"][:3]))
+        which = "request" if rewrites["count"] == 1 else "requests"
+        lines.append(
+            f"  cache     {_plural(rewrites['count'], 'request')} rewrote a prefix "
+            "the previous one had cached "
+            f"(~{_thousands(rewrites['tokens'])} tokens written again{priced}); "
+            f"{which} {shown}"
+        )
+    duplicates = duplicate_totals(exchanges)
+    if duplicates["count"]:
+        lines.append(
+            f"  duplicates  {_plural(duplicates['count'], 'request')} "
+            f"{'was' if duplicates['count'] == 1 else 'were'} sent while an "
+            "identical one was still in flight "
+            f"(~{_thousands(duplicates['input_tokens'])} input tokens billed again)"
+        )
 
     if session.errors:
         lines.append(f"  errors    {session.errors} request(s) could not be forwarded")
@@ -404,8 +597,9 @@ def as_json(session, seconds: float) -> dict:
         if exchange.path.endswith(("messages", "responses", "completions"))
     ]
     combined = totals(exchanges)
-    dollars, priced, unpriced = spend(exchanges)
+    dollars, priced, unpriced, costs = spend(exchanges)
     count, size = at_file_totals(exchanges)
+    rewrites = cache_rewrites(exchanges)
     return {
         "seconds": round(seconds, 1),
         "requests": len(exchanges),
@@ -430,6 +624,7 @@ def as_json(session, seconds: float) -> dict:
             "tokens_by_section": section_totals(exchanges),
             "spend_usd": round(dollars, 4) if priced else None,
             "priced_on": PRICED_ON if priced else None,
+            "prices_stale": prices_stale(),
             "unpriced_models": unpriced,
         },
         "spend_basis": spend_basis(exchanges),
@@ -440,6 +635,10 @@ def as_json(session, seconds: float) -> dict:
         "response_entities": response_totals(exchanges),
         "response_scan": response_scan(exchanges),
         "custom": custom_totals(exchanges),
+        "images": image_totals(exchanges),
+        "largest_tool_result": largest_tool_result(exchanges),
+        "cache_rewrites": cache_rewrite_totals(exchanges, rewrites),
+        "duplicates_in_flight": duplicate_totals(exchanges),
         "exchanges": [
             {
                 "entities_by_section": exchange.entities_by_section,
@@ -462,9 +661,18 @@ def as_json(session, seconds: float) -> dict:
                     "cache_creation_input_tokens": (
                         exchange.usage.cache_creation_input_tokens
                     ),
+                    "cache_creation_1h_input_tokens": (
+                        exchange.usage.cache_creation_1h_input_tokens
+                    ),
                 },
+                "spend_usd": None if cost is None else round(cost, 6),
+                "priced_as": None if cost is None else model_id(exchange.model),
+                "image_count": exchange.image_count,
+                "estimated_image_tokens": exchange.estimated_image_tokens,
+                "cache_rewrite": index in rewrites,
+                "duplicate_in_flight": exchange.duplicate_in_flight,
             }
-            for exchange in exchanges
+            for index, (exchange, cost) in enumerate(zip(exchanges, costs, strict=True))
         ],
     }
 
@@ -477,6 +685,14 @@ __all__ = [
     "custom_totals",
     "entity_section_totals",
     "entity_totals",
+    "cache_rewrite_totals",
+    "cache_rewrites",
+    "duplicate_totals",
+    "exchange_spend",
+    "image_totals",
+    "largest_tool_result",
+    "model_id",
+    "prices_stale",
     "response_scan",
     "response_scan_reason",
     "response_totals",

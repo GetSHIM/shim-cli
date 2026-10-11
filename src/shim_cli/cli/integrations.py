@@ -4,11 +4,11 @@ import contextlib
 import json
 import sys
 from pathlib import Path
-from typing import Literal, NoReturn
+from typing import Any, Literal, NoReturn
 
 import typer
 
-from shim_cli.cli.output import emit, emit_json
+from shim_cli.cli.output import FIX_CONFIRMATION, emit, emit_error, emit_json
 from shim_cli.clients.claude import settings as claude_settings
 from shim_cli.clients.codex import settings as codex_settings
 from shim_cli.clients.copilot import settings as copilot_settings
@@ -86,21 +86,16 @@ def _hook_fragment(client: str) -> dict[str, object]:
     return {"hooks": hooks}
 
 
-def _inline_hooks_notice(client: str) -> None:
+def _inline_hooks_notice(client: str) -> str | None:
     if client != "codex":
-        return
+        return None
     try:
         inline_hooks = codex_settings.has_inline_hooks()
     except ValueError:
-        emit(
-            "WARN", "Codex config.toml could not be inspected and will stay untouched."
-        )
-        return
+        return "Codex config.toml could not be inspected and will stay untouched."
     if inline_hooks:
-        emit(
-            "WARN",
-            "Inline config.toml hooks will stay untouched and may coexist with hooks.json.",
-        )
+        return "Inline config.toml hooks will stay untouched and may coexist with hooks.json."
+    return None
 
 
 def plan_status(plan: Plan) -> tuple[str, str]:
@@ -163,18 +158,63 @@ def _fragment_summary(client: str) -> str:
     )
 
 
-def _plan_error(client: str, command: str, as_json: bool = False) -> NoReturn:
-    name = client_name(client)
-    if as_json:
-        emit_json(
+def _plan_error(client: str, command: str, as_json: bool) -> NoReturn:
+    emit_error(
+        command,
+        "CLIENT_SETTINGS_UNREADABLE",
+        f"Unable to inspect {client_name(client)} hook configuration.",
+        f"Run shim doctor {client}.",
+        as_json=as_json,
+        client=client,
+    )
+
+
+def _plan_refused(
+    plan: Plan,
+    client: str,
+    command: str,
+    message: str,
+    *,
+    as_json: bool,
+    then: str | None = None,
+    **data: Any,
+) -> NoReturn:
+    """CONFLICT and REFUSE: shim leaves a file it cannot change safely alone."""
+    target = str(plan.target)
+    if plan.action is Action.CONFLICT:
+        emit_error(
             command,
-            "error",
+            "CLIENT_SETTINGS_MALFORMED",
+            message,
+            f"Fix {target} by hand so it parses, then run the command again.",
+            as_json=as_json,
+            then=then,
             client=client,
-            error=f"unable to inspect {name} hook configuration",
+            target=target,
+            **data,
         )
-    else:
-        emit("FAIL", f"Unable to inspect {name} hook configuration.", error=True)
-    raise typer.Exit(2)
+    emit_error(
+        command,
+        "CLIENT_SETTINGS_UNSAFE",
+        message,
+        f"Make {target} a regular file owned by you, then run the command again.",
+        as_json=as_json,
+        then=then,
+        client=client,
+        target=target,
+        **data,
+    )
+
+
+def _not_changed(client: str, command: str, as_json: bool) -> NoReturn:
+    emit_error(
+        command,
+        "CLIENT_SETTINGS_CHANGED",
+        f"{client_name(client)} hook configuration was not changed.",
+        "Run the command again.",
+        as_json=as_json,
+        client=client,
+    )
 
 
 def _legacy_copilot_file() -> Path | None:
@@ -186,18 +226,20 @@ def _legacy_copilot_file() -> Path | None:
     return legacy if copilot_settings.is_ours(state.content) else None
 
 
-def _remove_legacy_copilot_file() -> None:
+def _remove_legacy_copilot_file(as_json: bool) -> bool:
     legacy = _legacy_copilot_file()
     if legacy is None:
-        return
+        return False
     try:
         legacy.unlink()
     except OSError:
         # Saying "removed" over a failed unlink is the same defect this branch
         # has been fixing everywhere else: a message that does not match what
         # happened. The file is still there and doctor will keep naming it.
-        return
-    emit("PASS", f"removed the old hook file at {legacy}")
+        return False
+    if not as_json:
+        emit("PASS", f"removed the old hook file at {legacy}")
+    return True
 
 
 def _remove_empty_copilot_file() -> Path | None:
@@ -219,18 +261,30 @@ def _remove_empty_copilot_file() -> Path | None:
     return None
 
 
-def install(*, client: str, dry_run: bool, yes: bool) -> None:
+FIX_REINSTALL = (
+    "Reinstall shim: uv tool install --reinstall shim, or pipx reinstall shim."
+)
+_NEXT_STEP = {
+    "claude": "Start a new Claude Code session; /hooks lists shim.",
+    "codex": (
+        "Codex skips a hook you have not trusted, without warning: open "
+        "/hooks in Codex, review the shim entry and enable it."
+    ),
+}
+
+
+def install(*, client: str, dry_run: bool, yes: bool, as_json: bool = False) -> None:
     from shim_cli.cli import migration
 
     if not dry_run:
         migration.announce(
-            migration.settings() + migration.ledger_files(), as_json=False
+            migration.settings() + migration.ledger_files(), as_json=as_json
         )
     name = client_name(client)
     try:
         plan = client_plan(client, "install")
     except (OSError, ValueError):
-        _plan_error(client, "install")
+        _plan_error(client, "install", as_json)
 
     missing_parent = (
         plan.action is Action.REFUSE
@@ -243,34 +297,76 @@ def install(*, client: str, dry_run: bool, yes: bool) -> None:
         else plan.action
     )
     if action in {Action.CONFLICT, Action.REFUSE}:
-        emit("FAIL", f"{name} hook configuration cannot be changed safely.", error=True)
-        emit(
-            "WARN",
-            f"Review {name} hooks manually; shim did not change malformed, ambiguous, or unsafe settings.",
-            error=True,
+        _plan_refused(
+            plan,
+            client,
+            "install",
+            f"{name} hook configuration cannot be changed safely.",
+            as_json=as_json,
+            then=f"Review {name} hooks manually; shim did not change malformed, "
+            "ambiguous, or unsafe settings.",
         )
-        raise typer.Exit(2)
-    if action is Action.NOOP:
+    fragment = _hook_fragment(client)
+    hooks = fragment["hooks"]
+    assert isinstance(hooks, dict)
+    result: dict = {
+        "client": client,
+        "target": str(plan.target),
+        "action": action.value,
+        "events": [] if action is Action.NOOP else sorted(hooks),
+    }
+    if action is Action.NOOP and not as_json:
         emit("PASS", f"shim is already installed for {name}.")
         return
     # Read before apply() rewrites the file; both messages below describe it.
     legacy_hook, foreign_hooks = existing_hooks(client)
+    warnings: list[str] = []
     if action is Action.UPDATE:
-        legacy, foreign = legacy_hook, foreign_hooks
-        if legacy:
+        if legacy_hook and not as_json:
             emit("PASS", "Replaced the 0.2.0 hook line with the current one.")
-        if foreign or not legacy:
-            emit(
-                "WARN",
-                f"Existing {name} hooks will be preserved; shim will be appended last.",
+        if foreign_hooks or not legacy_hook:
+            warnings.append(
+                f"Existing {name} hooks will be preserved; shim will be appended last."
             )
-    _inline_hooks_notice(client)
+    if action is not Action.NOOP and (notice := _inline_hooks_notice(client)):
+        warnings.append(notice)
+    if not as_json:
+        for warning in warnings:
+            emit("WARN", warning)
     if dry_run:
+        if as_json:
+            emit_json(
+                "install",
+                "ok",
+                **result,
+                fragment=fragment,
+                summary=_fragment_summary(client),
+                dry_run=True,
+            )
+            return
         verb = "create" if action is Action.CREATE else "append to"
         emit("WARN", f"Would {verb} {name} hooks at {plan.target} with this fragment:")
         emit("WARN", _fragment_summary(client))
-        print(json.dumps(_hook_fragment(client), ensure_ascii=False, indent=2))
+        print(json.dumps(fragment, ensure_ascii=False, indent=2))
         return
+    result.update(
+        replaced_legacy=action is Action.UPDATE and legacy_hook,
+        preserved_hooks=foreign_hooks,
+        warnings=warnings,
+        next_step=None,
+    )
+    if action is Action.NOOP:
+        emit_json("install", "ok", **result)
+        return
+    if as_json and not yes:
+        emit_error(
+            "install",
+            "CONFIRMATION_REQUIRED",
+            "--yes is required with --json",
+            FIX_CONFIRMATION,
+            as_json=True,
+            client=client,
+        )
     prompt = (
         f"Create shim's {name} hook?"
         if action is Action.CREATE
@@ -284,30 +380,44 @@ def install(*, client: str, dry_run: bool, yes: bool) -> None:
             ensure_parent(plan.target)
             plan = client_plan(client, "install")
         except (InstallationError, OSError, ValueError):
-            emit("FAIL", f"{name} hook configuration was not changed.", error=True)
-            raise typer.Exit(2) from None
+            _not_changed(client, "install", as_json)
         if plan.action is Action.NOOP:
-            emit("PASS", f"shim is already installed for {name}.")
+            if as_json:
+                emit_json("install", "ok", **{**result, "action": "noop", "events": []})
+            else:
+                emit("PASS", f"shim is already installed for {name}.")
             return
         if plan.action is not Action.CREATE:
-            emit(
-                "FAIL", f"{name} hook configuration changed before install.", error=True
+            emit_error(
+                "install",
+                "CLIENT_SETTINGS_CHANGED",
+                f"{name} hook configuration changed before install.",
+                "Run the command again.",
+                as_json=as_json,
+                client=client,
             )
-            raise typer.Exit(2)
     try:
         from shim_cli.guard import evaluate
 
         evaluate("Synthetic safe prompt")
     except Exception:
-        emit("FAIL", "shim detector could not start.", error=True)
-        raise typer.Exit(2) from None
+        emit_error(
+            "install",
+            "DETECTOR_UNAVAILABLE",
+            "shim detector could not start.",
+            FIX_REINSTALL,
+            as_json=as_json,
+            client=client,
+        )
     try:
         apply(plan)
     except (InstallationError, OSError):
-        emit("FAIL", f"{name} hook configuration was not changed.", error=True)
-        raise typer.Exit(2) from None
-    if client == "copilot":
-        _remove_legacy_copilot_file()
+        _not_changed(client, "install", as_json)
+    if client == "copilot" and _remove_legacy_copilot_file(as_json):
+        result["replaced_legacy"] = True
+    if as_json:
+        emit_json("install", "ok", **{**result, "next_step": _NEXT_STEP.get(client)})
+        return
     emit(
         "PASS",
         f"Appended shim after existing {name} hooks."
@@ -315,11 +425,7 @@ def install(*, client: str, dry_run: bool, yes: bool) -> None:
         else f"Installed shim for {name}.",
     )
     if client == "codex":
-        emit(
-            "WARN",
-            "Codex skips a hook you have not trusted, without warning: open "
-            "/hooks in Codex, review the shim entry and enable it.",
-        )
+        emit("WARN", _NEXT_STEP["codex"])
 
 
 def status(*, client: str, as_json: bool) -> None:
@@ -329,48 +435,68 @@ def status(*, client: str, as_json: bool) -> None:
         label, state = plan_status(plan)
     except (OSError, ValueError):
         _plan_error(client, "status", as_json)
-    if as_json:
-        emit_json(
-            "status", "ok" if label != "FAIL" else "error", client=client, state=state
+    if label == "FAIL":
+        _plan_refused(
+            plan,
+            client,
+            "status",
+            f"{name} hook configuration is unsafe or differs from shim.",
+            as_json=as_json,
+            state=state,
         )
+    if as_json:
+        emit_json("status", "ok", client=client, state=state)
     elif state == "installed":
         emit("PASS", f"{name} hook configuration is installed.")
-    elif state == "not_installed":
-        emit("WARN", f"{name} hook configuration is not installed.")
     else:
-        emit(
-            "FAIL",
-            f"{name} hook configuration is unsafe or differs from shim.",
-            error=True,
-        )
+        emit("WARN", f"{name} hook configuration is not installed.")
     if label == "WARN":
         raise typer.Exit(1)
-    if label == "FAIL":
-        raise typer.Exit(2)
 
 
-def revert(*, client: str, yes: bool) -> None:
+def revert(*, client: str, yes: bool, as_json: bool = False) -> None:
     name = client_name(client)
     try:
         plan = client_plan(client, "revert")
     except (OSError, ValueError):
-        _plan_error(client, "revert")
+        _plan_error(client, "revert", as_json)
     if plan.action in {Action.CONFLICT, Action.REFUSE}:
-        emit("FAIL", f"{name} hook configuration cannot be removed safely.", error=True)
+        _plan_refused(
+            plan,
+            client,
+            "revert",
+            f"{name} hook configuration cannot be removed safely.",
+            as_json=as_json,
+            then=f"Review {name} hooks manually; shim removes only its exact hook group.",
+        )
+    legacy = client == "copilot" and _legacy_copilot_file() is not None
+    result: dict = {
+        "client": client,
+        "target": str(plan.target),
+        "action": "noop",
+        "removed_legacy_file": False,
+        "deleted_file": None,
+    }
+    if plan.action is Action.NOOP and not legacy:
+        if as_json:
+            emit_json("revert", "ok", **result)
+        else:
+            emit("PASS", f"shim is not installed for {name}.")
+        return
+    if as_json and not yes:
+        emit_error(
+            "revert",
+            "CONFIRMATION_REQUIRED",
+            "--yes is required with --json",
+            FIX_CONFIRMATION,
+            as_json=True,
+            client=client,
+        )
+    if not as_json:
         emit(
             "WARN",
-            f"Review {name} hooks manually; shim removes only its exact hook group.",
-            error=True,
+            "Only shim's exact hook group will be removed; other hooks will be preserved.",
         )
-        raise typer.Exit(2)
-    legacy = client == "copilot" and _legacy_copilot_file() is not None
-    if plan.action is Action.NOOP and not legacy:
-        emit("PASS", f"shim is not installed for {name}.")
-        return
-    emit(
-        "WARN",
-        "Only shim's exact hook group will be removed; other hooks will be preserved.",
-    )
     if not yes and not typer.confirm(f"Remove shim's {name} hook?", default=False):
         emit("WARN", "Revert cancelled.")
         raise typer.Exit(1)
@@ -378,14 +504,18 @@ def revert(*, client: str, yes: bool) -> None:
         try:
             apply(plan)
         except (InstallationError, OSError):
-            emit("FAIL", f"{name} hook configuration was not changed.", error=True)
-            raise typer.Exit(2) from None
+            _not_changed(client, "revert", as_json)
+    result["action"] = "remove"
     if client == "copilot":
-        _remove_legacy_copilot_file()
+        result["removed_legacy_file"] = _remove_legacy_copilot_file(as_json)
         # The file is shim's own. Leaving `{"version": 1, "hooks": {}}` behind
         # is litter, not preservation.
         removed = _remove_empty_copilot_file()
         if removed:
-            emit("PASS", f"Removed shim and deleted {removed}.")
-            return
-    emit("PASS", f"Removed shim and preserved the {name} settings file.")
+            result["deleted_file"] = str(removed)
+    if as_json:
+        emit_json("revert", "ok", **result)
+    elif result["deleted_file"]:
+        emit("PASS", f"Removed shim and deleted {result['deleted_file']}.")
+    else:
+        emit("PASS", f"Removed shim and preserved the {name} settings file.")

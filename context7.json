@@ -1,0 +1,33 @@
+{
+  "$schema": "https://context7.com/schema/context7.json",
+  "projectTitle": "shim-cli",
+  "description": "Local hooks and an opt-in measuring proxy for coding agents (Claude Code, Codex, GitHub Copilot CLI, VS Code): reports or masks secrets and personal data in prompts and tool traffic, and measures what a session sent and cost.",
+  "folders": [],
+  "excludeFolders": [
+    "src",
+    "tests",
+    "scripts",
+    "plugins",
+    ".github",
+    "docs/releases",
+    "docs/assets"
+  ],
+  "excludeFiles": [
+    "AGENTS.md",
+    "CONTRIBUTING.md",
+    "probe-2026-08.md",
+    "probe-2026-09-codex-watch.md",
+    "study-2026-09-08-image-repeat-cache.md",
+    "architecture-change-plan.md"
+  ],
+  "rules": [
+    "The command is `shim`, the PyPI package is `shim`, the repository and product are shim-cli; write the name in lowercase.",
+    "Claude Code and Codex cannot have a typed prompt masked; shim reports it, and blocks it under `[mode] user-prompt = \"enforce\"`. GitHub Copilot CLI replaces the prompt the model sees.",
+    "Claude Code tool inputs and results are masked by default; VS Code tool results are reported only.",
+    "`shim watch` supports Claude Code only, forwards bytes unchanged and never modifies a request.",
+    "Pipe text to `shim scan` or `shim redact` on stdin; never pass it as an argument.",
+    "Use `--json` and the exit codes in scripts and agents; JSON errors carry `code` and `fix`.",
+    "Windows is not supported; use WSL, macOS or Linux.",
+    "Settings live in `~/.config/shim/config.toml`; change them with `shim config`, never by editing a client's settings file."
+  ]
+}

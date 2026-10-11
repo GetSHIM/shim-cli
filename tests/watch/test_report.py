@@ -88,16 +88,17 @@ def test_at_files_are_called_out_as_not_masked() -> None:
 
 
 def test_spend_is_priced_per_kind_of_token() -> None:
-    dollars, priced, unpriced = report.spend([_exchange()])
+    dollars, priced, unpriced, costs = report.spend([_exchange()])
 
     assert priced == 1
     assert unpriced == []
-    expected = (2 * 3.0 + 214 * 15.0 + 18_093 * 3.75 + 91_562 * 0.3) / 1_000_000
+    expected = (2 * 2.0 + 214 * 10.0 + 18_093 * 2.5 + 91_562 * 0.2) / 1_000_000
     assert abs(dollars - expected) < 1e-9
+    assert costs == [dollars]
 
 
 def test_an_unknown_model_is_named_rather_than_guessed() -> None:
-    dollars, priced, unpriced = report.spend([_exchange(model="some-future-model")])
+    dollars, priced, unpriced, _ = report.spend([_exchange(model="some-future-model")])
 
     assert dollars == 0.0
     assert priced == 0
@@ -347,7 +348,14 @@ def test_the_json_report_carries_both_directions_and_each_request() -> None:
                 "output_tokens": 214,
                 "cache_read_input_tokens": 91_562,
                 "cache_creation_input_tokens": 18_093,
+                "cache_creation_1h_input_tokens": 0,
             },
+            "spend_usd": 0.065689,
+            "priced_as": "claude-sonnet-5",
+            "image_count": 0,
+            "estimated_image_tokens": 0,
+            "cache_rewrite": False,
+            "duplicate_in_flight": False,
         }
     ]
 
@@ -499,3 +507,221 @@ def test_the_response_line_does_not_claim_the_values_were_invented() -> None:
     assert report.NOT_LEAKS == (
         "written by the model; it may repeat values it was given"
     )
+
+
+def test_each_exchange_carries_its_own_cost_and_the_row_it_was_priced_as() -> None:
+    priced = _exchange(model="claude-opus-5-5-20260101")
+    unpriced = _exchange(model="some-future-model")
+
+    rows = report.as_json(_session(priced, unpriced), 5.0)["exchanges"]
+
+    assert rows[0]["priced_as"] == "claude-opus-5-5"
+    assert rows[0]["spend_usd"] == round(report.exchange_spend(priced), 6)
+    assert rows[1]["priced_as"] is rows[1]["spend_usd"] is None
+
+
+def test_the_costliest_request_is_named_once_two_are_priced() -> None:
+    cheap = _exchange(model="claude-haiku-4-5")
+    dear = _exchange(model="claude-opus-5-5")
+
+    alone = report.render(_session(dear), 5.0)
+    both = report.render(_session(cheap, dear), 5.0)
+
+    assert "costliest" not in alone
+    line = next(row for row in both.splitlines() if "costliest" in row)
+    cost = report.exchange_spend(dear)
+    assert line == (
+        f"  costliest  one request ~${cost:,.2f} (claude-opus-5-5, "
+        "109,657 input tokens)"
+    )
+
+
+def test_one_hour_cache_writes_are_priced_at_the_one_hour_rate() -> None:
+    usage = measure.Usage(
+        cache_creation_input_tokens=1_000_000, cache_creation_1h_input_tokens=400_000
+    )
+
+    cost = report.exchange_spend(_exchange(model="claude-opus-5-5", usage=usage))
+
+    assert cost == pytest.approx(600_000 * 5 / 1e6 + 400_000 * 8 / 1e6)
+
+
+@pytest.mark.parametrize(
+    ("prompt", "rate"), [(99_999, 0.1), (100_000, 0.1), (100_001, 0.5)]
+)
+def test_haiku_5_5_prices_a_long_prompt_at_the_upper_row(prompt, rate) -> None:
+    usage = measure.Usage(
+        input_tokens=prompt - 2,
+        cache_read_input_tokens=1,
+        cache_creation_input_tokens=1,
+    )
+
+    cost = report.exchange_spend(_exchange(model="claude-haiku-5-5", usage=usage))
+
+    read, write = (0.01, 0.125) if rate == 0.1 else (0.05, 0.625)
+    assert cost == pytest.approx(((prompt - 2) * rate + read + write) / 1e6)
+
+
+@pytest.mark.parametrize(("days", "stale"), [(90, False), (91, True)])
+def test_the_spend_line_says_when_its_prices_are_old(monkeypatch, days, stale) -> None:
+    import datetime
+
+    read_on = datetime.date.fromisoformat(report.PRICED_ON)
+    monkeypatch.setattr(report, "_today", lambda: read_on + datetime.timedelta(days))
+
+    line = _spend_line(_exchange(auth_route="api-key"))
+    document = report.as_json(_session(_exchange()), 5.0)
+
+    old = (
+        f"(approximate, {report.PRICED_ON} prices, older than 90 days; newer "
+        "models and price changes are not reflected)"
+    )
+    assert line.endswith(old) is stale
+    assert document["approximate"]["prices_stale"] is stale
+
+
+def _usage(read: int, written: int, uncached: int = 2) -> measure.Usage:
+    return measure.Usage(
+        input_tokens=uncached,
+        output_tokens=10,
+        cache_read_input_tokens=read,
+        cache_creation_input_tokens=written,
+    )
+
+
+def _turn(model: str, size: int, read: int, written: int):
+    return _exchange(model=model, request_bytes=size, usage=_usage(read, written))
+
+
+# A session shaped like the 8 September study: a cold first request, a growing
+# conversation that reads what the last one wrote, one request that rewrote the
+# prefix, Claude Code's smaller closing side call, and a second model between.
+CACHE_SERIES = [
+    _turn("claude-opus-5-5", 100_000, 0, 20_000),
+    _turn("claude-haiku-4-5", 5_000, 0, 3_000),
+    _turn("claude-opus-5-5", 110_000, 20_000, 2_000),
+    _turn("claude-opus-5-5", 120_000, 22_000, 1_000),
+    _turn("claude-haiku-4-5", 6_000, 0, 3_500),
+    _turn("claude-opus-5-5", 130_000, 5_000, 18_000),
+    _turn("claude-opus-5-5", 140_000, 23_000, 1_000),
+    _turn("claude-opus-5-5", 40_000, 9_000, 500),
+]
+
+
+def test_a_cache_rewrite_is_named_and_nothing_else_is() -> None:
+    assert report.cache_rewrites(CACHE_SERIES) == [5]
+
+    totals = report.cache_rewrite_totals(CACHE_SERIES, [5])
+    assert totals == {
+        "count": 1,
+        "tokens": 18_000,
+        "spend_usd": round(18_000 * 5 / 1_000_000, 6),
+        "requests": [6],
+    }
+    line = next(
+        row
+        for row in report.render(_session(*CACHE_SERIES), 9.0).splitlines()
+        if row.startswith("  cache  ")
+    )
+    assert line == (
+        "  cache     1 request rewrote a prefix the previous one had cached "
+        "(~18,000 tokens written again, ~$0.09); request 6"
+    )
+
+
+def test_a_cold_start_or_a_smaller_side_call_is_never_a_rewrite() -> None:
+    cold = [_turn("claude-opus-5-5", 100_000, 0, 20_000)] * 3
+    side_call = [
+        _turn("claude-opus-5-5", 100_000, 0, 20_000),
+        _turn("claude-opus-5-5", 110_000, 20_000, 2_000),
+        _turn("claude-opus-5-5", 30_000, 9_000, 500),
+    ]
+
+    assert report.cache_rewrites(cold) == []
+    assert report.cache_rewrites(side_call) == []
+    assert "  cache  " not in report.render(_session(*side_call), 9.0)
+
+
+def _with_images(digests: dict, count: int, tokens: int):
+    return _exchange(images=digests, image_count=count, estimated_image_tokens=tokens)
+
+
+def test_images_are_counted_once_however_often_history_replays_them() -> None:
+    first = _with_images({"a": True}, 1, 2_494)
+    replay = _with_images({"a": True, "b": False}, 2, 2_494)
+
+    document = report.as_json(_session(first, replay, _exchange()), 9.0)
+    line = next(
+        row
+        for row in report.render(_session(first, replay), 9.0).splitlines()
+        if row.startswith("  images")
+    )
+
+    assert document["images"] == {
+        "distinct": 2,
+        "requests": 2,
+        "estimated_tokens": 4_988,
+        "unknown_size": 1,
+    }
+    assert (
+        line
+        == "  images    2 distinct, ~4,988 input tokens across 2 requests (estimated)"
+    )
+    assert [row["image_count"] for row in document["exchanges"]] == [1, 2, 0]
+    assert "images" not in report.render(_session(_exchange()), 9.0)
+
+
+def test_the_largest_tool_result_is_named_with_its_replays() -> None:
+    first = _exchange(tool_results={"toolu_1": ("Bash", 40_960)})
+    later = _exchange(
+        tool_results={"toolu_1": ("Bash", 40_960), "toolu_2": ("unknown tool", 12)}
+    )
+
+    document = report.as_json(_session(first, later), 9.0)
+    text = report.render(_session(first, later), 9.0)
+
+    assert document["largest_tool_result"] == {
+        "tool": "Bash",
+        "bytes": 40_960,
+        "requests": 2,
+    }
+    assert (
+        "  largest tool result  Bash, 40,960 bytes (~10,240 tokens), carried by 2 "
+        "requests" in text
+    )
+    assert report.as_json(_session(_exchange()), 9.0)["largest_tool_result"] is None
+    assert "largest tool result" not in report.render(_session(_exchange()), 9.0)
+
+
+def test_identical_requests_in_flight_are_counted_not_withheld() -> None:
+    twin = _exchange(duplicate_in_flight=True)
+
+    document = report.as_json(_session(_exchange(), twin), 9.0)
+    text = report.render(_session(_exchange(), twin), 9.0)
+
+    assert document["duplicates_in_flight"] == {
+        "count": 1,
+        "input_tokens": twin.usage.total_input,
+    }
+    assert [row["duplicate_in_flight"] for row in document["exchanges"]] == [
+        False,
+        True,
+    ]
+    assert (
+        "  duplicates  1 request was sent while an identical one was still in "
+        "flight (~109,657 input tokens billed again)" in text
+    )
+    assert "duplicates" not in report.render(_session(_exchange()), 9.0)
+
+
+def test_no_digest_or_tool_id_reaches_the_json() -> None:
+    exchange = _exchange(
+        images={"f" * 64: True},
+        image_count=1,
+        tool_results={"toolu_secret_id": ("Bash", 10)},
+    )
+
+    dumped = json.dumps(report.as_json(_session(exchange), 9.0))
+
+    assert "f" * 64 not in dumped
+    assert "toolu_secret_id" not in dumped

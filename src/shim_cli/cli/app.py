@@ -327,11 +327,12 @@ def install(
     client: Annotated[Client, typer.Argument(case_sensitive=True, show_choices=True)],
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview without writing."),
     yes: bool = typer.Option(False, "--yes", help="Apply without confirmation."),
+    json_output: bool = typer.Option(False, "--json", help="Write a JSON result."),
 ) -> None:
     """Preview or install a client hook."""
     from shim_cli.cli.integrations import install as run_install
 
-    run_install(client=client.value, dry_run=dry_run, yes=yes)
+    run_install(client=client.value, dry_run=dry_run, yes=yes, as_json=json_output)
 
 
 @app.command()
@@ -360,11 +361,12 @@ def doctor(
 def revert(
     client: Annotated[Client, typer.Argument(case_sensitive=True, show_choices=True)],
     yes: bool = typer.Option(False, "--yes", help="Apply without confirmation."),
+    json_output: bool = typer.Option(False, "--json", help="Write a JSON result."),
 ) -> None:
     """Remove shim's client hook."""
     from shim_cli.cli.integrations import revert as run_revert
 
-    run_revert(client=client.value, yes=yes)
+    run_revert(client=client.value, yes=yes, as_json=json_output)
 
 
 def main() -> None:
