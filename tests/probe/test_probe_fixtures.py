@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 from pathlib import Path
 
@@ -157,3 +158,67 @@ def test_the_detector_counts_what_the_model_wrote_in_that_capture() -> None:
     message = _load("Stop-none-model-reply-1.json")["last_assistant_message"]
 
     assert dict(evaluate(message).counts) == {"EMAIL": 1}
+
+
+def test_a_pdf_read_is_a_file_view_holding_the_document_as_base64() -> None:
+    payload = _load("PostToolUse-Read-read-pdf-1.json")
+    result = payload["tool_response"]
+
+    assert payload["tool_input"]["file_path"].endswith("/doc.pdf")
+    assert result["type"] == "pdf"
+    assert set(result["file"]) == {"filePath", "base64", "originalSize"}
+    assert base64.b64decode(result["file"]["base64"]).startswith(b"%PDF-")
+    assert "probe document" not in json.dumps(result), "no extracted text"
+
+
+def test_a_word_read_is_refused_before_any_tool_event() -> None:
+    (call,) = _load("PostToolBatch-none-read-docx-1.json")["tool_calls"]
+
+    assert call["tool_input"]["file_path"].endswith("/doc.docx")
+    assert call["tool_response"].startswith("<tool_use_error>This tool cannot read")
+    assert not list(FIXTURES.glob("*Use*-read-docx-*.json"))
+
+
+def test_a_page_fetched_with_curl_reaches_the_hook_as_markup_up_to_30000() -> None:
+    result = _load("PostToolUse-Bash-bash-curl-html-1.json")["tool_response"]
+
+    assert result["stdout"].startswith("<!doctype html>")
+    assert len(result["stdout"]) == 30_000
+    assert result["persistedOutputSize"] > 30_000
+
+
+def test_a_page_from_an_mcp_server_reaches_the_hook_whole() -> None:
+    (block,) = _load("PostToolUse-mcp__probe__probe_echo-mcp-html-1.json")[
+        "tool_response"
+    ]
+
+    assert block["type"] == "text"
+    assert block["text"].startswith("<!doctype html>")
+    assert block["text"].endswith("</body></html>\n")
+
+
+@pytest.mark.parametrize(
+    "name,converted",
+    [
+        ("PostToolUse-Bash-bash-curl-html-1.json", True),
+        ("PostToolUse-mcp__probe__probe_echo-mcp-html-1.json", True),
+        ("PostToolUse-Read-read-pdf-1.json", False),
+    ],
+)
+def test_the_html_diet_converts_command_and_mcp_pages_and_never_a_file(
+    name: str, converted: bool
+) -> None:
+    from shim_cli.clients.claude.tool_events import TOOL_EVENTS
+    from shim_cli.events.pipeline import process
+    from shim_cli.guard import evaluate
+
+    outcome = process(
+        TOOL_EVENTS["PostToolUse"],
+        (FIXTURES / name).read_bytes(),
+        lambda direction, tool: "enforce",
+        evaluate,
+        ("json", "html"),
+    )
+
+    assert (outcome.record.transforms == ("html",)) is converted
+    assert (b"converted from HTML" in outcome.output) is converted

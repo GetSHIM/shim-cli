@@ -7,7 +7,9 @@ of each:
     base64 `image` block, and `UserPromptSubmit` receives the prompt text only;
   - an image read with the `Read` tool comes back in `tool_response`, which
     `PostToolUse` does see;
-  - a PDF read the same way may come back as text, as images, or as both.
+  - a PDF read the same way may come back as text, as images, or as both;
+  - a Word file read the same way comes back in whatever shape `read-docx`
+    records.
 
 Each case runs once under `shim watch` with the recording hook installed, so
 the same session answers both halves: which events fire and how large the hook
@@ -47,6 +49,10 @@ CASES = {
     ),
     "read-pdf": (
         "Use the Read tool on {pdf}. Then reply with only the word DONE.",
+        "Read",
+    ),
+    "read-docx": (
+        "Use the Read tool on {docx}. Then reply with only the word DONE.",
         "Read",
     ),
 }
@@ -109,11 +115,48 @@ def _tiny_pdf() -> bytes:
     return bytes(out)
 
 
+def _tiny_docx() -> bytes:
+    """A one-paragraph Word document: the three parts Word needs, nothing else."""
+    import io
+    import zipfile
+
+    parts = {
+        "[Content_Types].xml": (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<Types xmlns="http://schemas.openxmlformats.org/package/2006/'
+            'content-types"><Default Extension="rels" ContentType="application/'
+            'vnd.openxmlformats-package.relationships+xml"/><Default Extension='
+            '"xml" ContentType="application/xml"/><Override PartName="/word/'
+            'document.xml" ContentType="application/vnd.openxmlformats-'
+            'officedocument.wordprocessingml.document.main+xml"/></Types>'
+        ),
+        "_rels/.rels": (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/'
+            'relationships"><Relationship Id="rId1" Type="http://schemas.'
+            "openxmlformats.org/officeDocument/2006/relationships/officeDocument"
+            '" Target="word/document.xml"/></Relationships>'
+        ),
+        "word/document.xml": (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<w:document xmlns:w="http://schemas.openxmlformats.org/'
+            'wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>probe document '
+            "gamma delta</w:t></w:r></w:p></w:body></w:document>"
+        ),
+    }
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, text in parts.items():
+            archive.writestr(zipfile.ZipInfo(name, (2000, 1, 1, 0, 0, 0)), text)
+    return out.getvalue()
+
+
 def build_workspace(root: Path) -> Path:
     workspace = root / "workspace"
     workspace.mkdir(parents=True, exist_ok=True)
     (workspace / "shot.png").write_bytes(_tiny_png())
     (workspace / "doc.pdf").write_bytes(_tiny_pdf())
+    (workspace / "doc.docx").write_bytes(_tiny_docx())
     return workspace
 
 
@@ -180,7 +223,7 @@ def run_case(
     model: str,
 ) -> dict:
     prompt_template, tools = CASES[name]
-    prompt = prompt_template.format(image="shot.png", pdf="doc.pdf")
+    prompt = prompt_template.format(image="shot.png", pdf="doc.pdf", docx="doc.docx")
     captures = root / "captures" / name
     captures.mkdir(parents=True, exist_ok=True)
     settings = root / f"settings-{name}.json"

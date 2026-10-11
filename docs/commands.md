@@ -658,7 +658,7 @@ and a partial one would be worth guessing at.
 ```console
 shim config --ledger --yes      # keep records past the session; off by default
 shim config --no-ledger --yes
-shim config --diet --yes        # shrink tool results losslessly; on by default
+shim config --diet --yes        # back to the default diet, json only; on by default
 shim config --no-diet --yes
 shim config --reset --yes       # back to defaults; discards every setting
 ```
@@ -840,8 +840,9 @@ enabled_entities = ["EMAIL", "SECRET", "DB_URI", "IBAN", "CUSTOM"]
 # Keep records past the end of a session, for 30 days. Default: false.
 ledger = false
 
-# Shrink tool results losslessly before the model sees them.
-# true, false, or a list naming individual transforms: "json", "whitespace".
+# Shrink tool results before the model sees them. true (the default, "json"
+# only), false, or a list naming transforms: "json" (lossless), "html" (a whole
+# HTML page in command or MCP output becomes text) and "whitespace".
 diet = true
 
 # Tell the model when a Claude Code tool result reads as instructions.

@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import re
+import socket
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -133,7 +134,43 @@ STEPS = (
         "docker-compose.yml. Then reply with only the word DONE.",
         ("Read",),
     ),
+    Step(
+        "bash-curl-html",
+        "Use the Bash tool to run exactly: curl -s {url}/page.html. Then reply "
+        "with only the word DONE.",
+        ("Bash",),
+    ),
+    Step(
+        "mcp-html",
+        "Call the probe_echo MCP tool with customer_email set to ops@example.com "
+        "and page set to page.html. Then reply with only the word DONE.",
+        ("mcp__probe__probe_echo",),
+    ),
 )
+
+
+def page_html(rows: int = 330) -> str:
+    """A synthetic page of about 40 KB: a title, three headings, a table, two
+    links, a script and a style block."""
+    builds = "".join(
+        f'<tr class="row"><td class="build">build {number:04d}</td>'
+        f'<td class="result ok">passed</td><td class="duration">{number % 60} s</td>'
+        "</tr>\n"
+        for number in range(1, rows + 1)
+    )
+    return (
+        '<!doctype html>\n<html lang="en"><head><meta charset="utf-8">'
+        "<title>Release status</title>\n"
+        "<style>table{border-collapse:collapse}td{padding:2px 8px}</style>\n"
+        '<script>window.release = {"channel": "stable"};</script></head>\n<body>\n'
+        "<h1>Release status</h1>\n<p>Questions go to ops@example.com.</p>\n"
+        '<h2>Build history</h2>\n<table class="builds">'
+        "<tr><th>Build</th><th>Result</th><th>Duration</th></tr>\n"
+        f"{builds}</table>\n<h2>Links</h2>\n"
+        '<p><a href="https://example.com/runbook">Runbook</a> and '
+        '<a href="https://example.com/dashboard">dashboard</a>.</p>\n'
+        "</body></html>\n"
+    )
 
 
 def build_workspace(root: Path, large_bytes: int = 60_000) -> Path:
@@ -141,6 +178,7 @@ def build_workspace(root: Path, large_bytes: int = 60_000) -> Path:
     workspace.mkdir(parents=True, exist_ok=True)
     for name, content in WORKSPACE_FILES.items():
         (workspace / name).write_text(content, encoding="utf-8")
+    (workspace / "page.html").write_text(page_html(), encoding="utf-8")
     repeats = -(-large_bytes // len(LARGE_FILE_FILLER))
     body = "".join(
         f"{index:05d} {LARGE_FILE_FILLER}\n" for index in range(1, repeats + 1)
@@ -201,51 +239,63 @@ def run(
     server_command = [sys.executable, str(scripts / "mcp_echo_server.py")]
     _write_json(settings_path, hook_settings(capture_command))
     _write_json(mcp_path, mcp_settings(server_command))
-
-    for step in STEPS:
-        if only and step.name not in only:
-            continue
-        captures = root / "captures" / step.name
-        captures.mkdir(parents=True, exist_ok=True)
-        environment = child_environment(str(captures), system_message)
-        command = [
-            str(client_binary),
-            "-p",
-            step.prompt,
-            "--settings",
-            str(settings_path),
-            "--mcp-config",
-            str(mcp_path),
-            "--strict-mcp-config",
-            "--allowedTools",
-            ",".join(step.tools),
-            "--permission-mode",
-            "bypassPermissions",
-            "--model",
-            model,
-            "--effort",
-            "low",
-            "--output-format",
-            "stream-json",
-            "--verbose",
-            "--include-hook-events",
-            "--no-session-persistence",
-        ]
-        completed = subprocess.run(
-            command,
-            cwd=workspace,
-            env=environment,
-            capture_output=True,
-            check=False,
-            timeout=STEP_TIMEOUT_SECONDS,
-        )
-        (captures / "stream.jsonl").write_bytes(completed.stdout)
-        (captures / "stderr.txt").write_bytes(completed.stderr)
-        (captures / "exit-code.txt").write_text(
-            str(completed.returncode), encoding="utf-8"
-        )
-        found = sum(1 for _ in captures.glob("*-*-*.json"))
-        print(f"{step.name}: exit {completed.returncode}, {found} captures")
+    with socket.socket() as probe_socket:
+        probe_socket.bind(("127.0.0.1", 0))
+        port = probe_socket.getsockname()[1]
+    pages = subprocess.Popen(
+        [sys.executable, "-m", "http.server", str(port), "--bind", "127.0.0.1"],
+        cwd=workspace,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        for step in STEPS:
+            if only and step.name not in only:
+                continue
+            captures = root / "captures" / step.name
+            captures.mkdir(parents=True, exist_ok=True)
+            environment = child_environment(str(captures), system_message)
+            command = [
+                str(client_binary),
+                "-p",
+                step.prompt.format(url=f"http://127.0.0.1:{port}"),
+                "--settings",
+                str(settings_path),
+                "--mcp-config",
+                str(mcp_path),
+                "--strict-mcp-config",
+                "--allowedTools",
+                ",".join(step.tools),
+                "--permission-mode",
+                "bypassPermissions",
+                "--model",
+                model,
+                "--effort",
+                "low",
+                "--output-format",
+                "stream-json",
+                "--verbose",
+                "--include-hook-events",
+                "--no-session-persistence",
+            ]
+            completed = subprocess.run(
+                command,
+                cwd=workspace,
+                env=environment,
+                capture_output=True,
+                check=False,
+                timeout=STEP_TIMEOUT_SECONDS,
+            )
+            (captures / "stream.jsonl").write_bytes(completed.stdout)
+            (captures / "stderr.txt").write_bytes(completed.stderr)
+            (captures / "exit-code.txt").write_text(
+                str(completed.returncode), encoding="utf-8"
+            )
+            found = sum(1 for _ in captures.glob("*-*-*.json"))
+            print(f"{step.name}: exit {completed.returncode}, {found} captures")
+    finally:
+        pages.terminate()
+        pages.wait(timeout=10)
 
 
 def mangle(path: str) -> str:

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 JSON_COMPACTION = "json"
+HTML_TEXT = "html"
 TRAILING_WHITESPACE = "whitespace"
-TRANSFORMS = (JSON_COMPACTION, TRAILING_WHITESPACE)
+TRANSFORMS = (JSON_COMPACTION, HTML_TEXT, TRAILING_WHITESPACE)
 DEFAULT_TRANSFORMS = (JSON_COMPACTION,)
 
 MIN_CANDIDATE_CHARS = 64
@@ -76,8 +77,16 @@ def strip_trailing_whitespace(text: str) -> str:
     return "\n".join(stripped)
 
 
+def html_to_text(text: str) -> str:
+    # Imported here so the hook loads the parser only when `html` is enabled.
+    from .html_text import to_text
+
+    return to_text(text)
+
+
 _APPLY = {
     JSON_COMPACTION: compact_json,
+    HTML_TEXT: html_to_text,
     TRAILING_WHITESPACE: strip_trailing_whitespace,
 }
 
@@ -99,6 +108,7 @@ def shrink(text: str, enabled: tuple = DEFAULT_TRANSFORMS) -> tuple:
 
 __all__ = [
     "DEFAULT_TRANSFORMS",
+    "HTML_TEXT",
     "JSON_COMPACTION",
     "MIN_CANDIDATE_CHARS",
     "TRAILING_WHITESPACE",

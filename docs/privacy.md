@@ -368,10 +368,14 @@ idempotent, because the provider's prompt cache only hits if the history is
 byte-identical on every request, so a transform that drifts costs money instead
 of saving it.
 
-Two transforms ship. Only the lossless `json` transform is enabled by default.
-`whitespace` is opt in because it strips trailing spaces and tabs from every
-line, removing a Markdown hard line break since that break *is* two trailing
-spaces. It never changes a line count.
+Three transforms ship. Only the lossless `json` transform is enabled by
+default. `whitespace` is opt in because it strips trailing spaces and tabs from
+every line, removing a Markdown hard line break since that break *is* two
+trailing spaces. It never changes a line count. `html` is opt in because it is
+not lossless: a result that is a whole HTML page reaches the model as text, its
+markup, scripts and styles dropped and a header line saying so. Masking runs
+first, and a placeholder stays a placeholder. Like every transform, the record
+keeps only its name and the sizes before and after, never the page.
 
 JSON is compacted by a lexer rather than by parsing and re-serialising:
 re-serialising rewrites number literals (`1.10` becomes `1.1`, a long decimal
@@ -386,7 +390,9 @@ a *view of a file*: the model reproduces those bytes to edit the file, and
 `Edit` matches `old_string` against what is on disk rather than against what
 the model was shown, so reshaping a file on the way in makes the next edit of
 it miss. `shim config --no-diet` turns it off. To opt in to whitespace while
-keeping JSON, set `diet = ["json", "whitespace"]`.
+keeping JSON, set `diet = ["json", "whitespace"]`; for HTML pages,
+`diet = ["json", "html"]`. No PDF, Word or other binary document is read,
+decoded or converted.
 
 shim also flags text in a result that reads as an instruction to the model.
 Invisible-character detection covers the zero-width space, the invisible

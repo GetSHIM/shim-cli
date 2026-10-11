@@ -909,6 +909,21 @@ def test_a_single_transform_can_be_named_in_the_config_file(
     assert load_policy(target).diet == ("whitespace",)
 
 
+def test_the_diet_flag_never_turns_html_on_and_other_changes_keep_it(
+    monkeypatch, tmp_path: Path
+) -> None:
+    target = _guard_config(monkeypatch, tmp_path)
+    target.parent.mkdir()
+    target.write_text('enabled_entities = ["EMAIL"]\ndiet = ["json", "html"]\n')
+
+    assert runner.invoke(app, ["config", "--enable", "SECRET", "--yes"]).exit_code == 0
+    assert load_policy(target).diet == ("json", "html")
+    assert "Diet: json, html" in runner.invoke(app, ["config"]).output
+
+    assert runner.invoke(app, ["config", "--diet", "--yes"]).exit_code == 0
+    assert load_policy(target).diet == DEFAULT_TRANSFORMS == ("json",)
+
+
 def test_report_reads_the_ledger_once_the_session_has_ended(tmp_path: Path) -> None:
     from shim_cli.session import ledger
 
