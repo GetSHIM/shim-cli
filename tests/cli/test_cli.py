@@ -231,6 +231,7 @@ def test_privacy_stdin_json_and_no_color(monkeypatch) -> None:
     safe = runner.invoke(app, ["scan"], input="plain synthetic text")
     finding = runner.invoke(app, ["scan", "--json"], input="email alice@example.com")
     redacted = runner.invoke(app, ["redact"], input="email alice@example.com")
+    redacted_file = runner.invoke(app, ["redact"], input="email alice@example.com\n")
     redacted_json = runner.invoke(
         app, ["redact", "--json"], input="Contact alice@example.invalid"
     )
@@ -243,7 +244,8 @@ def test_privacy_stdin_json_and_no_color(monkeypatch) -> None:
     assert "alice@example.com" not in finding.output
     assert json.loads(finding.output)["schema_version"] == 1
     assert redacted.exit_code == 0
-    assert redacted.output == "email <EMAIL_1>\n"
+    assert redacted.output == "email <EMAIL_1>"
+    assert redacted_file.output == "email <EMAIL_1>\n"
     assert "alice@example.invalid" not in redacted_json.output
     assert "redacted_text" not in json.loads(redacted_json.output)
     assert "redacted_text" not in json.loads(demo.output)

@@ -208,7 +208,7 @@ you meant is a pattern that masks half your file.
 Check it before you trust it:
 
 ```console
-$ printf 'deploy ATLAS-1874 to db-core-01' | shim redact
+$ echo 'deploy ATLAS-1874 to db-core-01' | shim redact
 deploy <CUSTOM_1> to <CUSTOM_2>
 ```
 
@@ -257,7 +257,7 @@ A connection string keeps its scheme, host, port and database and loses its
 user and password, so the agent can still tell production from staging:
 
 ```console
-$ printf 'postgresql://app:synthetic-password@db-prod.internal:5432/kasa' | shim redact
+$ echo 'postgresql://app:synthetic-password@db-prod.internal:5432/kasa' | shim redact
 postgresql://<DB_URI_1>@db-prod.internal:5432/kasa
 ```
 
@@ -266,7 +266,7 @@ your host names are sensitive in themselves, teach shim their shape:
 
 ```console
 $ shim config --custom 'DB_HOST=\bdb-[a-z-]+\.internal\b' --yes
-$ printf 'postgresql://app:synthetic-password@db-prod.internal:5432/kasa' | shim redact
+$ echo 'postgresql://app:synthetic-password@db-prod.internal:5432/kasa' | shim redact
 postgresql://<DB_URI_1>@<CUSTOM_1>:5432/kasa
 ```
 

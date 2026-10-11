@@ -427,7 +427,7 @@ pipe it through `scan` or `redact`:
 
 ```console
 printf '%s' 'Contact me at alice@example.com' | shim scan
-printf '%s' 'Contact me at alice@example.com' | shim redact
+echo 'Contact me at alice@example.com' | shim redact
 ```
 
 Both commands read standard input. Do not pass real prompts as command-line

@@ -75,7 +75,8 @@ def redact(*, as_json: bool) -> None:
             counts=dict(decision.counts),
         )
     else:
-        print(terminal_text(decision.redacted_text, sys.stdout, "\n\t"))
+        # The input's own line ending, so `shim redact < f > g` changes only values.
+        sys.stdout.write(terminal_text(decision.redacted_text, sys.stdout, "\n\t"))
 
 
 def demo(*, client: str, as_json: bool) -> None:

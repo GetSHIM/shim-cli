@@ -706,13 +706,12 @@ read at all and while shim's settings file is refused or invalid.
 Same input, but writes the rewritten text to stdout.
 
 ```console
-$ printf 'key AKIAIOSFODNN7EXAMPLE' | shim redact
+$ echo 'key AKIAIOSFODNN7EXAMPLE' | shim redact
 key <SECRET_1>
 ```
 
-shim adds one newline to the end of the output, whatever the input ended with,
-so a file that already ends with one comes back from `shim redact < file` with
-a blank line at the end.
+The output ends the way the input did, so `shim redact < file > copy` changes
+only the values.
 
 Exits `0`, or `1` with `Unable to process stdin.` when stdin cannot be read or
 scanned in full, or the settings file is refused or invalid.
