@@ -213,6 +213,10 @@ Tool coverage is verified against a running client, not derived from
 documentation. `shim doctor <client>` prints exactly which events are installed
 and what shim can and cannot change at each one.
 
+**Why a hook and not an MCP server:** an MCP server sees only the calls made to
+its own tools, so the agent's built-in Read and Bash never pass through it. A
+hook sits on the client's own tool calls and sees those too.
+
 What shim-cli detects, and masks wherever the client allows it:
 
 - **Personal data:** email addresses (also written `name[at]domain.tld`),
@@ -282,8 +286,9 @@ pipx install --python python3.12 --fetch-missing-python shim
 `--python` matters on a machine whose only Python is the system 3.9:
 without it `uv` quietly installs the last release that ran there, 0.2.0.
 Neither line needs Python 3.12 installed first: `uv` fetches it itself, and
-`--fetch-missing-python` makes `pipx` do the same. When `python3 --version`
-already says 3.10 or newer, `pipx install shim` is enough.
+`--fetch-missing-python` makes `pipx` do the same. That flag needs pipx 1.5 or
+newer; Ubuntu 24.04 ships 1.4.3, which rejects it. When `python3 --version`
+already says 3.10 or newer, `pipx install shim` is enough, on any pipx.
 
 Preview and install the hook for your client:
 
@@ -773,7 +778,7 @@ Every figure here was measured on the released build, not estimated.
 | Tests | **2,300+**, one command: `python scripts/check.py` — lock, lint, format, types, suite, wheel, sdist |
 | Hook cost | **70 ms** median end to end, interpreter start included; **42 ms** for a session summary |
 | With 32 custom patterns | **+0.6 ms** median against the same prompt with none |
-| Detector corpus | **727 cases**, graded on exact redacted output rather than category presence, and the gateway's own 140-case corpus, against which every difference is pinned with its reason |
+| Detector corpus | **752 cases** in five corpora (`guard-v2` 235, `parity-v1` 475, `guard-tools-v1` 24, `custom-v1` 10, `reveal-v1` 8), graded on exact redacted output rather than category presence, and the gateway's own 140-case corpus, against which every difference is pinned with its reason |
 | Release evidence | SBOM, provenance and Sigstore bundles on the release page from 0.3.2, with the `gh attestation verify` command in [the compatibility record](https://github.com/GetSHIM/shim-cli/blob/main/docs/compatibility.md#100-release-evidence) |
 
 <p align="center">

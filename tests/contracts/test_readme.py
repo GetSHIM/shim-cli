@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -37,6 +38,26 @@ def test_the_readme_does_not_claim_more_tests_than_exist() -> None:
     assert collected, result.stdout.decode()[-400:]
 
     assert int(collected.group(1)) >= int(claimed.group(1).replace(",", ""))
+
+
+def test_the_readme_corpus_figure_is_the_sum_of_its_corpora() -> None:
+    """The figure is copied onto getshim.tech, so it must add up exactly."""
+    text = (ROOT / "README.md").read_text(encoding="utf-8")
+    claimed = re.search(
+        r"Detector corpus \| \*\*([\d,]+) cases\*\* in five corpora \(([^)]+)\)", text
+    )
+    assert claimed, "the README no longer states the detector corpus figure"
+
+    counts = {}
+    for part in claimed.group(2).split(", "):
+        name, count = part.replace("`", "").split()
+        corpus = json.loads(
+            (ROOT / "tests/corpus" / f"{name}.json").read_text(encoding="utf-8")
+        )
+        assert len(corpus["cases"]) == int(count), name
+        counts[name] = int(count)
+
+    assert sum(counts.values()) == int(claimed.group(1).replace(",", ""))
 
 
 def test_the_readme_does_not_call_1_0_alpha() -> None:
