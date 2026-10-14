@@ -30,3 +30,13 @@ private advisory, as [SECURITY.md](SECURITY.md) describes, never an issue.
 plugin users while PyPI still serves the last release. A pull request that is
 not a release leaves the archive alone; CI fails one that changes the archive
 without changing the version in `pyproject.toml`.
+
+## After a release
+
+Once PyPI serves the new version, the getshim.tech site has to follow, or its
+shim-cli page shows the last release. In the site repository: bump
+`SHIM_CLI.version` in `lib/constants/products.ts`, re-read the install, figures
+and VS Code lines from this README at the new tag, and add a frozen entry to
+`lib/constants/agent-instructions.ts` (older entries never change: their
+addresses and hashes are public). The site repository opens an issue within a
+day when its version and PyPI disagree.
