@@ -10,6 +10,8 @@ import tempfile
 from collections.abc import Iterator
 from pathlib import Path
 
+from shim_cli import json_bytes
+
 from . import _files
 
 MAX_SPOOL_BYTES = 1_000_000
@@ -71,7 +73,7 @@ def _parse(content: bytes) -> list:
 
 
 def append(session_id: str, entry: dict) -> bool:
-    line = json.dumps(entry, ensure_ascii=False, sort_keys=True).encode() + b"\n"
+    line = json_bytes.dumps(entry, sort_keys=True) + b"\n"
     if len(line) > MAX_ENTRY_BYTES:
         raise SpoolError("session record is too large")
     with _root() as root:

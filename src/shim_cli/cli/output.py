@@ -39,7 +39,7 @@ class Check:
 
 def terminal_text(text: str, stream: TextIO, allowed: str = "") -> str:
     if not stream.isatty():
-        return text
+        return text.encode("utf-8", errors="backslashreplace").decode("utf-8")
     return "".join(
         character
         if character in allowed or character.isprintable()

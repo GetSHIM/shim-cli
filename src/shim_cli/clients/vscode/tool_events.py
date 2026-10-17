@@ -15,8 +15,7 @@ nothing is ever masked.
 
 from __future__ import annotations
 
-import json
-
+from shim_cli import json_bytes
 from shim_cli.clients.user_prompt_hook import parse_object
 from shim_cli.events.pipeline import REFUSE, REPORT_ONLY, Adapter, Event
 from shim_cli.policy import ALLOW, DENY, MASK, REPORT
@@ -67,7 +66,7 @@ def _decoder(expected_event: str, root: str):
 
 
 def _dump(document: dict) -> bytes:
-    output = json.dumps(document, ensure_ascii=False, separators=(",", ":")).encode()
+    output = json_bytes.dumps(document, separators=(",", ":"))
     if len(output) > MAX_OUTPUT_BYTES:
         raise ValueError("hook output exceeds the safe limit")
     return output

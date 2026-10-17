@@ -353,8 +353,7 @@ def _summary_output(session_id: str, stop_active: bool) -> bytes:
     if not session_id or stop_active:
         return b""
     try:
-        import json
-
+        from shim_cli import json_bytes
         from shim_cli.session import spool, summary
 
         records = spool.entries(session_id)
@@ -364,7 +363,7 @@ def _summary_output(session_id: str, stop_active: bool) -> bytes:
         spool.mark_summarized(session_id, len(records))
         if not text:
             return b""
-        return json.dumps({"systemMessage": text}, ensure_ascii=False).encode()
+        return json_bytes.dumps({"systemMessage": text})
     except Exception:
         return b""
 

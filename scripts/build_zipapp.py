@@ -16,6 +16,7 @@ INCLUDED = (
     "py.typed",
     "config.py",
     "hook.py",
+    "json_bytes.py",
     "policy.py",
     "clients/__init__.py",
     "clients/user_prompt_hook.py",

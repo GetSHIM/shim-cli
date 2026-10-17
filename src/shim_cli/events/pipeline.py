@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import json
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from shim_cli import json_bytes
 from shim_cli.policy import (
     ALLOW,
     DENY,
@@ -92,7 +92,7 @@ INCOMPLETE_MESSAGE = (
 
 
 def _size(value) -> int:
-    return len(json.dumps(value, ensure_ascii=False).encode())
+    return len(json_bytes.dumps(value))
 
 
 def _message(tool: str, counts: tuple, action: str) -> str:

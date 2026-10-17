@@ -21,6 +21,7 @@ TOP_LEVEL_OWNERS = frozenset(
         "events",
         "guard",
         "hook",
+        "json_bytes",
         "policy",
         "session",
         "settings_files",
@@ -44,6 +45,7 @@ ALLOWED_INTERNAL_IMPORTS = {
         "shim_cli.config",
         "shim_cli.events",
         "shim_cli.guard",
+        "shim_cli.json_bytes",
         "shim_cli.session",
     ),
     "config": (
@@ -54,15 +56,21 @@ ALLOWED_INTERNAL_IMPORTS = {
     ),
     "clients": (
         "shim_cli.events",
+        "shim_cli.json_bytes",
         "shim_cli.policy",
         "shim_cli.session",
         "shim_cli.settings_files",
     ),
     "events": (
         "shim_cli.guard",
+        "shim_cli.json_bytes",
         "shim_cli.policy",
         "shim_cli.session.record",
     ),
+    # Spool and ledger lines go through the shared serializer.
+    "session": ("shim_cli.json_bytes",),
+    # The shared serializer imports from no other package owner.
+    "json_bytes": (),
     # The proxy reuses the hook's bounded traversal; the hook never sees watch.
     "watch": ("shim_cli.events.payload",),
 }

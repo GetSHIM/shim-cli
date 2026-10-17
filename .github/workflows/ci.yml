@@ -129,6 +129,34 @@ jobs:
               <(answer '${{ steps.floor.outputs.python-path }}' "$fixture") \
               <(answer '${{ steps.current.outputs.python-path }}' "$fixture")
           done
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - name: Build a fresh archive from this commit
+        run: |
+          uv sync --locked --python '${{ steps.current.outputs.python-path }}'
+          uv run --locked python scripts/build_zipapp.py --output "$RUNNER_TEMP/shim.pyz"
+      - name: The fresh archive masks beside a lone surrogate on 3.9 and 3.13
+        run: |
+          set -eu
+          # The committed archive is rebuilt only at release, so this branch's
+          # hook reaches 3.9 only through a fresh build. -I -S: the archive must
+          # carry its own dependencies, with nothing installed standing in.
+          payload='{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"cat .env"},"tool_response":{"stdout":"key=AKIAIOSFODNN7EXAMPLE","stderr":"trunc \ud83d"}}'
+          for python in '${{ steps.floor.outputs.python-path }}' '${{ steps.current.outputs.python-path }}'; do
+            archive_tmp="$(mktemp -d)"
+            printf '%s' "$payload" \
+              | env TMPDIR="$archive_tmp" XDG_STATE_HOME="$archive_tmp/state" XDG_CONFIG_HOME="$archive_tmp/config" \
+                "$python" -I -S -B "$RUNNER_TEMP/shim.pyz" claude > "$archive_tmp/out" 2> "$archive_tmp/err"
+            test ! -s "$archive_tmp/err"
+            "$python" -I - "$archive_tmp/out" <<'PY'
+          import json, sys
+          raw = open(sys.argv[1], "rb").read()
+          output = json.loads(raw.decode("utf-8", "strict"))["hookSpecificOutput"]
+          masked = {"stdout": "key=<SECRET_1>", "stderr": "trunc \ud83d"}
+          assert output["updatedToolOutput"] == masked, output
+          assert b"AKIAIOSFODNN7EXAMPLE" not in raw
+          print("masked beside a lone surrogate:", sys.version.split()[0])
+          PY
+          done
   archive-follows-version:
     # The marketplace installs the plugin from main, so a shim.pyz rebuilt
     # without a release ships unreleased code to plugin users.

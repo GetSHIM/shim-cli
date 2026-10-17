@@ -9,9 +9,9 @@ substitutes it.
 
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING
 
+from shim_cli import json_bytes
 from shim_cli.clients import user_prompt_hook
 
 if TYPE_CHECKING:
@@ -31,11 +31,10 @@ warn_output = user_prompt_hook.warn_output
 def _stop(reason: str) -> bytes:
     if not reason or len(reason) > user_prompt_hook.MAX_REASON_CHARS:
         raise ValueError("stop reason must contain at most 4,000 characters")
-    output = json.dumps(
+    output = json_bytes.dumps(
         {"continue": False, "stopReason": reason},
-        ensure_ascii=False,
         separators=(",", ":"),
-    ).encode()
+    )
     if len(output) > MAX_OUTPUT_BYTES:
         raise ValueError("stop output exceeds 4,096 bytes")
     return output
