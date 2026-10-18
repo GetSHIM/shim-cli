@@ -27,9 +27,14 @@ CLIENT = """\
 import os, signal, socket, sys, time, urllib.parse
 
 log = {log!r}
+# One unbuffered append per line: a signal handler that runs inside another
+# handler's note must not let the outer line land after the inner one.
 def note(line):
-    with open(log, "a") as handle:
-        handle.write(line + "\\n")
+    descriptor = os.open(log, os.O_WRONLY | os.O_APPEND | os.O_CREAT)
+    try:
+        os.write(descriptor, (line + "\\n").encode())
+    finally:
+        os.close(descriptor)
 
 def listener():
     address = urllib.parse.urlsplit(os.environ["ANTHROPIC_BASE_URL"])
