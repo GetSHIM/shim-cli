@@ -11,9 +11,9 @@ import pytest
 ROOT = Path(__file__).parents[2]
 
 
-def _run(raw: bytes, client: str = "claude") -> bytes:
+def _run(raw: bytes, client: str = "claude", command: tuple = ()) -> bytes:
     result = subprocess.run(
-        (sys.executable, "-I", "-B", "-m", "shim_cli.hook", client),
+        command or (sys.executable, "-I", "-B", "-m", "shim_cli.hook", client),
         input=raw,
         capture_output=True,
         cwd=ROOT,
@@ -32,15 +32,36 @@ MALFORMED_TOOL_EVENTS = (
 )
 
 
-@pytest.mark.parametrize("raw", MALFORMED_TOOL_EVENTS)
-def test_a_malformed_tool_event_is_never_answered_with_a_block(raw: bytes) -> None:
-    document = json.loads(_run(raw))
+def _denied(tool: str, reason: str) -> dict:
+    return {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": (
+                f"shim: could not inspect this {tool} call ({reason}), so it was "
+                "not allowed."
+            ),
+        }
+    }
 
-    assert "decision" not in document, "a block here denies the tool call"
-    assert "permissionDecision" not in document
-    assert "hookSpecificOutput" not in document
-    assert document["systemMessage"].startswith("shim:")
-    assert "prompt" not in document["systemMessage"]
+
+@pytest.mark.parametrize("raw", MALFORMED_TOOL_EVENTS[0::2])
+def test_a_malformed_tool_call_is_denied_not_passed(raw: bytes) -> None:
+    """Never the prompt's block, and never a call shim did not look at."""
+    assert json.loads(_run(raw)) == _denied("unknown tool", "analysis failed")
+
+
+def test_a_malformed_tool_result_is_withheld_not_passed() -> None:
+    document = json.loads(_run(MALFORMED_TOOL_EVENTS[1]))
+
+    assert "decision" not in document, "the prompt's block has no place here"
+    output = document["hookSpecificOutput"]
+    # A tool with no name is no built-in tool whose shape Claude Code checks,
+    # so not even a key of the result is kept.
+    assert output["updatedToolOutput"] == [
+        {"type": "text", "text": "[withheld by shim]"}
+    ]
+    assert "(analysis failed)" in document["systemMessage"]
 
 
 @pytest.mark.parametrize("raw", MALFORMED_TOOL_EVENTS)
@@ -61,14 +82,31 @@ def test_a_malformed_prompt_event_still_fails_closed() -> None:
     assert document["decision"] == "block"
 
 
-def test_an_over_cap_tool_payload_does_not_deny_the_tool_call() -> None:
+def test_an_over_cap_tool_call_is_denied() -> None:
+    head = b'{"hook_event_name":"PreToolUse","session_id":"s","tool_name":"Write",'
+    raw = head + b'"tool_input":{"content":"' + b"A" * 1_100_000
+
+    assert json.loads(_run(raw)) == _denied("Write", "too large")
+
+
+def test_an_over_cap_built_in_result_tells_the_model_it_was_not_inspected() -> None:
+    """Its shape is cut off at the read limit, and Claude Code sends the
+    original whenever a built-in tool's replacement does not match that tool's
+    schema; the honest answer left is to tell both the user and the model."""
     head = b'{"hook_event_name":"PostToolUse","session_id":"s","tool_name":"Read",'
     raw = head + b'"tool_response":{"content":"' + b"A" * 1_100_000
 
     document = json.loads(_run(raw))
 
     assert "decision" not in document
-    assert document["systemMessage"].startswith("shim:")
+    assert document["systemMessage"] == (
+        "shim: could not inspect this Read output (too large); the model has it "
+        "as it was."
+    )
+    assert document["hookSpecificOutput"]["additionalContext"] == (
+        "shim could not inspect this Read output (too large). Do not repeat "
+        "values from it in replies, files or commands."
+    )
 
 
 def test_an_over_cap_prompt_payload_still_fails_closed() -> None:
@@ -158,13 +196,18 @@ def test_an_uninspectable_tool_event_is_still_recorded(monkeypatch, tmp_path) ->
 
     output = hook._output(payload, "claude")
 
-    assert b"could not be inspected" in output
+    document = json.loads(output)
+    assert document["hookSpecificOutput"]["updatedToolOutput"] == {
+        "type": "text",
+        "content": "",
+    }
+    assert b"a@b.com" not in output
     records = spool.entries("dense")
     assert len(records) == 1
-    assert records[0]["action"] == "report"
+    assert records[0]["action"] == "deny"
     assert records[0]["event"] == "PostToolUse"
     assert records[0]["tool_name"] == "Read"
-    assert records[0]["note"].startswith(NOT_INSPECTED)
+    assert records[0]["note"] == f"{NOT_INSPECTED}: analysis failed"
 
 
 def test_uninspected_records_never_keep_raw_event_or_tool_labels(
@@ -184,7 +227,8 @@ def test_uninspected_records_never_keep_raw_event_or_tool_labels(
         }
     ).encode()
 
-    hook._uninspected(payload, "claude", event, "unsafe-labels")
+    # No adapter answers an event it does not know, so only the record is kept.
+    assert hook._not_inspected(payload, "claude", event, "unsafe-labels") == b""
 
     records = spool.entries("unsafe-labels")
     assert len(records) == 1
@@ -221,29 +265,143 @@ def test_detector_failure_still_records_an_unknown_tool(monkeypatch) -> None:
     assert "alice@example.com" not in json.dumps(records)
 
 
-def test_the_summary_names_an_uninspected_event(monkeypatch, tmp_path) -> None:
+def test_the_summary_says_which_uninspected_events_the_model_still_read(
+    unanalysable: str, unanalysable_hook: tuple
+) -> None:
+    """Withheld or refused is not passed through: the summary says which,
+    from what the hook told the client."""
     from shim_cli.session import spool, summary
-    from shim_cli.session.record import NOT_INSPECTED
 
-    spool.append(
-        "dense",
-        {
-            "action": "report",
-            "event": "PostToolUse",
-            "tool_name": "Read",
-            "target": "/work/customers.csv",
-            "entities": {},
-            "note": f"{NOT_INSPECTED}: analysis failed",
-            "latency_ms": 9,
-        },
+    big = "x" * 1_100_000
+    # Read in part: the key was found before the field beside it failed.
+    part_read = [
+        {"type": "text", "text": "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE"},
+        {"type": "text", "text": unanalysable},
+    ]
+    events = (
+        ("PostToolUse", "mcp__drive__read", "tool_response", [{"text": big}]),
+        ("PreToolUse", "Write", "tool_input", {"file_path": "/w/a", "content": big}),
+        ("PostToolUseFailure", "Bash", "error", 5),
+        ("PostToolUse", "mcp__sheets__read", "tool_response", part_read),
+    )
+    for event, tool, root, value in events:
+        _run(
+            json.dumps(
+                {
+                    "session_id": "mixed",
+                    "permission_mode": "default",
+                    "hook_event_name": event,
+                    "tool_name": tool,
+                    root: value,
+                }
+            ).encode(),
+            command=unanalysable_hook,
+        )
+
+    records = spool.entries("mixed")
+    text = summary.render(records)
+
+    assert [record["action"] for record in records] == [
+        "deny",
+        "deny",
+        "report",
+        "deny",
+    ]
+    assert records[-1]["note"] == "not inspected: analysis failed"
+    # The key found before the read stopped never reached the model either.
+    assert text.splitlines()[1:4] == [
+        "  blocked   1 SECRET  (mcp__sheets__read)",
+        "  skipped   3 not inspected, withheld or refused  "
+        "(Write, mcp__drive__read, mcp__sheets__read)",
+        "            1 not inspected, passed through  (failed Bash)",
+    ]
+    assert "incomplete inspection" not in text
+    assert summary.as_json(records)["not_inspected"] == 4
+
+
+def test_the_finding_for_uninspected_events_does_not_say_they_passed() -> None:
+    import datetime
+
+    from shim_cli.cli.findings import from_records
+    from shim_cli.session import spool
+
+    _run(
+        json.dumps(
+            {
+                "session_id": "finding",
+                "permission_mode": "default",
+                "hook_event_name": "PostToolUse",
+                "tool_name": "mcp__drive__read",
+                "tool_response": [{"text": "x" * 1_100_000}],
+            }
+        ).encode()
     )
 
-    text = summary.render(spool.entries("dense"))
+    [finding] = from_records(
+        spool.entries("finding"), datetime.datetime.now(datetime.timezone.utc)
+    )
 
-    assert "skipped" in text
-    assert "not inspected, passed through" in text
-    assert "Read customers.csv" in text
-    assert summary.as_json(spool.entries("dense"))["not_inspected"] == 1
+    assert finding["rule_id"] == "cli.session.not_inspected"
+    assert finding["title"] == "Tool events shim could not inspect"
+    assert finding["summary"]["en"] == (
+        "In this Claude Code session shim could not inspect 1 event(s) and "
+        "inspected 0 only in part."
+    )
+    assert finding["remediation"]["text"]["en"] == (
+        "Run shim report to see which tool or file it was, and shim doctor "
+        "claude to check the install."
+    )
+
+
+def test_a_refused_event_names_its_session_as_a_read_one_does() -> None:
+    """Copilot spells it `sessionId`; the reader for a document too large or
+    broken to parse takes either spelling, as the full parser does."""
+    from shim_cli import hook
+
+    head = b'{"hook_event_name":"PostToolUse","sessionId":"camel","tool_name":"x",'
+    for raw in (head + b'"tool_response":"y"}', head + b'"tool_response":"' + b"y" * 9):
+        assert hook._refused_envelope(raw)[:2] == ("PostToolUse", "camel")
+
+
+def test_a_broken_detector_still_withholds_a_built_in_result_in_its_shape(
+    monkeypatch,
+) -> None:
+    """With the detector down even the tool's label cannot be checked, so the
+    user reads "unknown tool"; the result is still a Read, and keeps the shape
+    Claude Code checks a Read against, or it would be sent as it was."""
+    from shim_cli import guard, hook
+    from shim_cli.session import spool
+
+    def explode(*_args, **_kwargs):
+        raise RuntimeError("detector unavailable")
+
+    monkeypatch.setattr(guard, "evaluate", explode)
+    payload = json.dumps(
+        {
+            "hook_event_name": "PostToolUse",
+            "session_id": "broken-detector",
+            "tool_name": "Read",
+            "tool_input": {"file_path": "/work/.env"},
+            "tool_response": {
+                "type": "text",
+                "file": {
+                    "filePath": "/work/.env",
+                    "content": "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE\n",
+                    "numLines": 1,
+                },
+            },
+        }
+    ).encode()
+
+    output = hook._output(payload, "claude")
+
+    assert b"AKIA" not in output
+    assert json.loads(output)["hookSpecificOutput"]["updatedToolOutput"] == {
+        "type": "text",
+        "file": {"filePath": "", "content": "[withheld by shim]", "numLines": 0},
+    }
+    [record] = spool.entries("broken-detector")
+    assert (record["tool_name"], record["action"]) == ("unknown tool", "deny")
 
 
 REFUSAL_CASES = (
@@ -272,13 +430,16 @@ def test_the_refusal_shape_follows_the_event(payload: bytes, is_tool: bool) -> N
         )
 
 
-def test_the_deadline_on_a_tool_event_does_not_deny_the_call() -> None:
+def test_the_deadline_on_a_tool_call_denies_it() -> None:
+    from shim_cli.session import spool
+    from shim_cli.session.record import NOT_INSPECTED
+
     code = (
         "import sys, time\n"
         "from shim_cli import hook as runner\n"
         "sys.argv.append('claude')\n"
         "runner.HOOK_DEADLINE_SECONDS = 0.2\n"
-        "runner._output = lambda raw, client='codex': time.sleep(5)\n"
+        "runner._output = lambda *_arguments: time.sleep(5)\n"
         "runner.main()\n"
     )
     payload = json.dumps(
@@ -301,8 +462,11 @@ def test_the_deadline_on_a_tool_event_does_not_deny_the_call() -> None:
     )
 
     assert result.returncode == 0, result.stderr.decode()
-    assert b'"decision":"block"' not in result.stdout
-    assert b"could not be inspected" in result.stdout
+    assert json.loads(result.stdout) == _denied("Read", "deadline")
+    records = spool.entries("slow")
+    assert [(record["action"], record["note"]) for record in records] == [
+        ("deny", f"{NOT_INSPECTED}: deadline")
+    ]
 
 
 def test_session_end_sweeps_stale_redacted_prompts(tmp_path, monkeypatch) -> None:

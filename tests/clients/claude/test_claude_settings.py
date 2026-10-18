@@ -90,7 +90,7 @@ def test_claude_code_settings_preserve_unrelated_values_and_hooks(
         if event in original["hooks"]:
             assert document["hooks"][event][0] == existing_group
     assert add_hook(installed, interpreter) == installed
-    assert json.loads(remove_hook(installed, interpreter)) == original
+    assert json.loads(remove_hook(installed)) == original
 
 
 def test_claude_code_settings_upgrade_a_prompt_only_install_in_place(
@@ -105,7 +105,7 @@ def test_claude_code_settings_upgrade_a_prompt_only_install_in_place(
     document = json.loads(upgraded)
     assert document["hooks"]["UserPromptSubmit"] == [hook_group(interpreter)]
     assert len(document["hooks"]) == len(hook_groups(interpreter))
-    assert json.loads(remove_hook(upgraded, interpreter)) == {}
+    assert json.loads(remove_hook(upgraded)) == {}
 
 
 def test_claude_code_revert_leaves_a_foreign_tool_hook_untouched(
@@ -116,7 +116,7 @@ def test_claude_code_revert_leaves_a_foreign_tool_hook_untouched(
     original = {"hooks": {"PreToolUse": [foreign]}}
 
     installed = add_hook(json.dumps(original).encode(), interpreter)
-    assert json.loads(remove_hook(installed, interpreter)) == original
+    assert json.loads(remove_hook(installed)) == original
 
 
 @pytest.mark.parametrize(
@@ -193,6 +193,6 @@ def test_reverting_a_1_0_2_install_removes_all_five_entries(tmp_path: Path) -> N
     five = json.loads(_five(interpreter))
     five["hooks"]["PreToolUse"].insert(0, foreign)
 
-    reverted = remove_hook(json.dumps(five).encode(), interpreter)
+    reverted = remove_hook(json.dumps(five).encode())
 
     assert json.loads(reverted) == {"hooks": {"PreToolUse": [foreign]}}

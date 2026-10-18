@@ -7,7 +7,8 @@
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/run-shim",
             "args": [
-              "claude"
+              "claude",
+              "prompt"
             ],
             "timeout": 30
           }
@@ -22,7 +23,8 @@
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/run-shim",
             "args": [
-              "claude"
+              "claude",
+              "call"
             ],
             "timeout": 30
           }

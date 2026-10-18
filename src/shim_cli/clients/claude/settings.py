@@ -6,6 +6,7 @@ from pathlib import Path
 
 from shim_cli.clients.claude.tool_events import INSTALLED_EVENTS
 from shim_cli.clients.hook_settings import (
+    HOOK_MODULE,
     MAX_SETTINGS_BYTES,
     Registration,
     add_groups,
@@ -20,6 +21,8 @@ HOOK_TIMEOUT_SECONDS = 30
 MAX_CONFIG_BYTES = MAX_SETTINGS_BYTES
 PROMPT_EVENT = "UserPromptSubmit"
 TOOL_MATCHER = "*"
+# The marketplace names of shim's Claude Code plugin, now and before 1.0.
+PLUGIN_NAMES = ("shim-cli", "shim-guard")
 
 
 def _claude_home(home: Path | None = None) -> Path:
@@ -35,10 +38,6 @@ def _claude_home(home: Path | None = None) -> Path:
 
 def target_path(home: Path | None = None) -> Path:
     return _claude_home(home) / "settings.json"
-
-
-HOOK_MODULE = "shim_cli.hook"
-LEGACY_HOOK_MODULE = "shim_guard.hook"
 
 
 def _handler(interpreter: str | Path, module: str = HOOK_MODULE) -> dict[str, object]:
@@ -74,18 +73,9 @@ def hook_groups(
     return tuple(groups)
 
 
-def legacy_hook_groups(
-    interpreter: str | Path = sys.executable,
-) -> tuple[Registration, ...]:
-    return hook_groups(interpreter, LEGACY_HOOK_MODULE)
-
-
 def add_hook(content: bytes | None, interpreter: str | Path = sys.executable) -> bytes:
-    if content is not None:
-        content = remove_groups(content, legacy_hook_groups(interpreter))
     return add_groups(content, hook_groups(interpreter))
 
 
-def remove_hook(content: bytes, interpreter: str | Path = sys.executable) -> bytes:
-    content = remove_groups(content, legacy_hook_groups(interpreter))
-    return remove_groups(content, hook_groups(interpreter))
+def remove_hook(content: bytes) -> bytes:
+    return remove_groups(content)

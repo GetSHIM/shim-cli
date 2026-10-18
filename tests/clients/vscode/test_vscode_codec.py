@@ -15,10 +15,21 @@ import json
 import pytest
 
 from shim_cli.clients.vscode import hook as vscode_hook
-from shim_cli.clients.vscode.tool_events import TOOL_EVENTS, error_output
-from shim_cli.events.pipeline import REFUSE, REPORT_ONLY, process
+from shim_cli.clients.vscode.tool_events import TOOL_EVENTS
+from shim_cli.events.pipeline import REFUSE, REPORT_ONLY, UNINSPECTED, process
 from shim_cli.guard import evaluate
-from shim_cli.policy import DENY, ENFORCE, MASK, OBSERVE, REPORT, WARN
+from shim_cli.guard.entities import DEFAULT_ENTITIES
+from shim_cli.policy import (
+    DENY,
+    ENFORCE,
+    EXECUTABLE_TEXT,
+    INBOUND,
+    MASK,
+    OBSERVE,
+    REPORT,
+    WARN,
+    Policy,
+)
 
 SECRET_RESULT = {
     "hook_event_name": "PostToolUse",
@@ -35,11 +46,15 @@ SECRET_CALL = {
 }
 
 
-def _process(document: dict, mode: str, diet: tuple = ()):
+def _process(document: dict, modes: dict, diet: tuple = ()):
+    """Modes resolved as a settings file's `[mode]` table resolves them, so a
+    tool filed under the wrong direction gets that direction's mode."""
+    settings = Policy(DEFAULT_ENTITIES, modes, {})
+    event = document["hook_event_name"]
     return process(
-        TOOL_EVENTS[document["hook_event_name"]],
+        TOOL_EVENTS[event],
         json.dumps(document).encode(),
-        lambda _direction, _tool: mode,
+        lambda direction, tool: settings.mode_for(direction, tool, event),
         evaluate,
         diet,
     )
@@ -54,9 +69,10 @@ def test_a_tool_result_is_reported_even_under_enforce(mode: str) -> None:
     turn either. Enforcement here would be a promise shim cannot keep, so the
     strongest honest action is the report — under enforce as well.
     """
-    outcome = _process(SECRET_RESULT, mode)
+    outcome = _process(SECRET_RESULT, {INBOUND: mode})
 
     document = json.loads(outcome.output)
+    assert outcome.record.direction == INBOUND
     assert document["systemMessage"] == (
         "shim: found SECRET (1) in read_file. Not modified."
     )
@@ -68,14 +84,14 @@ def test_a_tool_result_is_reported_even_under_enforce(mode: str) -> None:
 
 
 def test_observe_says_nothing_but_still_counts() -> None:
-    outcome = _process(SECRET_RESULT, OBSERVE)
+    outcome = _process(SECRET_RESULT, {INBOUND: OBSERVE})
 
     assert outcome.output == b""
     assert outcome.record.entities == (("SECRET", 1),)
 
 
-def test_a_tool_call_is_denied_under_enforce() -> None:
-    outcome = _process(SECRET_CALL, ENFORCE)
+def test_a_terminal_command_is_denied_under_executable_text_enforce() -> None:
+    outcome = _process(SECRET_CALL, {EXECUTABLE_TEXT: ENFORCE})
 
     assert json.loads(outcome.output) == {
         "hookSpecificOutput": {
@@ -84,6 +100,7 @@ def test_a_tool_call_is_denied_under_enforce() -> None:
             "permissionDecisionReason": "shim: blocked EMAIL (1) in run_in_terminal.",
         }
     }
+    assert outcome.record.direction == EXECUTABLE_TEXT
     assert outcome.record.action == DENY
 
 
@@ -92,7 +109,7 @@ def test_the_diet_never_rewrites_a_vs_code_result() -> None:
     from shim_cli.events.diet import DEFAULT_TRANSFORMS
 
     document = dict(SECRET_RESULT, tool_response={"items": [{"a": 1}] * 50})
-    outcome = _process(document, ENFORCE, DEFAULT_TRANSFORMS)
+    outcome = _process(document, {INBOUND: ENFORCE}, DEFAULT_TRANSFORMS)
 
     assert outcome.output == b""
     assert outcome.record.transforms == ()
@@ -116,12 +133,62 @@ def test_each_event_claims_only_what_the_client_grants() -> None:
     assert TOOL_EVENTS["PostToolUse"].power == REPORT_ONLY
 
 
-def test_an_uninspectable_tool_event_says_nothing_was_changed() -> None:
-    assert json.loads(error_output()) == {
-        "systemMessage": (
-            "shim: this tool event could not be inspected and was not modified."
-        )
+def test_a_call_that_could_not_be_inspected_is_denied() -> None:
+    """Refusing is the one thing this event does, so it does it here too."""
+    output = TOOL_EVENTS["PreToolUse"].encode(
+        UNINSPECTED, SECRET_CALL["tool_input"], "deadline", "", "run_in_terminal"
+    )
+
+    assert json.loads(output) == {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": (
+                "shim: could not inspect this run_in_terminal call (deadline), so "
+                "it was not allowed."
+            ),
+        }
     }
+
+
+def test_a_result_that_could_not_be_inspected_is_reported_to_both() -> None:
+    output = TOOL_EVENTS["PostToolUse"].encode(
+        UNINSPECTED, "key=AKIAIOSFODNN7EXAMPLE", "too large", "", "run_in_terminal"
+    )
+
+    assert b"AKIA" not in output
+    assert json.loads(output) == {
+        "systemMessage": (
+            "shim: could not inspect this run_in_terminal output (too large); the "
+            "model has it as it was."
+        ),
+        "hookSpecificOutput": {
+            "hookEventName": "PostToolUse",
+            "additionalContext": (
+                "shim could not inspect this run_in_terminal output (too large). Do "
+                "not repeat values from it in replies, files or commands."
+            ),
+        },
+    }
+
+
+def test_an_uninspectable_call_is_denied_even_under_the_shipped_default(
+    _isolated_roots, monkeypatch
+) -> None:
+    """The default reports findings rather than refusing; a call shim could
+    not look at is a different thing, and it does not run."""
+    from shim_cli import guard
+    from shim_cli.hook import _output
+
+    def expired(*_args, **_kwargs):
+        raise TimeoutError("shim hook deadline exceeded")
+
+    monkeypatch.setattr(guard, "evaluate", expired)
+
+    output = _output(json.dumps(SECRET_CALL).encode(), "vscode")
+
+    assert json.loads(output)["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert b"ayse.yilmaz" not in output
 
 
 def test_a_blocked_prompt_stops_the_turn_and_names_the_file() -> None:
@@ -178,7 +245,7 @@ def test_enforce_asked_for_in_settings_denies_the_call_it_can_deny(
 ) -> None:
     from shim_cli.hook import _output
 
-    _settings(_isolated_roots, '[mode]\noutbound = "enforce"\n')
+    _settings(_isolated_roots, '[mode]\nexecutable-text = "enforce"\n')
 
     output = _output(json.dumps(SECRET_CALL).encode(), "vscode")
 

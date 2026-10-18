@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import shlex
 import sys
 from pathlib import Path
 from typing import Any, Literal, NoReturn
@@ -18,7 +19,13 @@ from shim_cli.cli.output import (
 from shim_cli.clients.claude import settings as claude_settings
 from shim_cli.clients.codex import settings as codex_settings
 from shim_cli.clients.copilot import settings as copilot_settings
-from shim_cli.clients.hook_settings import interpreter_path
+from shim_cli.clients.hook_settings import (
+    HOOK_MODULE,
+    LEGACY_HOOK_MODULE,
+    interpreter_path,
+    remove_groups,
+    shim_hooks,
+)
 from shim_cli.settings_files import (
     Action,
     InstallationError,
@@ -92,6 +99,45 @@ def _hook_fragment(client: str) -> dict[str, object]:
     return {"hooks": hooks}
 
 
+def hook_argv(client: str) -> list[str]:
+    """The command the client runs for shim, read from the fragment install writes.
+
+    Every handler in a fragment runs the same command. Claude Code runs
+    `command` with `args`; Codex and Copilot hand `command` to a shell, which
+    splits it the way `shlex.join` quoted it.
+    """
+    hooks = _hook_fragment(client)["hooks"]
+    assert isinstance(hooks, dict)
+    entry = next(iter(hooks.values()))[0]
+    handler = entry["hooks"][0] if "hooks" in entry else entry
+    if "args" in handler:
+        return [handler["command"], *handler["args"]]
+    return shlex.split(handler["command"])
+
+
+def _refuse_unless_hook_runs(client: str, command: str, as_json: bool) -> None:
+    """Run the exact hook command on doctor's fixtures before calling it working.
+
+    The client runs `<python> -I -B -m shim_cli.hook`, and -I ignores the user
+    site and PYTHONPATH: a `pip install --user` shim imports in this process
+    and not in the hook, which then fails open on every event. Nothing else
+    notices, so this is the only guard.
+    """
+    from shim_cli.cli.diagnostics import _runner_check
+
+    check = _runner_check(client)
+    if check.status != "PASS":
+        emit_error(
+            command,
+            "DETECTOR_UNAVAILABLE",
+            check.detail,
+            check.fix,
+            as_json=as_json,
+            then=check.fix,
+            client=client,
+        )
+
+
 def _inline_hooks_notice(client: str) -> str | None:
     if client != "codex":
         return None
@@ -112,6 +158,40 @@ def plan_status(plan: Plan) -> tuple[str, str]:
     return "FAIL", "unsafe" if plan.action is Action.REFUSE else "conflict"
 
 
+def hooks_on_disk(client: str) -> list[tuple[str, str, str]]:
+    """(event, interpreter, module) for each shim hook in the client's file.
+
+    Whichever installation wrote them; empty when the file is absent or cannot
+    be read, which the plan reports on its own.
+    """
+    module = {
+        "claude": claude_settings,
+        "codex": codex_settings,
+        "copilot": copilot_settings,
+    }[client]
+    try:
+        state = inspect_file(module.target_path(), module.MAX_CONFIG_BYTES)
+        if state.kind is not StateKind.FILE or state.content is None:
+            return []
+        if client == "copilot":
+            return copilot_settings.shim_hooks(state.content) or []
+        return shim_hooks(state.content)
+    except (OSError, ValueError):
+        return []
+
+
+def other_installations(client: str) -> list[str]:
+    """Interpreters of other shim installations whose hooks the client runs."""
+    current = str(interpreter_path(sys.executable))
+    return sorted(
+        {
+            interpreter
+            for _event, interpreter, hook_module in hooks_on_disk(client)
+            if hook_module == HOOK_MODULE and interpreter != current
+        }
+    )
+
+
 def existing_hooks(client: str) -> tuple[bool, bool]:
     """(a 0.2.0 fragment is on disk, hooks that are not shim's are on disk).
 
@@ -119,8 +199,6 @@ def existing_hooks(client: str) -> tuple[bool, bool]:
     Only the messages ever said otherwise: an upgrade printed "existing hooks
     will be preserved" over a file whose only hook was the one being replaced.
     """
-    from shim_cli.clients.hook_settings import remove_groups
-
     module = {"claude": claude_settings, "codex": codex_settings}.get(client)
     if module is None:
         return (False, False)
@@ -131,11 +209,13 @@ def existing_hooks(client: str) -> tuple[bool, bool]:
     if state.kind is not StateKind.FILE or state.content is None:
         return (False, False)
     try:
-        without_legacy = remove_groups(state.content, module.legacy_hook_groups())
-        stripped = remove_groups(without_legacy, module.hook_groups())
+        legacy = any(
+            hook_module == LEGACY_HOOK_MODULE
+            for _event, _interpreter, hook_module in shim_hooks(state.content)
+        )
+        stripped = remove_groups(state.content)
     except ValueError:
         return (False, False)
-    legacy = without_legacy != state.content
     try:
         document = json.loads(stripped.decode("utf-8"))
     except (UnicodeDecodeError, ValueError):
@@ -300,9 +380,6 @@ def _remove_empty_copilot_file() -> Path | None:
     return None
 
 
-FIX_REINSTALL = (
-    "Reinstall shim: uv tool install --reinstall shim, or pipx reinstall shim."
-)
 _NEXT_STEP = {
     "claude": "Start a new Claude Code session; /hooks lists shim.",
     "copilot": "Start a new GitHub Copilot CLI session; it has no trust step.",
@@ -346,6 +423,7 @@ def install(*, client: str, dry_run: bool, yes: bool, as_json: bool = False) -> 
             then=f"Review {name} hooks manually; shim did not change malformed, "
             "ambiguous, or unsafe settings.",
         )
+    _refuse_unless_hook_runs(client, "install", as_json)
     fragment = _hook_fragment(client)
     hooks = fragment["hooks"]
     assert isinstance(hooks, dict)
@@ -368,6 +446,11 @@ def install(*, client: str, dry_run: bool, yes: bool, as_json: bool = False) -> 
             warnings.append(
                 f"Existing {name} hooks will be preserved; shim will be appended last."
             )
+    if others := other_installations(client):
+        warnings.append(
+            f"shim's hook from another installation ({', '.join(others)}) will be "
+            "replaced by this one."
+        )
     if action is not Action.NOOP and (notice := _inline_hooks_notice(client)):
         warnings.append(notice)
     if not as_json:
@@ -439,19 +522,6 @@ def install(*, client: str, dry_run: bool, yes: bool, as_json: bool = False) -> 
                 client=client,
             )
     try:
-        from shim_cli.guard import evaluate
-
-        evaluate("Synthetic safe prompt")
-    except Exception:
-        emit_error(
-            "install",
-            "DETECTOR_UNAVAILABLE",
-            "shim detector could not start.",
-            FIX_REINSTALL,
-            as_json=as_json,
-            client=client,
-        )
-    try:
         apply(plan)
     except (InstallationError, OSError) as error:
         _not_changed(client, "install", plan.target, error, as_json)
@@ -488,10 +558,18 @@ def status(*, client: str, as_json: bool) -> None:
             as_json=as_json,
             state=state,
         )
+    if state == "installed":
+        _refuse_unless_hook_runs(client, "status", as_json)
     if as_json:
         emit_json("status", "ok", client=client, state=state)
     elif state == "installed":
         emit("PASS", f"{name} hook configuration is installed.")
+    elif others := other_installations(client):
+        emit(
+            "WARN",
+            f"{name} runs shim's hook from another installation "
+            f"({', '.join(others)}); run shim install {client} to run only this one.",
+        )
     else:
         emit("WARN", f"{name} hook configuration is not installed.")
     if label == "WARN":
@@ -511,7 +589,7 @@ def revert(*, client: str, yes: bool, as_json: bool = False) -> None:
             "revert",
             f"{name} hook configuration cannot be removed safely.",
             as_json=as_json,
-            then=f"Review {name} hooks manually; shim removes only its exact hook group.",
+            then=f"Review {name} hooks manually; shim removes only its own hook groups.",
         )
     legacy = client == "copilot" and _legacy_copilot_file() is not None
     result: dict = {
@@ -539,7 +617,7 @@ def revert(*, client: str, yes: bool, as_json: bool = False) -> None:
     if not as_json:
         emit(
             "WARN",
-            "Only shim's exact hook group will be removed; other hooks will be preserved.",
+            "Only shim's hook groups will be removed; other hooks will be preserved.",
         )
     if not yes and not typer.confirm(f"Remove shim's {name} hook?", default=False):
         emit("WARN", "Revert cancelled.")

@@ -241,11 +241,20 @@ def render(records: list, capped: bool = False) -> str:
         lines.append(
             f"  {column:<9} {count} {marker}{_where(_carrying(records, marker))}"
         )
-    if skipped:
-        lines.append(
-            f"  {'skipped':<9} {len(skipped)} not inspected, passed through"
-            f"{_where(skipped)}"
-        )
+    # A record says which: "deny" where the client let shim withhold or
+    # refuse the event, "report" where the model has it anyway.
+    withheld = [record for record in skipped if record.get("action") == "deny"]
+    passed = [record for record in skipped if record.get("action") != "deny"]
+    column = "skipped"
+    for group, outcome in (
+        (withheld, "withheld or refused"),
+        (passed, "passed through"),
+    ):
+        if group:
+            lines.append(
+                f"  {column:<9} {len(group)} not inspected, {outcome}{_where(group)}"
+            )
+            column = ""
     if partial:
         lines.append(
             f"  incomplete inspection of {len(partial)} tool event(s){_where(partial)}"

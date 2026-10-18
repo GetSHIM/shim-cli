@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import codecs
 import hashlib
 import http.client
@@ -9,6 +10,7 @@ import ssl
 import threading
 import time
 import urllib.parse
+import urllib.request
 import zlib
 from collections import Counter
 from dataclasses import dataclass, field
@@ -17,8 +19,9 @@ from .measure import (
     BODY_TOO_LARGE,
     MAX_BODY_BYTES,
     MODEL_PATHS,
-    NOT_JSON,
+    NOT_ANALYSED,
     SLOTS_BUSY,
+    UNFINISHED,
     Exchange,
     SectionMemo,
     UsageReader,
@@ -122,6 +125,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     session: Session
     tls_context: ssl.SSLContext
     evaluate = None
+    # (host, port, CONNECT headers) of the egress proxy the client would use.
+    egress: tuple | None = None
 
     def setup(self) -> None:
         super().setup()
@@ -156,8 +161,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         capture = bytearray()
         oversized = length > MAX_BODY_BYTES
         measuring = not oversized and self.session._measurement_slots.acquire(False)
-        if not measuring:
-            exchange.incomplete_reason = BODY_TOO_LARGE if oversized else SLOTS_BUSY
+        # Recorded before `_measure` runs, so a report written meanwhile says why.
+        exchange.incomplete_reason = (
+            UNFINISHED if measuring else BODY_TOO_LARGE if oversized else SLOTS_BUSY
+        )
         digest = (
             hashlib.sha256()
             if self.command == "POST" and exchange.path.endswith(MODEL_PATHS)
@@ -190,13 +197,14 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         connection = None
         responded = False
         try:
-            headers = {
-                name: value
+            # Pairs, not a dict: a repeated header is forwarded as sent.
+            headers = [
+                (name, value)
                 for name, value in self.headers.items()
                 if name.lower() not in HOP_BY_HOP
                 and name.lower() not in {"host", "content-length"}
-            }
-            names = {name.lower() for name in headers}
+            ]
+            names = {name.lower() for name, _ in headers}
             exchange.auth_route = (
                 "api-key"
                 if "x-api-key" in names
@@ -204,14 +212,31 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 if "authorization" in names
                 else ""
             )
-            headers["Host"] = self.upstream_host
-            headers["Content-Length"] = str(length)
-            connection = http.client.HTTPSConnection(
-                self.upstream_host,
-                timeout=UPSTREAM_TIMEOUT_SECONDS,
-                context=self.tls_context,
+            headers += [("Host", self.upstream_host), ("Content-Length", str(length))]
+            if self.egress is None:
+                connection = http.client.HTTPSConnection(
+                    self.upstream_host,
+                    timeout=UPSTREAM_TIMEOUT_SECONDS,
+                    context=self.tls_context,
+                )
+            else:
+                proxy_host, proxy_port, proxy_headers = self.egress
+                connection = http.client.HTTPSConnection(
+                    proxy_host,
+                    proxy_port,
+                    timeout=UPSTREAM_TIMEOUT_SECONDS,
+                    context=self.tls_context,
+                )
+                connection.set_tunnel(self.upstream_host, headers=proxy_headers)
+            connection.putrequest(
+                self.command,
+                self.path,
+                skip_host=True,
+                skip_accept_encoding="accept-encoding" in names,
             )
-            connection.request(self.command, self.path, body=body(), headers=headers)
+            for name, value in headers:
+                connection.putheader(name, value)
+            connection.endheaders(body())
             upstream = connection.getresponse()
             exchange.status = upstream.status
             responded = True
@@ -239,7 +264,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             measured = inspect_request(body, self.evaluate, self.session.memo)
         except Exception:
             exchange.measured = False
-            exchange.incomplete_reason = NOT_JSON
+            exchange.incomplete_reason = NOT_ANALYSED
             return
         exchange.model = measured.model or exchange.model
         exchange.conversation = measured.conversation
@@ -256,7 +281,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         exchange.incomplete_reason = measured.incomplete_reason
 
     def _stream(self, upstream, exchange: Exchange, measuring: bool = False) -> None:
-        self.send_response(upstream.status)
+        # Not send_response: it adds a Server and a Date of its own.
+        self.send_response_only(upstream.status)
         for name, value in upstream.getheaders():
             lowered = name.lower()
             # Stream without deriving a length.
@@ -327,14 +353,15 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                     readable = False
                     continue
                 reader.feed(text_decoder.decode(decoded))
-            except (UnicodeError, ValueError, zlib.error):
+            except Exception:
+                # Reading is measurement; whatever it hits, the relay goes on.
                 readable = False
         readable = readable and (decoder is None or decoder.eof)
         if readable:
             try:
                 reader.feed(text_decoder.decode(b"", final=True))
                 reader.finish()
-            except UnicodeError:
+            except Exception:
                 readable = False
         exchange.usage_status = reader.status if readable else "unavailable"
         try:
@@ -352,9 +379,11 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             )
             if exchange.response_scan_status != "unavailable":
                 try:
-                    exchange.response_entities, exchange.response_custom = (
+                    exchange.response_entities, exchange.response_custom, partial = (
                         scan_response(reader, self.evaluate)
                     )
+                    if partial:
+                        exchange.response_scan_status = NOT_ANALYSED
                 except Exception:
                     exchange.response_entities = {}
                     exchange.response_scan_status = "unavailable"
@@ -398,6 +427,26 @@ class Watch:
         self._thread.join(timeout=5)
 
 
+def _egress(host: str) -> tuple | None:
+    """The proxy the client's own environment sends `host` through, if any.
+    Environment only: Claude Code does not read macOS's system proxy either."""
+    address = urllib.request.getproxies_environment().get("https")
+    # With an environment proxy set, proxy_bypass reads NO_PROXY only.
+    if not address or urllib.request.proxy_bypass(host):
+        return None
+    parts = urllib.parse.urlsplit(address if "//" in address else f"//{address}")
+    if parts.scheme not in ("", "http") or not parts.hostname:
+        raise OSError("only http:// egress proxies are supported (HTTPS_PROXY)")
+    headers = {}
+    if parts.username is not None:
+        login = f"{urllib.parse.unquote(parts.username)}:"
+        login += urllib.parse.unquote(parts.password or "")
+        headers["Proxy-Authorization"] = (
+            "Basic " + base64.b64encode(login.encode()).decode()
+        )
+    return parts.hostname, parts.port or 80, headers
+
+
 def start(upstream: str = "api.anthropic.com", evaluate=None) -> Watch:
     session = Session()
     handler = type(
@@ -408,6 +457,7 @@ def start(upstream: str = "api.anthropic.com", evaluate=None) -> Watch:
             "session": session,
             "tls_context": ssl.create_default_context(),
             "evaluate": staticmethod(evaluate) if evaluate else None,
+            "egress": _egress(upstream),
         },
     )
     # Loopback carries live credentials.

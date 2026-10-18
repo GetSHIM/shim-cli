@@ -252,9 +252,9 @@ from shim_cli import hook
 page = "<!doctype html><html><body>" + "<div class='row'>ok</div>" * 200 + "</body></html>"
 payload = json.dumps({
     "hook_event_name": "PostToolUse",
-    "tool_name": "Bash",
-    "tool_input": {"command": "curl -s http://127.0.0.1/page.html"},
-    "tool_response": {"stdout": page},
+    "tool_name": "mcp__fetch__fetch",
+    "tool_input": {"url": "http://127.0.0.1/page.html"},
+    "tool_response": [{"type": "text", "text": page}],
 }).encode()
 output = hook._output(payload, "claude")
 sys.stdout.write(json.dumps({

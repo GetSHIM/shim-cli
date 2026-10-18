@@ -70,14 +70,23 @@ Rotating a credential cannot be undone, so `remediation.reversible` is `false`.
 
 ## `cli.session.not_inspected`
 
-**Checks:** shim let at least one event through without inspecting it, such as
-a file attached with `@` past the limits, or inspected one only in part.
+**Checks:** shim could not inspect at least one event, its rule titled "Tool
+events shim could not inspect". A tool call shim could not inspect was refused
+and a Claude Code result was withheld; a file attached with `@` past the
+limits, a failed call's output or a VS Code result reached the model anyway.
+`measurements` counts the events not inspected and those inspected only in part
+(records written before 1.2.2; a newer event read only in part counts as not
+inspected).
 
-**Why it matters:** whatever was in it reached the model unchecked.
+**Why it matters:** a withheld result or a refused call is work the agent could
+not do; what reached the model anyway was not checked. The session summary
+says which: `not inspected, withheld or refused` or `not inspected, passed
+through`.
 
-**What to do:** `shim report` names the tool or file; `shim doctor <client>`
-checks the install. Large output is better written to a file the agent reads
-in parts.
+**What to do:** `shim report` names the tool or file; the client showed the
+reason when it happened (`deadline`, `too large`, `settings unreadable` or
+`analysis failed`). `shim doctor <client>` checks the install and the settings
+file. Large output is better written to a file the agent reads in parts.
 
 **How it goes away:** a session in which every event is inspected in full.
 

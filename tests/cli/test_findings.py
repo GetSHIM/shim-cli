@@ -94,7 +94,8 @@ def test_doctor_raises_one_finding_per_check_that_did_not_pass() -> None:
         },
     }
     assert installed["summary"]["en"] == (
-        "shim's hook is not in the Claude Code settings file, so nothing is inspected."
+        "The Claude Code settings file does not hold exactly this shim "
+        "installation's hook; without any shim hook there, nothing is inspected."
     )
     assert installed["playbook"] == "docs/commands.md#error-codes"
     assert settings["rule_id"] == "cli.doctor.settings_invalid"

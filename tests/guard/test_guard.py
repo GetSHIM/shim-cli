@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from shim_cli.guard import (
+    ENTITY_TYPES,
     MAX_SOURCE_CHARACTERS,
     Finding,
     GuardDecision,
@@ -486,6 +487,7 @@ def test_a_piece_that_fails_leaves_the_others_masked() -> None:
 
     line = "row %d contact user%d@example.com\n"
     text = "".join(line % (index, index) for index in range(14_000))
+    failed = list(evaluate_module._pieces(text))[1][1]
     try:
         evaluate_module.analyze_counting = flaky
         decision = evaluate(text, ("EMAIL",))
@@ -493,8 +495,12 @@ def test_a_piece_that_fails_leaves_the_others_masked() -> None:
         evaluate_module.analyze_counting = real
 
     assert decision.partial is True
-    assert decision.findings, "one bad piece must not cost every other piece"
-    assert "<EMAIL_1>" in decision.redacted_text
+    # Every piece after the failed one is still masked, to the last row.
+    assert decision.counts == (("EMAIL", 14_000 - failed.count("@")),)
+    assert "user13999@example.com" not in decision.redacted_text
+    assert decision.redacted_text.endswith(
+        f"row 13999 contact <EMAIL_{14_000 - failed.count('@')}>\n"
+    )
 
 
 def test_a_piece_that_runs_out_of_time_ends_the_scan(
@@ -1383,20 +1389,70 @@ def test_a_plate_is_looked_for_only_where_the_settings_enable_it() -> None:
     ]
 
 
-@pytest.mark.parametrize(
-    "text",
-    [
-        ("a." * 20_000 + "[at]") * 3,
-        "x@" + "a." * 20_000 + "com",
-        "[at]" * 25_000,
-        "tr12 " + "abcd " * 20_000,
-        "34 " * 30_000 + "ABC",
-        "Tr12-" * 20_000,
-    ],
-    ids=["written-at", "long-domain", "bare-at", "iban", "plate", "iban-dashed"],
-)
-def test_the_ported_shapes_scan_in_linear_time(text: str) -> None:
-    started = time.perf_counter()
-    evaluate(text, ("EMAIL", "IBAN", "TR_LICENSE_PLATE"))
+def _numeric_rows(count: int) -> str:
+    return "".join(
+        f"2024-{row % 12 + 1:02d}-{row % 28 + 1:02d},{row * 7_919 % 999_983},"
+        f"{row * 104_729 % 99_991}.{row % 100:02d},{row * 15_485_863 % 9_999_991}\n"
+        for row in range(count)
+    )
 
-    assert time.perf_counter() - started < 2
+
+def _address_lines(count: int) -> str:
+    return "".join(
+        f"{row * 37 % 223 + 1}.{row * 91 % 256}.{row * 53 % 256}.{row % 256}\n"
+        for row in range(count)
+    )
+
+
+def _seconds(text: str) -> tuple[float, float]:
+    """Wall and CPU seconds of one evaluation. The CPU time is the detector's
+    own work, so the ratio of two holds on a machine busy with other things."""
+    wall, cpu = time.perf_counter(), time.process_time()
+    evaluate(text, ENTITY_TYPES)
+    return time.perf_counter() - wall, time.process_time() - cpu
+
+
+@pytest.mark.parametrize(
+    ("shape", "count"),
+    [
+        (lambda count: ("a." * count + "[at]") * 3, 20_000),
+        (lambda count: "x@" + "a." * count + "com", 20_000),
+        (lambda count: "[at]" * count, 25_000),
+        (lambda count: "tr12 " + "abcd " * count, 20_000),
+        (lambda count: "34 " * count + "ABC", 30_000),
+        (lambda count: "Tr12-" * count, 20_000),
+        (lambda count: "a." * count + "@", 20_000),
+        (lambda count: ("a." * count + "@ ") * 10, 4_000),
+        (lambda count: "postgres://x" + "?" * count, 40_000),
+        (lambda count: "eyJ" * count, 13_334),
+        (lambda count: "ZXlK" * count, 10_000),
+        (lambda count: "1 " * count, 20_000),
+        (_numeric_rows, 1_200),
+        (_address_lines, 2_900),
+    ],
+    ids=[
+        "written-at",
+        "long-domain",
+        "bare-at",
+        "iban",
+        "plate",
+        "iban-dashed",
+        "email-local-part",
+        "email-local-parts",
+        "query-marks",
+        "jwt-prefixes",
+        "base64-of-jwt-prefixes",
+        "spaced-digits",
+        "numeric-csv",
+        "address-lines",
+    ],
+)
+def test_the_ported_shapes_scan_in_linear_time(shape, count: int) -> None:
+    """Every recogniser at once, on the shape that once made one of them
+    quadratic: `a.` repeated before an `@` took 9 s at 40 KB. Doubling the
+    input may double the time, with room for noise, and never quadruple it."""
+    half = _seconds(shape(count // 2))[1]
+    wall, full = _seconds(shape(count))
+
+    assert wall < 2
+    assert full <= 2.5 * half + 0.05, (half, full)

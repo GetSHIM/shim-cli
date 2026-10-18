@@ -200,12 +200,13 @@ def test_a_page_from_an_mcp_server_reaches_the_hook_whole() -> None:
 @pytest.mark.parametrize(
     "name,converted",
     [
-        ("PostToolUse-Bash-bash-curl-html-1.json", True),
+        # Command output may be a file the model edits next: never converted.
+        ("PostToolUse-Bash-bash-curl-html-1.json", False),
         ("PostToolUse-mcp__probe__probe_echo-mcp-html-1.json", True),
         ("PostToolUse-Read-read-pdf-1.json", False),
     ],
 )
-def test_the_html_diet_converts_command_and_mcp_pages_and_never_a_file(
+def test_the_html_diet_converts_mcp_pages_and_never_a_command_or_file(
     name: str, converted: bool
 ) -> None:
     from shim_cli.clients.claude.tool_events import TOOL_EVENTS

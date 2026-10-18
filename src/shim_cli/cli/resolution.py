@@ -8,8 +8,9 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from shim_cli.clients.claude.settings import PLUGIN_NAMES
+
 ARCHIVE_RELATIVE = Path("bin") / "shim.pyz"
-PLUGIN_NAMES = ("shim-cli", "shim-guard")
 MAX_MANIFEST_BYTES = 1_000_000
 _VERSION = re.compile(r'^__version__ = "(?P<version>[0-9][0-9A-Za-z.+-]*)"', re.M)
 

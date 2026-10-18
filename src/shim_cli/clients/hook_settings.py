@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import json
 import math
+import shlex
 import sys
 from collections.abc import Sequence
 from pathlib import Path
 
 MAX_SETTINGS_BYTES = 1_000_000
+HOOK_MODULE = "shim_cli.hook"
+LEGACY_HOOK_MODULE = "shim_guard.hook"
 
 Registration = tuple
 
@@ -110,6 +113,74 @@ def _dump(document: dict[str, object]) -> bytes:
     return content
 
 
+# The handler keys every release wrote for each client, and the argument that
+# follows `-I -B -m <module>`: Claude Code's exec-form `command` and `args`,
+# Codex's shell command, and Copilot's shell command.
+_LAYOUTS = {
+    frozenset({"args", "command", "timeout", "type"}): ["claude"],
+    frozenset({"command", "timeout", "type"}): [],
+    frozenset({"command", "timeoutSec", "type"}): ["copilot"],
+}
+# shim's command is an interpreter path (PATH_MAX is 4096) and a few arguments,
+# quoted. Anything longer is someone else's, and shlex.split is quadratic in a
+# long quoted token.
+_MAX_COMMAND = 8192
+
+
+def shim_hook(handler: object) -> tuple[str, str] | None:
+    """(interpreter, module) when a hook handler is one shim wrote, else None.
+
+    Every release wrote a `command` handler with exactly the keys above that
+    runs `<python> -I -B -m <module>` and the client's argument, and nothing
+    else. The interpreter is whichever installation wrote it, so it is not part
+    of the identity: matching it made a second installation add a second hook
+    set, and revert leave the first one running. Anything that differs in any
+    other way, such as a command chained after shim's, is someone's own hook.
+    """
+    if not isinstance(handler, dict) or handler.get("type") != "command":
+        return None
+    tail = _LAYOUTS.get(frozenset(handler))
+    command = handler.get("command")
+    if tail is None or not isinstance(command, str) or len(command) > _MAX_COMMAND:
+        return None
+    if "args" in handler:
+        argv = [command, *handler["args"]] if isinstance(handler["args"], list) else []
+    elif HOOK_MODULE in command or LEGACY_HOOK_MODULE in command:
+        try:
+            argv = shlex.split(command)
+        except ValueError:
+            return None
+        # Only the quoting shlex.join wrote: `/x/$(y)/python` unquoted runs `y`.
+        if shlex.join(argv) != command:
+            return None
+    else:
+        return None
+    for module in (HOOK_MODULE, LEGACY_HOOK_MODULE):
+        if argv[1:] == ["-I", "-B", "-m", module, *tail]:
+            return argv[0], module
+    return None
+
+
+def shim_hooks(content: bytes) -> list[tuple[str, str, str]]:
+    """(event, interpreter, module) for every handler in the document that runs shim."""
+    hooks = _load(content).get("hooks", {})
+    assert isinstance(hooks, dict)
+    return [
+        (event, *found)
+        for event, groups in hooks.items()
+        for group in groups
+        for handler in group["hooks"]
+        if (found := shim_hook(handler)) is not None
+    ]
+
+
+def _is_shim(group: dict) -> bool:
+    ours = [shim_hook(handler) is not None for handler in group["hooks"]]
+    if any(ours) and not all(ours):
+        raise ValueError("a hook group runs shim beside another hook")
+    return any(ours)
+
+
 def _same_group(left: object, right: object) -> bool:
     try:
         return json.dumps(
@@ -121,11 +192,19 @@ def _same_group(left: object, right: object) -> bool:
         raise ValueError("invalid hook settings") from error
 
 
-def _match(groups: list, group: dict[str, object]) -> int | None:
-    matches = [index for index, item in enumerate(groups) if _same_group(item, group)]
-    if len(matches) > 1:
-        raise ValueError("duplicate shim hook groups are ambiguous")
-    return matches[0] if matches else None
+def _drop_shim_groups(hooks: dict, keep: dict) -> bool:
+    """Remove every group that runs shim, except an event's one exact `keep`."""
+    changed = False
+    for event, groups in list(hooks.items()):
+        ours = [group for group in groups if _is_shim(group)]
+        exact = len(ours) == 1 and event in keep and _same_group(ours[0], keep[event])
+        if not ours or exact:
+            continue
+        changed = True
+        hooks[event] = [group for group in groups if not _is_shim(group)]
+        if not hooks[event] and event not in keep:
+            del hooks[event]
+    return changed
 
 
 def installed_events(
@@ -136,22 +215,23 @@ def installed_events(
     return frozenset(
         event
         for event, group in registrations
-        if _match(hooks.get(event, []), group) is not None
+        if any(_same_group(item, group) for item in hooks.get(event, []))
     )
 
 
 def add_groups(content: bytes | None, registrations: Sequence[Registration]) -> bytes:
+    """Leave exactly `registrations` as shim's groups, each appended last if new."""
     if not registrations:
         assert content is not None
         return content
     document = {} if content is None else _load(content)
     hooks = document.setdefault("hooks", {})
     assert isinstance(hooks, dict)
-    changed = content is None
+    changed = _drop_shim_groups(hooks, dict(registrations)) or content is None
     for event, group in registrations:
         groups = hooks.setdefault(event, [])
         assert isinstance(groups, list)
-        if _match(groups, group) is None:
+        if not any(_same_group(item, group) for item in groups):
             groups.append(group)
             changed = True
     if changed:
@@ -160,26 +240,14 @@ def add_groups(content: bytes | None, registrations: Sequence[Registration]) -> 
     return content
 
 
-def remove_groups(content: bytes, registrations: Sequence[Registration]) -> bytes:
-    if not registrations:
-        return content
+def remove_groups(content: bytes) -> bytes:
+    """Remove every group that runs shim, whichever installation wrote it."""
     document = _load(content)
     hooks = document.get("hooks")
     if hooks is None:
         return content
     assert isinstance(hooks, dict)
-    changed = False
-    for event, group in registrations:
-        groups = hooks.get(event, [])
-        assert isinstance(groups, list)
-        match = _match(groups, group)
-        if match is None:
-            continue
-        del groups[match]
-        changed = True
-        if not groups:
-            del hooks[event]
-    if not changed:
+    if not _drop_shim_groups(hooks, {}):
         return content
     if not hooks:
         del document["hooks"]

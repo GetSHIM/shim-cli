@@ -17,7 +17,7 @@ import pytest
 from shim_cli.clients.claude import settings as claude
 from shim_cli.clients.codex import settings as codex
 from shim_cli.clients.copilot import settings as copilot
-from shim_cli.clients.hook_settings import interpreter_path
+from shim_cli.clients.hook_settings import LEGACY_HOOK_MODULE, interpreter_path
 
 
 @pytest.fixture
@@ -57,21 +57,19 @@ def test_installing_under_a_second_alias_does_not_duplicate_the_hook(
     assert len(groups) == 1
 
 
-def test_a_second_alias_still_removes_the_hook_the_first_installed(
+def test_revert_removes_the_hook_whichever_alias_installed_it(
     aliases: tuple[Path, ...],
 ) -> None:
-    installed, other = aliases[0], aliases[1]
-    assert codex.remove_hook(codex.add_hook(None, installed), other) == b"{}\n"
-    assert claude.remove_hook(claude.add_hook(None, installed), other) == b"{}\n"
+    installed = aliases[1]
+    assert codex.remove_hook(codex.add_hook(None, installed)) == b"{}\n"
+    assert claude.remove_hook(claude.add_hook(None, installed)) == b"{}\n"
 
 
 def test_an_upgrade_replaces_the_0_2_0_fragment_rather_than_joining_it(
     aliases: tuple[Path, ...],
 ) -> None:
     """The 0.2.0 install wrote whichever alias it was started with."""
-    legacy = codex.add_groups(
-        None, codex.hook_groups(aliases[0], codex.LEGACY_HOOK_MODULE)
-    )
+    legacy = codex.add_groups(None, codex.hook_groups(aliases[0], LEGACY_HOOK_MODULE))
     upgraded = codex.add_hook(legacy, aliases[1])
     groups = json.loads(upgraded)["hooks"][codex.PROMPT_EVENT]
     assert len(groups) == 1

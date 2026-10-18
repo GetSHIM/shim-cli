@@ -5,6 +5,7 @@ import os
 import stat
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -285,59 +286,61 @@ runner.main()
     assert secret.encode() not in result.stdout + result.stderr
 
 
-@pytest.mark.parametrize("stage", ["detector", "serialization"])
+# Only the stage under test is replaced, on the real modules: a stub of the
+# whole package failed at `load_policy` before either stage ran, so every case
+# passed on that ImportError and the stages themselves went untested.
+_STAGE = r"""
+import dataclasses
+import os
+from pathlib import Path
+
+import shim_cli.guard as guard
+from shim_cli import hook as runner
+from shim_cli.clients.codex import hook as adapter
+
+stage = os.environ["SHIM_TEST_STAGE"]
+reached = Path(os.environ["SHIM_TEST_REACHED"])
+real_evaluate = guard.evaluate
+
+
+def evaluate(*args, **kwargs):
+    reached.write_text("detector")
+    if stage == "detector-error":
+        raise RuntimeError(os.environ["SHIM_TEST_SECRET"])
+    decision = real_evaluate(*args, **kwargs)
+    if stage == "detector-partial":
+        return dataclasses.replace(decision, partial=True)
+    return decision
+
+
+def block_output(decision, suggestion_path=None):
+    reached.write_text(f"serialization {suggestion_path}")
+    raise RuntimeError(os.environ["SHIM_TEST_SECRET"])
+
+
+guard.evaluate = evaluate
+if stage == "serialization":
+    adapter.block_output = block_output
+runner.main()
+"""
+
+
+@pytest.mark.parametrize(
+    "stage", ["detector-error", "detector-partial", "serialization"]
+)
 def test_dependency_errors_use_the_same_generic_block(
     stage: str, tmp_path: Path
 ) -> None:
-    code = r"""
-import os
-import sys
-import types
-from shim_cli import hook as runner
-from shim_cli.clients import user_prompt_hook
-
-clients = types.ModuleType("shim_cli.clients")
-clients.__path__ = []
-codex = types.ModuleType("shim_cli.clients.codex")
-codex.__path__ = []
-adapter = types.ModuleType("shim_cli.clients.codex.hook")
-guard = types.ModuleType("shim_cli.guard")
-
-adapter.parse_input = lambda raw: "safe"
-adapter.warn_output = lambda decision: b""
-adapter.error_output = lambda: runner._ERROR_OUTPUT
-
-def evaluate(prompt, enabled_entities, custom=(), reveal=None):
-    if os.environ["SHIM_TEST_STAGE"] == "detector":
-        raise RuntimeError(os.environ["SHIM_TEST_SECRET"])
-    return types.SimpleNamespace(blocked=True, redacted_text="redacted")
-
-def block_output(decision, suggestion_path=None):
-    if os.environ["SHIM_TEST_STAGE"] == "serialization":
-        raise RuntimeError(os.environ["SHIM_TEST_SECRET"])
-    return b""
-
-adapter.block_output = block_output
-guard.evaluate = evaluate
-sys.modules.update({
-    "shim_cli.clients": clients,
-    "shim_cli.clients.user_prompt_hook": user_prompt_hook,
-    "shim_cli.clients.codex": codex,
-    "shim_cli.clients.codex.hook": adapter,
-    "shim_cli.guard": guard,
-})
-runner.main()
-"""
-    env = os.environ.copy()
-    env["SHIM_TEST_STAGE"] = stage
-    env["SHIM_TEST_SECRET"] = "raw-value-must-not-leak"
-    settings = tmp_path.parent / f"{tmp_path.name}-enforce.toml"
-    settings.write_text(ENFORCE_PROMPT, encoding="utf-8")
-    env["SHIM_CONFIG"] = str(settings)
-    env["TMPDIR"] = str(tmp_path)
+    reached = tmp_path / "reached.mark"
+    env = _enforcing(
+        tmp_path,
+        SHIM_TEST_STAGE=stage,
+        SHIM_TEST_SECRET="raw-value-must-not-leak",
+        SHIM_TEST_REACHED=str(reached),
+    )
     result = subprocess.run(
-        (sys.executable, "-I", "-B", "-c", code),
-        input=b"{}",
+        (sys.executable, "-I", "-B", "-c", _STAGE),
+        input=_payload("Contact alice@example.com"),
         capture_output=True,
         cwd=ROOT,
         env=env,
@@ -347,7 +350,15 @@ runner.main()
 
     _assert_output(result, GENERIC_BLOCK)
     assert b"raw-value-must-not-leak" not in result.stdout + result.stderr
-    assert not _redaction_files(tmp_path)
+    assert b"alice@example.com" not in result.stdout
+    if stage == "serialization":
+        # The block was being written, so the redaction existed; it is gone.
+        written = Path(reached.read_text().removeprefix("serialization "))
+        assert written.name.startswith("shim-redacted-")
+        assert not written.exists()
+    else:
+        assert reached.read_text() == "detector"
+    assert not list(tmp_path.rglob("shim-redacted-*.txt"))
 
 
 def test_adapter_import_error_uses_the_same_generic_block() -> None:
@@ -382,44 +393,44 @@ runner.main()
     assert b"import-error-must-not-leak" not in result.stdout + result.stderr
 
 
-def test_hook_processing_deadline_uses_the_generic_block() -> None:
+def test_hook_processing_deadline_uses_the_generic_block(tmp_path: Path) -> None:
+    """The detector is entered and outlasts the deadline: the block must come
+    from the deadline, not from a stub that fails to import before it runs."""
     code = r"""
-import sys
+import os
 import time
-import types
-from shim_cli import hook as runner
-from shim_cli.clients import user_prompt_hook
+from pathlib import Path
 
-clients = types.ModuleType("shim_cli.clients")
-clients.__path__ = []
-codex = types.ModuleType("shim_cli.clients.codex")
-codex.__path__ = []
-adapter = types.ModuleType("shim_cli.clients.codex.hook")
-guard = types.ModuleType("shim_cli.guard")
-adapter.parse_input = lambda raw: "safe"
-adapter.block_output = lambda decision, suggestion_path=None: b""
-adapter.error_output = lambda: runner._ERROR_OUTPUT
-guard.evaluate = lambda prompt, enabled_entities: time.sleep(1)
-sys.modules.update({
-    "shim_cli.clients": clients,
-    "shim_cli.clients.user_prompt_hook": user_prompt_hook,
-    "shim_cli.clients.codex": codex,
-    "shim_cli.clients.codex.hook": adapter,
-    "shim_cli.guard": guard,
-})
-runner.HOOK_DEADLINE_SECONDS = 0.05
+import shim_cli.guard as guard
+from shim_cli import hook as runner
+
+
+def evaluate(*args, **kwargs):
+    Path(os.environ["SHIM_TEST_REACHED"]).write_text("detector")
+    time.sleep(5)
+
+
+guard.evaluate = evaluate
+runner.HOOK_DEADLINE_SECONDS = 1
 runner.main()
 """
+    reached = tmp_path / "reached.mark"
+    env = {**os.environ, "SHIM_TEST_REACHED": str(reached)}
+    started = time.monotonic()
     result = subprocess.run(
         (sys.executable, "-I", "-B", "-c", code),
-        input=b"{}",
+        input=_payload("Explain merge sort."),
         capture_output=True,
         cwd=ROOT,
+        env=env,
         check=False,
-        timeout=5,
+        timeout=30,
     )
+    elapsed = time.monotonic() - started
 
     _assert_output(result, GENERIC_BLOCK)
+    assert reached.read_text() == "detector"
+    assert elapsed < 4, "the detector ran to the end: no deadline stopped it"
 
 
 def test_hook_deadline_includes_waiting_for_stdin_eof() -> None:

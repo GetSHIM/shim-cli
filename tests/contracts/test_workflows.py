@@ -51,6 +51,24 @@ def test_a_workflow_starts_from_least_privilege(workflow: Path) -> None:
     )
 
 
+def test_ci_and_release_gate_the_installed_hook_on_its_latency_ceilings() -> None:
+    """The gate was removed once for noisy runners and nothing replaced it; a
+    9 s email scan went unnoticed. CI and the release run it at the default
+    ceilings."""
+    ci = (WORKFLOWS / "ci.yml").read_text(encoding="utf-8")
+    release = (WORKFLOWS / "release.yml").read_text(encoding="utf-8")
+
+    assert (
+        "python scripts/benchmark_hook.py /tmp/shim-cli-wheel/bin/python "
+        "--samples-per-fixture 20 --output" in ci
+    )
+    assert (
+        "scripts/benchmark_hook.py /tmp/shim-cli-benchmark/bin/python "
+        "--samples-per-fixture 20 --output" in release
+    )
+    assert "--ceiling-scale" not in ci + release
+
+
 RELEASE = WORKFLOWS / "release.yml"
 
 

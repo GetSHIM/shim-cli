@@ -24,4 +24,9 @@ The hook is a local best-effort guard, not an enforcement boundary. A report
 involving prompt leakage, unsafe hook output, persistence beyond the documented
 temporary suggestion, session spool, or opt-in ledger boundaries, an
 undocumented network destination or transmission, installer ownership
-failures, or an unsafe fail-open path is in scope.
+failures, or an unsafe fail-open path is in scope. From 1.2.2 an event the hook
+cannot inspect fails closed, so one that reaches the model uninspected without
+the user and the model being told is in scope. So is an agent turning shim off
+by a route that
+[docs/privacy.md](docs/privacy.md#an-agent-turning-shim-off) says is refused;
+the routes it lists as not caught are known limits.

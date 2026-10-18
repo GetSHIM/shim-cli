@@ -7,7 +7,7 @@
 | Python | CPython 3.10 or newer for the package, tested on 3.10, 3.13 and 3.14; the plugin archive runs on 3.9 or newer |
 | Operating systems | macOS and Linux. Windows is not supported: the hook stands down with one line on stderr and inspects nothing, so no prompt is withheld; the plugin launcher does the same under Git Bash; every CLI command except `help`, `--version` and `update` refuses with exit 2. This was simulated (platform patched, `fcntl` removed), not run on Windows. WSL runs as Linux, not yet verified |
 | Prompt hooks | Codex CLI, Claude Code, GitHub Copilot CLI, and VS Code |
-| Tool hooks | Claude Code `PreToolUse` and `PostToolUse`, masked, and `PostToolUseFailure`, reported only; VS Code `PreToolUse` reports and denies, `PostToolUse` reports only |
+| Tool hooks | Claude Code `PreToolUse` and `PostToolUse`, masked, and `PostToolUseFailure`, reported only; VS Code `PreToolUse` reports and denies, `PostToolUse` reports only. From 1.2.2 a tool input is handled by where it goes (web tools masked, MCP and unknown tools refused under `enforce`, local tools reported only), and an event shim cannot inspect is denied or withheld wherever the client allows |
 | `shim audit` | Claude Code history only: transcripts written by 2.1.270 to 2.1.291 were read; the record shapes are below |
 | `shim watch` | Claude Code only. Codex is refused: it reads its endpoint from its own configuration, so the proxy is bypassed and the session measured as empty ([probe](probe-2026-09-codex-watch.md)). Copilot out of scope because a custom endpoint removes GitHub authentication |
 
@@ -17,6 +17,19 @@ The package runs on CPython 3.10 or newer; CI covers 3.10, 3.13 and 3.14, and
 no newer release is refused by the package metadata. On a machine whose only Python
 is 3.9, the plugin route needs no Python beyond 3.9 and the package route needs
 `--python`: `uv tool install --python 3.12 --compile-bytecode shim`.
+
+From 1.2.2 `shim install` refuses a shim installed with `pip install --user`,
+or by Ubuntu's silent fallback to a user install: every hook runs Python with
+`-I`, which ignores the user site and `PYTHONPATH`, so that hook could not
+import shim and would let every event through. Install with `uv tool` or
+`pipx`.
+
+The release evidence below describes the release it names. Two of its results
+changed in 1.2.2: `curl` output through `Bash` is no longer converted by the
+`html` diet (the 1.2.0 and 1.2.1 rows), and the plugin launcher with no Python
+on `PATH` withholds the prompt, printing `shim: no python3 found on PATH; the
+prompt was withheld.` to stderr, where 1.0.0 let it through (`the prompt was
+not inspected.`).
 
 ## The 0.2.0 names
 
@@ -100,12 +113,19 @@ Two further limits from the same run. A `read_file` result arrives as
 `PreToolUse`; the transcript records `success: true` and no content either. A
 `run_in_terminal` result does arrive in full. Tool names are VS Code's own
 (`read_file`, `run_in_terminal`) and inputs are camelCase (`filePath`), so a
-Claude-shaped adapter would not match them.
+Claude-shaped adapter would not match them. From 1.2.2 `policy.TOOLS` sorts
+VS Code's tools by direction, read from Copilot Chat 0.69.0's tool registry on
+VS Code 1.141.1 rather than measured live: `run_in_terminal`, `send_to_terminal`,
+`create_and_run_task` and `run_playwright_code` are `executable-text`, the file
+editing tools `local-write`, `fetch_webpage` `outbound`, and `read_file` and
+the other workspace readers `local-tool`.
 
 The shipped default for tool traffic is `enforce`, chosen when masking was
 free. In VS Code that would mean denying calls nobody asked to have denied, so
-a mode that was never written down reports instead; `[mode] outbound =
-"enforce"` turns denial on.
+a mode that was never written down reports instead; `enforce` written for a
+call's direction (`executable-text`, `local-write` or `outbound`) turns denial
+on. A `local-tool` call is never denied, and a call shim cannot inspect is
+denied in every mode.
 
 **The Agent Plugins manifest is what the submission checks read.** `plugin.json`
 at the plugin root declares the `agent-plugins.org` v1 schema, whose fields are
@@ -151,7 +171,8 @@ starts an `app-server-daemon` with the first session and runs every later
 session's hooks inside it. The hook sees the variables of the session that
 started the daemon, not of the current one: a `SHIM_CONFIG` or `CODEX_HOME` set
 for a later session does not reach it until the daemon restarts. A relative
-`CODEX_HOME` or `SHIM_CONFIG` is refused, and the prompt is withheld.
+`SHIM_CONFIG` is refused, and the prompt is withheld. The prompt hook does not
+read `CODEX_HOME`, so a relative one changes nothing there.
 
 **Codex does not load the plugin's hook.** Measured 29 September 2026 on Codex
 0.151.0 and 0.159.0, in a separate `CODEX_HOME`: `codex plugin marketplace add
@@ -418,7 +439,7 @@ could pass. It has been superseded by:
 | Corpus | Cases | Contract |
 | --- | ---: | --- |
 | `guard-v2.json` | 210 | Exact redacted output for every case, with every built-in type enabled, plus source spans for normalization-sensitive cases. |
-| `guard-tools-v1.json` | 24 | Exact output at 25 scanned paths in captured tool payloads, per event and policy direction. |
+| `guard-tools-v1.json` | 24 | Exact output at 25 scanned paths in captured tool payloads, per event and policy direction. From 1.2.2 each case runs through the whole hook with no settings file; the `PostToolBatch` cases, an event shim does not install, are graded as no output, and their detector redaction is kept as `expected_redaction`. |
 | `parity-v1.json` | 475 | Exact findings, spans, scores, and redacted output from the previous Presidio implementation. |
 | `custom-v1.json` | 10 | Exact output with your own patterns, including where they overlap a built-in type. |
 | `reveal-v1.json` | 8 | Exact output with the last digits kept by `[reveal]`. |
@@ -507,6 +528,13 @@ The previous Presidio-based implementation measured p50 2,410 ms and p95
 they are historical comparisons rather than a release guarantee. Detector
 analysis has a 20-second deadline, the outer hook has a 25-second deadline, and
 client settings use 30 seconds.
+
+From 1.2.2 `benchmark-hook.json` also times an `adversarial` prompt, built from
+the shapes that made the email, JWT, connection-string and base64 recognizers
+quadratic before, and records `ceilings_ms`. CI and the release fail when a
+fixture's median passes its ceiling: 420 ms, three times the slowest CI
+runner's median, and 2,000 ms for the adversarial prompt, which took over 4 s
+before the fix and about 0.2 s after on an M1.
 
 ## 0.2.0 release evidence
 

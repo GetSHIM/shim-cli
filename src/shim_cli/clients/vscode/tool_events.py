@@ -17,7 +17,16 @@ from __future__ import annotations
 
 from shim_cli import json_bytes
 from shim_cli.clients.user_prompt_hook import parse_object
-from shim_cli.events.pipeline import REFUSE, REPORT_ONLY, Adapter, Event
+from shim_cli.events.payload import PayloadTooLarge
+from shim_cli.events.pipeline import (
+    REFUSE,
+    REPORT_ONLY,
+    UNINSPECTED,
+    UNINSPECTED_CALL,
+    Adapter,
+    Event,
+    uninspected_report,
+)
 from shim_cli.policy import ALLOW, DENY, MASK, REPORT
 
 MAX_INPUT_BYTES = 1_000_000
@@ -27,11 +36,9 @@ _REPEAT_WARNING = (
     "Do not repeat the values this names in your reply, and do not write "
     "them to a file."
 )
-_ERROR_MESSAGE = "shim: this tool event could not be inspected and was not modified."
 # VS Code names tool inputs in camelCase; the snake_case spellings are here
 # because a hook file shared with a Claude-shaped client sees both.
 _TARGET_KEYS = ("filePath", "file_path", "notebookPath", "notebook_path", "path", "url")
-_FILE_VIEW_KEYS = ("filePath", "file_path", "notebookPath", "notebook_path", "path")
 
 
 def _decoder(expected_event: str, root: str):
@@ -48,7 +55,6 @@ def _decoder(expected_event: str, root: str):
             raise ValueError("tool-hook tool name must be text")
 
         target = ""
-        views_file = False
         tool_input = document.get("tool_input")
         if isinstance(tool_input, dict):
             for key in _TARGET_KEYS:
@@ -56,11 +62,7 @@ def _decoder(expected_event: str, root: str):
                 if isinstance(value, str) and value:
                     target = value
                     break
-            views_file = any(
-                isinstance(tool_input.get(key), str) and tool_input[key]
-                for key in _FILE_VIEW_KEYS
-            )
-        return Event(tool, document.get(root), target, views_file)
+        return Event(tool, document.get(root), target)
 
     return decode
 
@@ -68,18 +70,25 @@ def _decoder(expected_event: str, root: str):
 def _dump(document: dict) -> bytes:
     output = json_bytes.dumps(document, separators=(",", ":"))
     if len(output) > MAX_OUTPUT_BYTES:
-        raise ValueError("hook output exceeds the safe limit")
+        raise PayloadTooLarge("hook output exceeds the safe limit")
     return output
 
 
 def pre_tool_use(
-    action: str, _payload: object, message: str, _found: str, _tool: str
+    action: str,
+    _payload: object,
+    message: str,
+    _found: str,
+    tool: str,
+    _name: str = "",
 ) -> bytes:
     if action == ALLOW:
         return b""
     if action == REPORT:
         return _dump({"systemMessage": message})
-    if action == DENY:
+    if action == UNINSPECTED:
+        message = UNINSPECTED_CALL.format(tool=tool, reason=message)
+    if action in (DENY, UNINSPECTED):
         return _dump(
             {
                 "hookSpecificOutput": {
@@ -95,10 +104,26 @@ def pre_tool_use(
 
 
 def post_tool_use(
-    action: str, _payload: object, message: str, _found: str, _tool: str
+    action: str,
+    _payload: object,
+    message: str,
+    found: str,
+    tool: str,
+    _name: str = "",
 ) -> bytes:
     if action == ALLOW:
         return b""
+    if action == UNINSPECTED:
+        system, context = uninspected_report(tool, message, found)
+        return _dump(
+            {
+                "systemMessage": system,
+                "hookSpecificOutput": {
+                    "hookEventName": "PostToolUse",
+                    "additionalContext": context,
+                },
+            }
+        )
     if action == REPORT:
         # additionalContext is the one field that reaches the model here. It
         # cannot unsend the result, but it can stop the model repeating the
@@ -115,10 +140,6 @@ def post_tool_use(
     if action in (DENY, MASK):
         raise ValueError("VS Code cannot withhold or replace a tool result")
     raise ValueError("unsupported action")
-
-
-def error_output() -> bytes:
-    return _dump({"systemMessage": _ERROR_MESSAGE})
 
 
 TOOL_EVENTS = {

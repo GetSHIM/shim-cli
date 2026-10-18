@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import base64
 import binascii
+import functools
 import ipaddress
 import re
 import string
+import sys
 from typing import TYPE_CHECKING, NamedTuple
 
 from .entities import PLACEHOLDER
@@ -14,7 +16,8 @@ from .iban_patterns import regex_per_country
 from .suffixes import is_registrable
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterator
+    from typing import Any
 
 ENTITY_MAP = {
     "EMAIL_ADDRESS": "EMAIL",
@@ -150,16 +153,13 @@ def _trim_trailing_prose(text: str, start: int, end: int) -> int:
 # the variable name too — so a `.env` came back with `AWS_ACCESS_KEY_ID=<SECRET_1>`
 # on one line and a bare `<EMAIL_1>` on the next. The cost is that a genuine
 # address with `=` before the `@` is missed.
-_EMAIL_PATTERNS = _compile(
-    (
-        (
-            r"\b((([!#$%&'*+\-/?^_`{|}~\w])|([!#$%&'*+\-/?^_`{|}~\w]"
-            r"[!#$%&'*+\-/?^_`{|}~\.\w]{0,}[!#$%&'*+\-/?^_`{|}~\w]))"
-            r"[@]\w+(?:-+\w+)*(?:\.\w+(?:-+\w+)*)+)\b",
-            0.5,
-        ),
-    )
-)
+_LOCAL = r"!#$%&'*+\-/?^_`{|}~\w"
+# The run of local-part characters before each `@`, read once. The ported
+# pattern tried every word start in the run, so `a.` repeated before an `@`
+# was quadratic: 9 s at 40 KB.
+_LOCAL_RUN = re.compile(rf"(?<![{_LOCAL}.])[{_LOCAL}.]+(?=@)")
+_LOCAL_START = re.compile(rf"\b[{_LOCAL}]")
+_DOMAIN = re.compile(r"\w+(?:-+\w+)*(?:\.\w+(?:-+\w+)*)+\b")
 
 
 def _validate_email(text: str) -> bool:
@@ -262,6 +262,15 @@ def _scan_ip(text: str) -> list[Match]:
 
 
 def _invalidate_ip(text: str) -> bool:
+    if ":" not in text and text.isascii():
+        # Without a colon only the dotted pattern matched, and it bounds each
+        # octet and the prefix, so `ip_interface` adds only its refusal of a
+        # leading zero, at ten times the cost. The prefix's `\d` also takes
+        # other scripts' digits, which `ip_interface` refuses: those go to it.
+        octets = text.partition("/")[0].split(".")
+        if any(len(octet) > 1 and octet[0] == "0" for octet in octets):
+            return True
+        return octets[0] == "127" or octets == ["0", "0", "0", "0"]
     try:
         parsed = ipaddress.ip_interface(text)
     except ValueError:
@@ -439,16 +448,335 @@ def _glued_to_identifier(text: str, start: int) -> bool:
     return tail is not None and bool(_LETTER.search(tail.group()))
 
 
-def _scan_phone(text: str) -> list[Match]:
-    import phonenumbers
+# Digits, `+` and the library's punctuation other than its extension marks
+# (`x`, `~`): no extension or letter to read, so the digits are the number's.
+_PLAIN_NUMBER = re.compile(
+    "[\\d+\uff0b\\-\u2010-\u2015\u2212\u30fc\uff0d-\uff0f \u00a0\u00ad\u200b\u2060"
+    "\u3000()\uff08\uff09\uff3b\uff3d.\\[\\]/\u2053\u223c]*"
+)
+# The library reads a number as international when it starts with a `+`.
+_LEADING_PLUS = re.compile("[^+\uff0b\\d]*[+\uff0b]")
+# Three letters are read as digits too: "1-800-FLOWERS".
+_SPELLED = re.compile(r"(?:.*?[A-Za-z]){3}")
+_FIRST_GROUP_ONLY = re.compile(r"\(?\\1\)?")
+_BACK_REFERENCE = re.compile(r"\\\d")
+# The shortest number of every region has four digits; prefixes only add more.
+_FEWEST_PHONE_DIGITS = 4
+_ENOUGH_DIGITS = re.compile(rf"(?:\D*\d){{{_FEWEST_PHONE_DIGITS}}}")
+# A `+` and a known country code read the same from every region.
+_ANY_REGION = "*"
+# Characters the library's candidate pattern cannot hold (it reads only digits,
+# separators and the letters of `ext`, `anexo` and `int`, in any case), so the
+# text can be cut at one: each side keeps it to look at, as before.
+_PHONE_BREAK = re.compile(
+    r"[\n\r!\"$%&'*<>?@\\^_`{|}b-df-hj-mp-ru-wyzB-DF-HJ-MP-RU-WYZ]"
+)
+_PHONE_ROW = 1_000
+# What `is_valid_number` asks a national number to match one of.
+_NUMBER_TYPES = (
+    "premium_rate",
+    "toll_free",
+    "shared_cost",
+    "voip",
+    "personal_number",
+    "pager",
+    "uan",
+    "voicemail",
+    "fixed_line",
+    "mobile",
+)
 
+
+class _PhoneRegion:
+    """What the library's `parse` and `is_valid_number` need of a number
+    written without `+` in one region, read from its metadata: after an
+    optional country code and national prefix, the national number has a
+    length and a pattern of one of the country's number types, and the
+    national prefix is there when the number's format asks for it. It never
+    refuses a number the library would accept; the library decides the rest."""
+
+    def __init__(self, region: str) -> None:
+        import phonenumbers
+
+        def metadata(name: str) -> Any:
+            # Every region named here has metadata; the stubs allow for none.
+            return phonenumbers.PhoneMetadata.metadata_for_region(name)
+
+        own = metadata(region)
+        code = own.country_code
+        main = metadata(phonenumbers.region_code_for_country_code(code))
+        shapes: dict[int, list[str]] = {}
+        for each in map(metadata, phonenumbers.COUNTRY_CODE_TO_REGION_CODE[code]):
+            general = each.general_desc.possible_length
+            for kind in _NUMBER_TYPES:
+                desc = getattr(each, kind)
+                if desc is not None and desc.national_number_pattern:
+                    for length in set(desc.possible_length or general) & set(general):
+                        shapes.setdefault(length, []).append(
+                            desc.national_number_pattern
+                        )
+        self.shapes = {
+            length: "|".join(f"(?:{shape})" for shape in dict.fromkeys(each))
+            for length, each in shapes.items()
+        }
+        self.formats = "|".join(
+            f"(?P<f{index}>"
+            + (
+                f"(?={rule.leading_digits_pattern[-1]})"
+                if rule.leading_digits_pattern
+                else ""
+            )
+            + f"(?:{rule.pattern})\\Z)"
+            for index, rule in enumerate(main.number_format)
+        )
+        self.needs_prefix = [
+            bool(rule.national_prefix_formatting_rule)
+            and not rule.national_prefix_optional_when_formatting
+            and not _FIRST_GROUP_ONLY.fullmatch(rule.national_prefix_formatting_rule)
+            for rule in main.number_format
+        ]
+        self.code = str(code)
+        self.dialling = re.compile(own.international_prefix)
+        self.prefixes = [
+            re.compile(pattern)
+            for pattern in dict.fromkeys(
+                each.national_prefix_for_parsing for each in (own, main)
+            )
+            if pattern
+        ]
+        # A transform that writes digits of its own leaves nothing to rule out.
+        self.exact = all(
+            _BACK_REFERENCE.fullmatch(each.national_prefix_transform_rule)
+            for each in (own, main)
+            if each.national_prefix_transform_rule
+        )
+
+    def _stripped(self, digits: str, start: int) -> set[int]:
+        found = {start}
+        for prefix in self.prefixes:
+            match = prefix.match(digits, start)
+            if match:
+                found.add(match.end())
+                found.update(
+                    match.start(group) for group in range(1, prefix.groups + 1)
+                )
+        found.discard(-1)
+        return found
+
+    def _fits(self, digits: str, starts: set[int]) -> bool:
+        return any(
+            len(digits) - start in self.shapes
+            and _compiled(self.shapes[len(digits) - start]).fullmatch(digits, start)
+            for start in starts
+        )
+
+    def admits(self, digits: str, written: str) -> bool:
+        """`digits` as `reading` gives them; `written` is the text they were
+        read from."""
+        if digits.startswith("+"):
+            # No country followed the `+`, so the library drops it and reads
+            # the digits again: only an international prefix or this region's
+            # code can then give them one.
+            digits = digits[1:]
+            if not (self.dialling.match(digits) or digits.startswith(self.code)):
+                return False
+        if not self.exact or self.dialling.match(digits):
+            return True
+        starts = self._stripped(digits, 0)
+        if digits.startswith(self.code):
+            for start in self._stripped(digits, len(self.code)):
+                starts |= self._stripped(digits, start)
+            return self._fits(digits, starts)
+        if not self._fits(digits, starts):
+            return False
+        chosen = None if len(starts) > 1 else _compiled(self.formats).match(digits)
+        if chosen is None or not self.needs_prefix[int(chosen.lastgroup[1:])]:
+            return True
+        import phonenumbers
+
+        # The library looks for the prefix in every digit as written: those
+        # of an extension too, and not letters it read as digits.
+        written = phonenumbers.normalize_digits_only(written)
+        return len(self._stripped(written, 0)) > 1
+
+
+# The type unions are compiled on first use: North America's alone takes 8 ms.
+_compiled = functools.cache(re.compile)
+# A region's metadata is read when a candidate first needs it, as the library
+# reads it: North America's shared code alone is 25 regions' modules.
+_phone_region = functools.cache(_PhoneRegion)
+
+
+@functools.cache
+def _phone_walk() -> Any:
+    import phonenumbers
+    from phonenumbers import phonenumbermatcher as library
+    from phonenumbers import phonenumberutil as util
+
+    @functools.lru_cache(maxsize=4_096)
+    def reading(candidate: str) -> str:
+        """What decides whether a region's parser accepts `candidate`, with
+        the text itself: its digits, after a `+` when no known country follows
+        it; "" when no region can, and `_ANY_REGION` when every region reads it
+        alike."""
+        digits = _NOT_DIGIT.sub("", candidate)
+        if len(digits) < _FEWEST_PHONE_DIGITS and not _SPELLED.match(candidate):
+            return ""
+        number = candidate
+        if not _PLAIN_NUMBER.fullmatch(number):
+            # As `parse` reads it: without its extension, and its letters
+            # dropped, or read as digits when there are three.
+            _, number = util._maybe_strip_extension(
+                util._extract_possible_number(number)
+            )
+            if _SPELLED.match(number):
+                digits = util._normalize(number)
+            else:
+                digits = _NOT_DIGIT.sub("", number)
+            if len(digits) < _FEWEST_PHONE_DIGITS:
+                return ""
+        if not digits.isascii():
+            digits = phonenumbers.normalize_digits_only(digits)
+        if not _LEADING_PLUS.match(number):
+            return digits
+        if digits[0] != "0" and any(
+            int(digits[:size]) in phonenumbers.COUNTRY_CODE_TO_REGION_CODE
+            for size in (1, 2, 3)
+        ):
+            return _ANY_REGION
+        return "+" + digits
+
+    class Walk(library.PhoneNumberMatcher):
+        """The nine regions' matchers over one row, walked together.
+
+        A matcher goes on from the end of its match, or of the candidate when
+        it has none, so regions at the same place share the candidate. Its
+        parts come in the library's order, and a region's match is the first
+        part valid there; the search stops once every region has one."""
+
+        def __init__(self, row: str) -> None:
+            super().__init__(row, None, _PHONE_LENIENCY, max_tries=sys.maxsize)
+            self.parsers: dict[str | None, Any] = {}
+            self.verdicts: dict[tuple[str | None, int, str], bool] = {}
+            self.spans: set[tuple[int, int]] = set()
+            # A part of the row the library tries: its offset, its text and
+            # `reading` of it. The whole candidate is the first.
+            self.whole: tuple[int, str, str] = (0, "", "")
+            self.open: list[str] = []
+            self.waiting: list[str] | None = None
+            self.found: dict[str, tuple[int, str]] = {}
+
+        def read(self) -> set[tuple[int, int]]:
+            paths = {0: list(_PHONE_REGIONS)}
+            while paths:
+                index = min(paths)
+                names = paths.pop(index)
+                match = library._PATTERN.search(self.text, index)
+                if match is None:
+                    continue
+                start = match.start()
+                # As the library's `_find` does; its stub leaves the pattern out.
+                second = library._SECOND_NUMBER_START_PATTERN  # ty: ignore[unresolved-attribute]
+                candidate = self._trim_after_first_match(second, match.group())
+                self.open, self.waiting, self.found = names, None, {}
+                if _ENOUGH_DIGITS.match(candidate) or _SPELLED.match(candidate):
+                    self._extract_match(candidate, start)
+                for name in names:
+                    offset, part = self.found.get(name, (start, candidate))
+                    paths.setdefault(offset + len(part), []).append(name)
+            return self.spans
+
+        def _parse_and_verify(self, candidate, offset):
+            part = offset, candidate, reading(candidate)
+            first = self.waiting is None
+            if first:
+                self.whole = part
+            elif part[2] == "":
+                # No region reads a number in it, so nothing changes.
+                return None
+            waiting: list[str] = [] if first else self.waiting
+            for name in self.open:
+                if first and (offset, offset + len(candidate)) in self.spans:
+                    # Another region read the whole candidate as a number;
+                    # this one does or does not, and ends there either way,
+                    # unless a part of it is a number here.
+                    waiting.append(name)
+                elif self._valid(name, part):
+                    self._take(name, part)
+            for name in () if first else waiting:
+                if part != self.whole and self._valid(name, part):
+                    whole = self._valid(name, self.whole)
+                    self._take(name, self.whole if whole else part)
+            self.open = [
+                name
+                for name in self.open
+                if name not in self.found and name not in waiting
+            ]
+            self.waiting = [name for name in waiting if name not in self.found]
+            return None if self.open or self.waiting else self
+
+        def _take(self, name: str, part: tuple[int, str, str]) -> None:
+            self.found[name] = part[:2]
+            self.spans.add((part[0], part[0] + len(part[1])))
+
+        def _valid(self, name: str, part: tuple[int, str, str]) -> bool:
+            offset, text, how = part
+            if how == "" or (
+                how != _ANY_REGION and not _phone_region(name).admits(how, text)
+            ):
+                return False
+            region = None if how == _ANY_REGION else name
+            key = region, offset, text
+            if key not in self.verdicts:
+                if region not in self.parsers:
+                    self.parsers[region] = library.PhoneNumberMatcher(
+                        self.text, region, _PHONE_LENIENCY
+                    )
+                found = self.parsers[region]._parse_and_verify(text, offset)
+                self.verdicts[key] = found is not None
+            return self.verdicts[key]
+
+    return Walk
+
+
+def _phone_spans(text: str) -> set[tuple[int, int]]:
+    """Every span the library's matcher finds for any of `_PHONE_REGIONS`.
+
+    Nine matchers over a table of numbers cost 40 us a character, so a large
+    one reached the hook's deadline and passed through unmasked. The walk
+    reads each candidate once, asks a region's parser only where its metadata
+    allows a number, and once one region has read a whole candidate as a
+    number, asks the others only about its parts."""
+    if not _BARE_DIGITS.search(text):
+        return set()
+    walk = _phone_walk()
+    return {
+        (offset + start, offset + end)
+        for offset, row in _phone_rows(text)
+        if _BARE_DIGITS.search(row)
+        for start, end in walk(row).read()
+    }
+
+
+def _phone_rows(text: str) -> Iterator[tuple[int, str]]:
+    """The text in parts of `_PHONE_ROW` characters or more, each cut at a
+    `_PHONE_BREAK` that both keep: no candidate holds one, so every region's
+    walk reaches it at the same place."""
+    start = 0
+    while len(text) - start > 2 * _PHONE_ROW:
+        cut = _PHONE_BREAK.search(text, start + _PHONE_ROW)
+        if cut is None:
+            break
+        yield start, text[start : cut.end()]
+        start = cut.start()
+    yield start, text[start:]
+
+
+def _scan_phone(text: str) -> list[Match]:
     candidates = deduplicate(
         [
-            Match("PHONE_NUMBER", match.start, match.end, _PHONE_SCORE)
-            for region in _PHONE_REGIONS
-            for match in phonenumbers.PhoneNumberMatcher(
-                text, region, leniency=_PHONE_LENIENCY
-            )
+            Match("PHONE_NUMBER", start, end, _PHONE_SCORE)
+            for start, end in _phone_spans(text)
         ]
     )
     results: list[Match] = []
@@ -546,29 +874,28 @@ _DB_URI = re.compile(
     r"([^\s'\"<>]*)"
 )
 _NOT_A_CREDENTIAL = re.compile(r"[….*•:]+|(?:\$\{\w+\}|\{\w*\}|\$\w+|%\w+%|:)+")
-_QUERY_PARAMETER = re.compile(r"[?&;](?P<key>[^=&;#]*)=(?P<value>[^&;#]+)")
+# A key with no value is matched too, so the scan moves past it once: the `?`s
+# inside it start the same failed key, and retrying each was quadratic.
+_QUERY_PARAMETER = re.compile(r"[?&;](?P<key>[^=&;#]*)(?:=(?P<value>[^&;#]+))?")
 _AUTHORITY_END = re.compile(r"[/?#]")
+# Vendor tokens. The JWT alternative they had is read in `_vendor_tokens`.
+_VENDOR_TOKEN = re.compile(
+    r"(?:AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{20,}|"
+    r"sk_(?:live|test)_[A-Za-z0-9]{16,}|"
+    r"sk-(?:proj-)?[A-Za-z0-9_-]{16,}|"
+    r"SG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}|"
+    r"(?<![\w-])(?:xox[abposr]-[0-9A-Za-z-]{10,}|AIza[0-9A-Za-z_-]{35}|"
+    r"github_pat_[0-9A-Za-z_]{22,}|glpat-[0-9A-Za-z_-]{20,}|"
+    r"npm_[0-9A-Za-z]{36}|hf_[0-9A-Za-z]{30,})(?![\w-]))"
+)
+_JWT = re.compile(r"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+")
+_NOT_TOKEN = re.compile(r"[^A-Za-z0-9_-]")
 _SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str | None, float, bool], ...] = (
     (
         re.compile(
             r"-----BEGIN "
             r"(?P<key_type>(?:(?:RSA|EC|OPENSSH|ENCRYPTED) )?PRIVATE KEY)"
             r"-----[\s\S]*?(?:-----END (?P=key_type)-----|\Z)"
-        ),
-        None,
-        0.99,
-        False,
-    ),
-    (
-        re.compile(
-            r"(?:AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{20,}|"
-            r"sk_(?:live|test)_[A-Za-z0-9]{16,}|"
-            r"sk-(?:proj-)?[A-Za-z0-9_-]{16,}|"
-            r"SG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}|"
-            r"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+|"
-            r"(?<![\w-])(?:xox[abposr]-[0-9A-Za-z-]{10,}|AIza[0-9A-Za-z_-]{35}|"
-            r"github_pat_[0-9A-Za-z_]{22,}|glpat-[0-9A-Za-z_-]{20,}|"
-            r"npm_[0-9A-Za-z]{36}|hf_[0-9A-Za-z]{30,})(?![\w-]))"
         ),
         None,
         0.99,
@@ -680,6 +1007,7 @@ def _scan_secret(text: str) -> list[Match]:
                 end = _trim_trailing_prose(text, start, end)
             if start < end:
                 results.append(Match("SECRET", start, end, score))
+    results.extend(Match("SECRET", *span, 0.99) for span in _vendor_tokens(text))
     for match in _URL_USERINFO.finditer(text):
         if not _NOT_A_CREDENTIAL.fullmatch(match.group("userinfo")):
             results.append(Match("SECRET", *match.span("userinfo"), 0.99))
@@ -689,7 +1017,7 @@ def _scan_secret(text: str) -> list[Match]:
         if query < 0:
             continue
         for parameter in _QUERY_PARAMETER.finditer(text, query, end):
-            if _SECRET_NAME.search(parameter.group("key")):
+            if parameter["value"] and _SECRET_NAME.search(parameter["key"]):
                 results.append(Match("SECRET", *parameter.span("value"), 0.97))
     for match in _SPACED_ASSIGNMENT.finditer(text):
         group = "quoted" if match.group("quoted") is not None else "bare"
@@ -718,6 +1046,33 @@ def _scan_secret(text: str) -> list[Match]:
         if not _not_a_secret(value, new_key, quoted, ":" in separator, after):
             results.append(Match("SECRET", start, end, 0.97))
     return deduplicate(results)
+
+
+def _next_jwt(text: str, position: int) -> re.Match[str] | None:
+    """`_JWT.search`, which tried every `eyJ` in a run of token characters to
+    the run's end: quadratic on `eyJeyJ...`. Each of them reads on to the same
+    place, so when one fails the rest of its run does too."""
+    while (start := text.find("eyJ", position)) >= 0:
+        found = _JWT.match(text, start)
+        if found:
+            return found
+        run_end = _NOT_TOKEN.search(text, start)
+        position = run_end.start() if run_end else len(text)
+    return None
+
+
+def _vendor_tokens(text: str) -> Iterator[tuple[int, int]]:
+    """What `finditer` found when `_JWT` was one more alternative of
+    `_VENDOR_TOKEN`: the leftmost match of either, the search going on from its
+    end. No vendor token starts with the `e` of a JWT, so they never tie."""
+    token, jwt = _VENDOR_TOKEN.search(text), _next_jwt(text, 0)
+    while token or jwt:
+        first = min((each for each in (token, jwt) if each), key=re.Match.start)
+        yield first.span()
+        if token and token.start() < first.end():
+            token = _VENDOR_TOKEN.search(text, first.end())
+        if jwt and jwt.start() < first.end():
+            jwt = _next_jwt(text, first.end())
 
 
 def _scan_db_uri(text: str) -> list[Match]:
@@ -856,10 +1211,28 @@ def _scan_written_at(text: str) -> list[Match]:
     return results
 
 
+def _scan_addresses(text: str) -> list[Match]:
+    """What the ported pattern matched, found from each `@`: the address starts
+    at the first word boundary of the run before it, and not inside the one
+    before."""
+    results: list[Match] = []
+    end = 0
+    for run in _LOCAL_RUN.finditer(text):
+        at = run.end()
+        start = _LOCAL_START.search(text, max(run.start(), end), at)
+        domain = _DOMAIN.match(text, at + 1)
+        if start is None or text[at - 1] == "." or domain is None:
+            continue
+        end = domain.end()
+        if _validate_email(text[start.start() : end]):
+            results.append(Match("EMAIL_ADDRESS", start.start(), end, 1.0))
+    return results
+
+
 def _scan_email(text: str) -> list[Match]:
     if "@" not in text:
         return _scan_written_at(text)
-    found = _scan(text, "EMAIL_ADDRESS", _EMAIL_PATTERNS, validate=_validate_email)
+    found = _scan_addresses(text)
     if "://" not in text:
         return found + _scan_written_at(text)
     authority = {match.end("userinfo") for match in _URL_USERINFO.finditer(text)}

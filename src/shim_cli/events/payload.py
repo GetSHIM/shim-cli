@@ -11,8 +11,11 @@ from typing import Any, Literal
 # ponytail: the bound is size, not time. The per-call analysis deadline is the
 # backstop; a shared deadline across pieces is the upgrade if this ever bites.
 MAX_TEXT_CHARACTERS = 1_000_000
-MAX_DEPTH = 24
-MAX_LEAVES = 2_000
+# Below the interpreter's recursion limit with room to spare. The hook has no
+# leaf count: its 1 MB input bound already bounds the work, and a count below
+# that only turned the fields after it into fields nobody inspected. Anything
+# nested deeper than this is not inspected, so the hook withholds it.
+MAX_DEPTH = 64
 
 Path = tuple
 
@@ -28,21 +31,18 @@ class Traversal:
     partial: bool = False
     skipped: int = 0
     reasons: set[str] = field(default_factory=set)
-    max_leaves: int = MAX_LEAVES
+    max_leaves: int | None = None
     max_characters: int = MAX_TEXT_CHARACTERS
     max_depth: int = MAX_DEPTH
 
     def add(self, path: Path, text: str) -> None:
-        if self.partial and (
-            len(self.leaves) >= self.max_leaves
-            or self.characters + len(text) > self.max_characters
-        ):
+        if self.partial and self.characters + len(text) > self.max_characters:
             self.skipped += 1
             self.reasons.add("size-limit")
             return
         self.leaves.append((path, text))
         self.characters += len(text)
-        if len(self.leaves) > self.max_leaves:
+        if self.max_leaves is not None and len(self.leaves) > self.max_leaves:
             raise PayloadTooLarge("payload has too many text fields to scan safely")
         if self.characters > self.max_characters:
             raise PayloadTooLarge("payload text exceeds the safe analysis limit")
@@ -53,11 +53,11 @@ def walk(
     root: Path = (),
     *,
     partial: bool = False,
-    max_leaves: int = MAX_LEAVES,
+    max_leaves: int | None = None,
     max_characters: int = MAX_TEXT_CHARACTERS,
     max_depth: int = MAX_DEPTH,
 ) -> Traversal:
-    """The defaults bound a hook a user is waiting on; only the proxy raises them."""
+    """The defaults bound a hook a user is waiting on; only the proxy changes them."""
     found = Traversal(
         partial=partial,
         max_leaves=max_leaves,
@@ -120,7 +120,7 @@ def _replace(value: Any, path: Path, replacements: dict) -> Any:
     return value
 
 
-def _past_deadline(error: Exception) -> bool:
+def past_deadline(error: BaseException) -> bool:
     # The detector wraps its own timeout in a ValueError; the hook's is bare.
     return isinstance(error, TimeoutError) or isinstance(error.__cause__, TimeoutError)
 
@@ -141,7 +141,7 @@ def _shrink(masked: str, decision, transforms: tuple, shrink, evaluate) -> tuple
     try:
         again = evaluate(shrunk)
     except (ValueError, TimeoutError) as error:
-        if _past_deadline(error):
+        if past_deadline(error):
             raise
         return masked, (), decision
     if again.partial:
@@ -201,7 +201,7 @@ def inspect(
             decision = evaluate(text)
         except (ValueError, TimeoutError) as error:
             # Do not consume the hook deadline and continue.
-            if _past_deadline(error):
+            if past_deadline(error):
                 found.skipped += len(found.leaves) - index
                 found.reasons.add("deadline")
                 break
@@ -239,6 +239,8 @@ def inspect(
     status = "complete"
     if found.skipped:
         status = "partial" if inspected else "not-inspected"
+        # Part of it was never read, so no version of it may be handed on.
+        value, replacements = None, {}
     return Inspection(
         replace(value, replacements) if replacements else value,
         findings,

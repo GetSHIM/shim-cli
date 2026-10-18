@@ -5,19 +5,21 @@
   "capture_provenance": "Real payloads recorded from Claude Code 2.1.250 by scripts/probe/probe.py on 29 Aug 2026; see docs/probe-2026-08.md.",
   "directions": {
     "user-prompt": "The sentence a person typed. Report it; never rewrite it.",
-    "outbound": "Structured arguments leaving the machine. Mask in place.",
+    "outbound": "Arguments a tool sends on. Mask in place for a known network tool; refuse an MCP or unknown tool's call under enforce, never rewrite it.",
     "inbound": "A result flowing into the model's context. Mask in place.",
     "local-write": "A payload that lands on the user's disk. Never rewrite.",
-    "executable-text": "A free-form command string. Never rewrite; warn, or deny under enforce."
+    "executable-text": "A free-form command string. Never rewrite; warn, or deny under enforce.",
+    "local-tool": "The input of a tool that acts locally, or a person's answer to the agent. Report it; never rewrite or refuse it.",
+    "model-output": "The model's last message at Stop. Count it; it has already been shown."
   },
-  "output_rule": "expected_output holds the exact post-policy value. Above 2000 input characters it is replaced by expected_output_sha256 of the same value, so one 54 KB capture does not dominate the file. Cases whose direction forbids rewriting carry unchanged=true and an expected_output equal to the input.",
+  "output_rule": "Each case's fixture runs through the whole Claude Code hook with no settings file. direction and expected_action are what the hook records; both are null for an event no hook is installed for, which is answered with nothing. expected_output holds the exact value the model reads at that path, the payload with any replacement the hook sent; unchanged=true marks a value that reaches it as it was. Above 2000 input characters it is replaced by expected_output_sha256 of the same value, so one 54 KB capture does not dominate the file. rewritable says whether the hook masks the payload when it holds a finding. expected_redaction (or expected_redaction_sha256), where present, is the detector's exact redacted text of a value the hook leaves as it was.",
   "cases": [
     {
       "id": "claude-pretooluse-bash-connection-string",
       "client": "claude",
       "event": "PreToolUse",
       "direction": "executable-text",
-      "expected_action": "warn",
+      "expected_action": "report",
       "rewritable": false,
       "fixture": "claude/PreToolUse-Bash-bash-connection-string-1.json",
       "scanned": [
@@ -41,8 +43,8 @@
       "client": "claude",
       "event": "PreToolUse",
       "direction": "outbound",
-      "expected_action": "mask",
-      "rewritable": true,
+      "expected_action": "deny",
+      "rewritable": false,
       "fixture": "claude/PreToolUse-mcp__probe__probe_echo-mcp-echo-1.json",
       "scanned": [
         {
@@ -54,7 +56,9 @@
             "EMAIL"
           ],
           "input_chars": 17,
-          "expected_output": "<EMAIL_1>"
+          "expected_output": "alice@example.com",
+          "unchanged": true,
+          "expected_redaction": "<EMAIL_1>"
         }
       ],
       "tool": "mcp__probe__probe_echo"
@@ -64,7 +68,7 @@
       "client": "claude",
       "event": "PreToolUse",
       "direction": "local-write",
-      "expected_action": "warn",
+      "expected_action": "report",
       "rewritable": false,
       "fixture": "claude/PreToolUse-Write-write-1.json",
       "scanned": [
@@ -191,7 +195,7 @@
       "client": "claude",
       "event": "PostToolUse",
       "direction": "inbound",
-      "expected_action": "mask",
+      "expected_action": "allow",
       "rewritable": true,
       "fixture": "claude/PostToolUse-WebFetch-webfetch-1.json",
       "scanned": [
@@ -202,7 +206,8 @@
           ],
           "categories": [],
           "input_chars": 170,
-          "expected_output": "# Example\n\nThe page describes a domain designated for documentation purposes, stating that it is available \"for use in documentation examples without needing permission.\""
+          "expected_output": "# Example\n\nThe page describes a domain designated for documentation purposes, stating that it is available \"for use in documentation examples without needing permission.\"",
+          "unchanged": true
         }
       ],
       "tool": "WebFetch"
@@ -259,7 +264,7 @@
       "client": "claude",
       "event": "PostToolUse",
       "direction": "inbound",
-      "expected_action": "mask",
+      "expected_action": "allow",
       "rewritable": true,
       "fixture": "claude/PostToolUse-Grep-grep-1.json",
       "scanned": [
@@ -270,7 +275,8 @@
           ],
           "categories": [],
           "input_chars": 18,
-          "expected_output": "files_with_matches"
+          "expected_output": "files_with_matches",
+          "unchanged": true
         }
       ],
       "tool": "Grep"
@@ -280,8 +286,8 @@
       "client": "claude",
       "event": "PostToolUseFailure",
       "direction": "inbound",
-      "expected_action": "report",
-      "rewritable": true,
+      "expected_action": "allow",
+      "rewritable": false,
       "fixture": "claude/PostToolUseFailure-Bash-bash-connection-string-1.json",
       "scanned": [
         {
@@ -290,7 +296,8 @@
           ],
           "categories": [],
           "input_chars": 128,
-          "expected_output": "Exit code 2\npsql: error: could not translate host name \"db.example.com\" to address: nodename nor servname provided, or not known"
+          "expected_output": "Exit code 2\npsql: error: could not translate host name \"db.example.com\" to address: nodename nor servname provided, or not known",
+          "unchanged": true
         }
       ],
       "tool": "Bash"
@@ -299,8 +306,8 @@
       "id": "claude-posttoolusefailure-bash-command",
       "client": "claude",
       "event": "PostToolUseFailure",
-      "direction": "executable-text",
-      "expected_action": "warn",
+      "direction": "inbound",
+      "expected_action": "allow",
       "rewritable": false,
       "fixture": "claude/PostToolUseFailure-Bash-bash-connection-string-1.json",
       "scanned": [
@@ -323,9 +330,9 @@
       "id": "claude-posttoolbatch-read-line-numbered",
       "client": "claude",
       "event": "PostToolBatch",
-      "direction": "inbound",
-      "expected_action": "mask",
-      "rewritable": true,
+      "direction": null,
+      "expected_action": null,
+      "rewritable": false,
       "fixture": "claude/PostToolBatch-none-read-small-1.json",
       "scanned": [
         {
@@ -342,7 +349,9 @@
             "EMAIL"
           ],
           "input_chars": 220,
-          "expected_output": "1\tDATABASE_URL=postgresql://<DB_URI_1>@db.example.com/app\n2\tAWS_ACCESS_KEY_ID=<SECRET_1>\n3\tGITHUB_TOKEN=<SECRET_2>\n4\tpassword = <SECRET_3>\n5\tOWNER_EMAIL=<EMAIL_1>\n6\t"
+          "expected_output": "1\tDATABASE_URL=postgresql://alice:s3cr3tpw@db.example.com/app\n2\tAWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE\n3\tGITHUB_TOKEN=ghp_0123456789abcdefghijklmnopqrstuvwx\n4\tpassword = SuperSecret123!\n5\tOWNER_EMAIL=alice@example.com\n6\t",
+          "unchanged": true,
+          "expected_redaction": "1\tDATABASE_URL=postgresql://<DB_URI_1>@db.example.com/app\n2\tAWS_ACCESS_KEY_ID=<SECRET_1>\n3\tGITHUB_TOKEN=<SECRET_2>\n4\tpassword = <SECRET_3>\n5\tOWNER_EMAIL=<EMAIL_1>\n6\t"
         }
       ],
       "tool": "Read"
@@ -351,9 +360,9 @@
       "id": "claude-posttoolbatch-read-compose-db-uri",
       "client": "claude",
       "event": "PostToolBatch",
-      "direction": "inbound",
-      "expected_action": "mask",
-      "rewritable": true,
+      "direction": null,
+      "expected_action": null,
+      "rewritable": false,
       "fixture": "claude/PostToolBatch-none-batch-1.json",
       "scanned": [
         {
@@ -366,7 +375,9 @@
             "DB_URI"
           ],
           "input_chars": 190,
-          "expected_output": "1\tservices:\n2\t  api:\n3\t    image: example/api:1\n4\t    environment:\n5\t      DATABASE_URL: postgresql://<DB_URI_1>@db.example.com/app\n6\t      REDIS_URL: redis://cache.example.com:6379/0\n7\t"
+          "expected_output": "1\tservices:\n2\t  api:\n3\t    image: example/api:1\n4\t    environment:\n5\t      DATABASE_URL: postgresql://alice:s3cr3tpw@db.example.com/app\n6\t      REDIS_URL: redis://cache.example.com:6379/0\n7\t",
+          "unchanged": true,
+          "expected_redaction": "1\tservices:\n2\t  api:\n3\t    image: example/api:1\n4\t    environment:\n5\t      DATABASE_URL: postgresql://<DB_URI_1>@db.example.com/app\n6\t      REDIS_URL: redis://cache.example.com:6379/0\n7\t"
         }
       ],
       "tool": "Read"
@@ -375,9 +386,9 @@
       "id": "claude-posttoolbatch-read-large",
       "client": "claude",
       "event": "PostToolBatch",
-      "direction": "inbound",
-      "expected_action": "mask",
-      "rewritable": true,
+      "direction": null,
+      "expected_action": null,
+      "rewritable": false,
       "fixture": "claude/PostToolBatch-none-read-large-1.json",
       "scanned": [
         {
@@ -390,7 +401,9 @@
             "EMAIL"
           ],
           "input_chars": 57473,
-          "expected_output_sha256": "359e57aa363c556b757f53ff81e8adf1cc36eb3f2953beaccf6c82548597b687"
+          "expected_output_sha256": "be33d9453f8c2673a3b81af9b24b5598eddc2f9e679b04b6034d691779107eb5",
+          "unchanged": true,
+          "expected_redaction_sha256": "359e57aa363c556b757f53ff81e8adf1cc36eb3f2953beaccf6c82548597b687"
         }
       ],
       "tool": "Read"
@@ -399,8 +412,8 @@
       "id": "claude-posttoolbatch-bash-connection-string",
       "client": "claude",
       "event": "PostToolBatch",
-      "direction": "executable-text",
-      "expected_action": "warn",
+      "direction": null,
+      "expected_action": null,
       "rewritable": false,
       "fixture": "claude/PostToolBatch-none-bash-connection-string-1.json",
       "scanned": [
@@ -425,9 +438,9 @@
       "id": "claude-posttoolbatch-bash-stdout",
       "client": "claude",
       "event": "PostToolBatch",
-      "direction": "inbound",
-      "expected_action": "mask",
-      "rewritable": true,
+      "direction": null,
+      "expected_action": null,
+      "rewritable": false,
       "fixture": "claude/PostToolBatch-none-bash-multiline-1.json",
       "scanned": [
         {
@@ -444,7 +457,9 @@
             "EMAIL"
           ],
           "input_chars": 211,
-          "expected_output": "DATABASE_URL=postgresql://<DB_URI_1>@db.example.com/app\nAWS_ACCESS_KEY_ID=<SECRET_1>\nGITHUB_TOKEN=<SECRET_2>\npassword = <SECRET_3>\nOWNER_EMAIL=<EMAIL_1>\nend"
+          "expected_output": "DATABASE_URL=postgresql://alice:s3cr3tpw@db.example.com/app\nAWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE\nGITHUB_TOKEN=ghp_0123456789abcdefghijklmnopqrstuvwx\npassword = SuperSecret123!\nOWNER_EMAIL=alice@example.com\nend",
+          "unchanged": true,
+          "expected_redaction": "DATABASE_URL=postgresql://<DB_URI_1>@db.example.com/app\nAWS_ACCESS_KEY_ID=<SECRET_1>\nGITHUB_TOKEN=<SECRET_2>\npassword = <SECRET_3>\nOWNER_EMAIL=<EMAIL_1>\nend"
         }
       ],
       "tool": "Bash"
@@ -453,9 +468,9 @@
       "id": "claude-posttoolbatch-mcp-argument-and-result",
       "client": "claude",
       "event": "PostToolBatch",
-      "direction": "outbound",
-      "expected_action": "mask",
-      "rewritable": true,
+      "direction": null,
+      "expected_action": null,
+      "rewritable": false,
       "fixture": "claude/PostToolBatch-none-mcp-echo-2.json",
       "scanned": [
         {
@@ -469,7 +484,9 @@
             "EMAIL"
           ],
           "input_chars": 17,
-          "expected_output": "<EMAIL_1>"
+          "expected_output": "alice@example.com",
+          "unchanged": true,
+          "expected_redaction": "<EMAIL_1>"
         },
         {
           "path": [
@@ -483,7 +500,9 @@
             "EMAIL"
           ],
           "input_chars": 55,
-          "expected_output": "{\"customer_email\": \"<EMAIL_1>\", \"note\": \"ping\"}"
+          "expected_output": "{\"customer_email\": \"alice@example.com\", \"note\": \"ping\"}",
+          "unchanged": true,
+          "expected_redaction": "{\"customer_email\": \"<EMAIL_1>\", \"note\": \"ping\"}"
         }
       ],
       "tool": "mcp__probe__probe_echo"
@@ -492,8 +511,8 @@
       "id": "claude-posttoolbatch-write-content",
       "client": "claude",
       "event": "PostToolBatch",
-      "direction": "local-write",
-      "expected_action": "warn",
+      "direction": null,
+      "expected_action": null,
       "rewritable": false,
       "fixture": "claude/PostToolBatch-none-write-1.json",
       "scanned": [
@@ -519,7 +538,7 @@
       "client": "claude",
       "event": "UserPromptSubmit",
       "direction": "user-prompt",
-      "expected_action": "warn",
+      "expected_action": "report",
       "rewritable": false,
       "fixture": "claude/UserPromptSubmit-none-bash-connection-string-1.json",
       "scanned": [
@@ -541,7 +560,7 @@
       "client": "claude",
       "event": "UserPromptSubmit",
       "direction": "user-prompt",
-      "expected_action": "warn",
+      "expected_action": "report",
       "rewritable": false,
       "fixture": "claude/UserPromptSubmit-none-mcp-echo-1.json",
       "scanned": [
@@ -563,7 +582,7 @@
       "client": "claude",
       "event": "UserPromptSubmit",
       "direction": "user-prompt",
-      "expected_action": "warn",
+      "expected_action": "report",
       "rewritable": false,
       "fixture": "claude/UserPromptSubmit-none-write-1.json",
       "scanned": [
@@ -584,9 +603,9 @@
       "id": "claude-stop-last-assistant-message",
       "client": "claude",
       "event": "Stop",
-      "direction": "inbound",
-      "expected_action": "observe",
-      "rewritable": true,
+      "direction": "model-output",
+      "expected_action": "report",
+      "rewritable": false,
       "fixture": "claude/Stop-none-write-1.json",
       "scanned": [
         {
@@ -595,7 +614,8 @@
           ],
           "categories": [],
           "input_chars": 4,
-          "expected_output": "DONE"
+          "expected_output": "DONE",
+          "unchanged": true
         }
       ]
     }
