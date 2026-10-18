@@ -71,12 +71,28 @@ def _wait_for(
     deadline = time.monotonic() + seconds
     while line not in _lines(log):
         if time.monotonic() > deadline:
+            # TEMPORARY macOS CI diagnostics: process table and tracebacks.
+            table = subprocess.run(
+                ["ps", "-A", "-o", "pid,ppid,pgid,stat,etime,command"],
+                capture_output=True,
+                text=True,
+            ).stdout
+            group = [
+                row
+                for row in table.splitlines()
+                if row.split()[2:3] == [str(shim.pid)] or str(log.parent) in row
+            ]
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(shim.pid, signal.SIGABRT)
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                shim.wait(timeout=10)
             with contextlib.suppress(ProcessLookupError):
                 os.killpg(shim.pid, signal.SIGKILL)
             stdout, stderr = shim.communicate()
             pytest.fail(
                 f"{line!r} never logged: {_lines(log)}; shim watch exited "
-                f"{shim.returncode}\nstdout: {stdout!r}\nstderr: {stderr!r}"
+                f"{shim.returncode}\nps: {group}\nstdout: {stdout!r}\n"
+                f"stderr: {stderr.decode(errors='replace')}"
             )
         time.sleep(0.05)
 
@@ -87,11 +103,15 @@ def _watch(tmp_path: Path, program: Path) -> subprocess.Popen:
     }
     environment["HOME"] = str(tmp_path / "home")
     environment["TMPDIR"] = str(tmp_path)
+    environment["PYTHONFAULTHANDLER"] = "1"
     (tmp_path / "home").mkdir(exist_ok=True)
     return subprocess.Popen(
         [
             sys.executable,
             "-I",
+            "-u",
+            "-X",
+            "faulthandler",
             "-c",
             "from shim_cli.cli.app import main; main()",
             "watch",
