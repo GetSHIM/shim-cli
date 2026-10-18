@@ -390,8 +390,11 @@ def test_an_extension_costs_the_parser_nothing_more(
     1 MB of them took 20 to 40 s."""
     from phonenumbers import phonenumbermatcher
 
-    from shim_cli.guard.recognizers import _phone_spans
+    from shim_cli.guard.recognizers import _phone_spans, _phone_walk
 
+    # The walk remembers candidates it has read: start with none, so the
+    # parser is asked about every row of both lists.
+    _phone_walk.cache_clear()
     real = phonenumbermatcher.PhoneNumberMatcher._parse_and_verify
     asked: list[str] = []
 

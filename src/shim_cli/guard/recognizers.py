@@ -472,6 +472,9 @@ _PHONE_BREAK = re.compile(
     r"[\n\r!\"$%&'*<>?@\\^_`{|}b-df-hj-mp-ru-wyzB-DF-HJ-MP-RU-WYZ]"
 )
 _PHONE_ROW = 1_000
+# Candidates' outcomes remembered across rows and pieces: a list repeats its
+# numbers, and a candidate costs the walk 60 to 100 us.
+_PHONE_MEMO = 1 << 15
 # What `is_valid_number` asks a national number to match one of.
 _NUMBER_TYPES = (
     "premium_rate",
@@ -564,11 +567,11 @@ class _PhoneRegion:
         return found
 
     def _fits(self, digits: str, starts: set[int]) -> bool:
-        return any(
-            len(digits) - start in self.shapes
-            and _compiled(self.shapes[len(digits) - start]).fullmatch(digits, start)
-            for start in starts
-        )
+        for start in starts:
+            shape = self.shapes.get(len(digits) - start)
+            if shape is not None and _compiled(shape).fullmatch(digits, start):
+                return True
+        return False
 
     def admits(self, digits: str, written: str) -> bool:
         """`digits` as `reading` gives them; `written` is the text they were
@@ -592,12 +595,17 @@ class _PhoneRegion:
         chosen = None if len(starts) > 1 else _compiled(self.formats).match(digits)
         if chosen is None or not self.needs_prefix[int(chosen.lastgroup[1:])]:
             return True
-        import phonenumbers
-
         # The library looks for the prefix in every digit as written: those
         # of an extension too, and not letters it read as digits.
-        written = phonenumbers.normalize_digits_only(written)
-        return len(self._stripped(written, 0)) > 1
+        return len(self._stripped(_written_digits(written), 0)) > 1
+
+
+@functools.lru_cache(maxsize=64)
+def _written_digits(written: str) -> str:
+    """The same text is asked of each region that needs its prefix."""
+    import phonenumbers
+
+    return phonenumbers.normalize_digits_only(written)
 
 
 # The type unions are compiled on first use: North America's alone takes 8 ms.
@@ -646,6 +654,16 @@ def _phone_walk() -> Any:
             return _ANY_REGION
         return "+" + digits
 
+    @functools.lru_cache(maxsize=_PHONE_MEMO)
+    def admitted(candidate: str) -> bool:
+        """Whether any region's metadata admits `candidate` as a number."""
+        how = reading(candidate)
+        return how == _ANY_REGION or any(
+            _phone_region(name).admits(how, candidate) for name in _PHONE_REGIONS
+        )
+
+    outcomes: dict[tuple, tuple[tuple[str, int, int], ...]] = {}
+
     class Walk(library.PhoneNumberMatcher):
         """The nine regions' matchers over one row, walked together.
 
@@ -678,21 +696,54 @@ def _phone_walk() -> Any:
                 # As the library's `_find` does; its stub leaves the pattern out.
                 second = library._SECOND_NUMBER_START_PATTERN  # ty: ignore[unresolved-attribute]
                 candidate = self._trim_after_first_match(second, match.group())
-                self.open, self.waiting, self.found = names, None, {}
+                found = ()
                 if _ENOUGH_DIGITS.match(candidate) or _SPELLED.match(candidate):
-                    self._extract_match(candidate, start)
+                    found = self._outcome(candidate, start, names)
+                ends = {name: end for name, _, end in found}
                 for name in names:
-                    offset, part = self.found.get(name, (start, candidate))
-                    paths.setdefault(offset + len(part), []).append(name)
+                    paths.setdefault(start + ends.get(name, len(candidate)), []).append(
+                        name
+                    )
+                self.spans.update((start + each, start + end) for _, each, end in found)
             return self.spans
+
+        def _outcome(
+            self, candidate: str, start: int, names: list[str]
+        ) -> tuple[tuple[str, int, int], ...]:
+            """Each region's match in `candidate`, relative to `start`. It is
+            the same wherever the candidate recurs between the same characters
+            with the same regions: a part's verdict looks one character out,
+            the time-stamp check three."""
+            end = start + len(candidate)
+            key = (
+                candidate,
+                self.text[max(start - 1, 0) : start],
+                self.text[end : end + 3],
+                tuple(names),
+                (start, end) in self.spans,
+            )
+            known = outcomes.get(key)
+            if known is None:
+                self.open, self.waiting, self.found = names, None, {}
+                self._extract_match(candidate, start)
+                known = tuple(
+                    (name, offset - start, offset + len(part) - start)
+                    for name, (offset, part) in self.found.items()
+                )
+                if len(outcomes) >= _PHONE_MEMO:
+                    # ponytail: emptied when full, not least-recently-used.
+                    outcomes.clear()
+                outcomes[key] = known
+            return known
 
         def _parse_and_verify(self, candidate, offset):
             part = offset, candidate, reading(candidate)
             first = self.waiting is None
             if first:
                 self.whole = part
-            elif part[2] == "":
-                # No region reads a number in it, so nothing changes.
+            elif part[2] == "" or part == self.whole or not admitted(candidate):
+                # No region reads a number in it, or every open region has
+                # read it already, so nothing changes.
                 return None
             waiting: list[str] = [] if first else self.waiting
             for name in self.open:
@@ -773,15 +824,15 @@ def _phone_rows(text: str) -> Iterator[tuple[int, str]]:
 
 
 def _scan_phone(text: str) -> list[Match]:
-    candidates = deduplicate(
-        [
-            Match("PHONE_NUMBER", start, end, _PHONE_SCORE)
-            for start, end in _phone_spans(text)
-        ]
-    )
     results: list[Match] = []
-    for candidate in candidates:
-        start, end = candidate.start, candidate.end
+    # `deduplicate` of spans of one kind and score: in order of start, longest
+    # first, a span inside one kept before it is dropped.
+    furthest = -1
+    for start, end in sorted(_phone_spans(text), key=lambda span: (span[0], -span[1])):
+        if end <= furthest:
+            continue
+        furthest = end
+        candidate = Match("PHONE_NUMBER", start, end, _PHONE_SCORE)
         raw = text[start:end]
         number = raw.lstrip("([" + string.whitespace)
         if number != raw and not {")", "]"} & set(number):
