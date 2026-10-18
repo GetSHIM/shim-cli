@@ -399,6 +399,11 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 class _Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
     daemon_threads = True
 
+    def server_bind(self) -> None:
+        # HTTPServer's own also stores the reverse-DNS name of 127.0.0.1, read
+        # only by CGI handlers; a slow resolver held the client's start on it.
+        socketserver.TCPServer.server_bind(self)
+
     def handle_error(self, request: object, client_address: object) -> None:
         pass
 

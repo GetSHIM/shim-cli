@@ -279,6 +279,17 @@ def test_the_proxy_binds_to_loopback_only() -> None:
         running.stop()
 
 
+def test_the_proxy_starts_without_a_reverse_dns_lookup(monkeypatch) -> None:
+    # HTTPServer looks up the name of 127.0.0.1, which on GitHub's macOS
+    # runners held `shim watch` for more than 20 s before the client started.
+    def lookup(address: str):
+        raise AssertionError(f"reverse DNS lookup of {address}")
+
+    monkeypatch.setattr(socket, "gethostbyaddr", lookup)
+
+    proxy.start("api.anthropic.com").stop()
+
+
 def test_the_stream_is_relayed_in_pieces_rather_than_at_the_end(
     monkeypatch,
 ) -> None:
