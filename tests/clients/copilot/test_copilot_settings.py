@@ -63,17 +63,17 @@ def test_copilot_target_respects_home_and_copilot_home(
 def test_copilot_hook_file_install_and_revert_are_exact(tmp_path: Path) -> None:
     interpreter = tmp_path / "python"
     installed = add_hook(None, interpreter)
-    empty = remove_hook(installed, interpreter)
+    empty = remove_hook(installed)
 
     assert add_hook(installed, interpreter) is installed
     assert json.loads(empty) == {"version": 1, "hooks": {}}
-    assert remove_hook(empty, interpreter) is empty
+    assert remove_hook(empty) is empty
     assert add_hook(empty, interpreter) == installed
 
     with pytest.raises(ValueError, match="unexpected content"):
         add_hook(b"{}", interpreter)
     with pytest.raises(ValueError, match="unexpected content"):
-        remove_hook(b"not json", interpreter)
+        remove_hook(b"not json")
 
 
 def test_copilot_hook_command_requires_absolute_interpreter() -> None:

@@ -197,14 +197,14 @@ def test_shared_hook_document_preserves_unrelated_content_and_order(
     ]
     assert add_hook(installed, interpreter) == installed
     assert (
-        remove_hook(installed, interpreter)
+        remove_hook(installed)
         == (json.dumps(existing, ensure_ascii=False, indent=2) + "\n").encode()
     )
 
 
 def test_remove_only_hook_returns_empty_document(tmp_path: Path) -> None:
     interpreter = tmp_path / "python"
-    assert remove_hook(add_hook(None, interpreter), interpreter) == b"{}\n"
+    assert remove_hook(add_hook(None, interpreter)) == b"{}\n"
 
 
 @pytest.mark.parametrize(
@@ -233,14 +233,15 @@ def test_hook_transform_rejects_malformed_or_unsafe_documents(
         add_hook(content)
 
 
-def test_hook_transform_rejects_duplicate_shim_groups(tmp_path: Path) -> None:
+def test_hook_transform_collapses_duplicate_shim_groups(tmp_path: Path) -> None:
+    """Both copies run shim: install keeps one, revert removes both."""
     interpreter = tmp_path / "python"
     group = hook_group(interpreter)
     content = json.dumps({"hooks": {"UserPromptSubmit": [group, group]}}).encode()
-    with pytest.raises(ValueError, match="ambiguous"):
-        add_hook(content, interpreter)
-    with pytest.raises(ValueError, match="ambiguous"):
-        remove_hook(content, interpreter)
+    assert json.loads(add_hook(content, interpreter)) == {
+        "hooks": {"UserPromptSubmit": [group]}
+    }
+    assert remove_hook(content) == b"{}\n"
 
 
 def test_hook_matching_is_type_sensitive_and_ignores_key_order(tmp_path: Path) -> None:
@@ -263,17 +264,16 @@ def test_hook_matching_is_type_sensitive_and_ignores_key_order(tmp_path: Path) -
         == 1
     )
 
+    # 30.0 is not the 30 shim writes. The group still runs shim, so install
+    # rewrites it in place rather than adding a second one beside it, and
+    # revert removes it.
     modified = hook_group(interpreter)
     modified["hooks"][0]["timeout"] = 30.0
-    installed = json.loads(
-        add_hook(
-            json.dumps({"hooks": {"UserPromptSubmit": [modified]}}).encode(),
-            interpreter,
-        )
-    )
-    assert installed["hooks"]["UserPromptSubmit"] == [modified, exact]
-    reverted = json.loads(remove_hook(json.dumps(installed).encode(), interpreter))
-    assert reverted["hooks"]["UserPromptSubmit"] == [modified]
+    content = json.dumps({"hooks": {"UserPromptSubmit": [modified]}}).encode()
+    installed = add_hook(content, interpreter)
+    assert b"30.0" not in installed
+    assert json.loads(installed)["hooks"]["UserPromptSubmit"] == [exact]
+    assert remove_hook(content) == b"{}\n"
 
 
 def test_noop_transforms_preserve_original_bytes(tmp_path: Path) -> None:
@@ -286,8 +286,8 @@ def test_noop_transforms_preserve_original_bytes(tmp_path: Path) -> None:
     no_hooks = b'{ "version": 1 }\n'
 
     assert add_hook(installed, interpreter) is installed
-    assert remove_hook(unrelated, interpreter) is unrelated
-    assert remove_hook(no_hooks, interpreter) is no_hooks
+    assert remove_hook(unrelated) is unrelated
+    assert remove_hook(no_hooks) is no_hooks
 
 
 def test_hook_transform_caps_input_and_output() -> None:

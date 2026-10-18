@@ -115,3 +115,147 @@ def test_codex_is_refused_rather_than_proxied_past(monkeypatch, as_json):
     start.assert_not_called()
     child.assert_not_called()
     assert os.environ.get("OPENAI_BASE_URL") is None
+
+
+def _through_the_proxy(monkeypatch, request_text: str, response_text: str) -> None:
+    """Run `claude` as a child that sends one model request through the real
+    proxy; only the HTTPS leg to the provider is replaced by a canned stream."""
+    import http.client
+    import json
+    import urllib.parse
+
+    event = json.dumps(
+        {
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {"type": "text_delta", "text": response_text},
+        }
+    )
+    stream = f"event: content_block_delta\ndata: {event}\n\n".encode()
+
+    class Response:
+        status = 200
+
+        def __init__(self) -> None:
+            self.chunks = [stream, b""]
+
+        def getheaders(self):
+            return [("Content-Type", "text/event-stream")]
+
+        def getheader(self, name):
+            return "text/event-stream" if name == "Content-Type" else None
+
+        def read1(self, _size):
+            return self.chunks.pop(0)
+
+    class Provider:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def putrequest(self, *_args, **_kwargs):
+            pass
+
+        def putheader(self, *_args):
+            pass
+
+        def endheaders(self, body):
+            # The proxy captures the request while it relays it.
+            for _chunk in body:
+                pass
+
+        def getresponse(self):
+            return Response()
+
+        def close(self):
+            pass
+
+    def claude(_command, env):
+        body = json.dumps(
+            {
+                "model": "claude-sonnet-5",
+                "messages": [{"role": "user", "content": request_text}],
+            }
+        ).encode()
+        address = urllib.parse.urlsplit(env["ANTHROPIC_BASE_URL"])
+        connection = http.client.HTTPConnection(address.hostname, address.port)
+        connection.request(
+            "POST", "/v1/messages", body, {"Content-Type": "application/json"}
+        )
+        connection.getresponse().read()
+        connection.close()
+        return SimpleNamespace(wait=lambda: 0)
+
+    monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
+    monkeypatch.setattr("shutil.which", lambda _: "/synthetic/claude")
+    monkeypatch.setattr(http.client, "HTTPSConnection", Provider)
+    monkeypatch.setattr("subprocess.Popen", claude)
+
+
+def test_watch_measures_with_the_users_entity_settings_and_custom_patterns(
+    monkeypatch,
+):
+    """`shim scan`, the hook and `shim audit` read the settings file; watch
+    counted with the built-in defaults, so the same text gave another answer."""
+    import json
+
+    configured = CliRunner().invoke(
+        app,
+        [
+            "config",
+            "--custom-literal",
+            "PROJECT=ACME-PROJECT-ZEBRA",
+            "--disable",
+            "EMAIL",
+            "--enable",
+            "TR_LICENSE_PLATE",
+            "--yes",
+        ],
+    )
+    assert configured.exit_code == 0, configured.output
+    text = "host ACME-PROJECT-ZEBRA, mail jane.doe@example.com, plaka 34 ABC 123"
+    _through_the_proxy(monkeypatch, text, text)
+
+    result = CliRunner().invoke(app, ["watch", "--json", "--", "claude"])
+
+    assert result.exit_code == 0, result.output
+    document = json.loads(result.stdout)
+    assert document["entities"] == {"CUSTOM": 1, "TR_LICENSE_PLATE": 1}
+    assert document["response_entities"] == {
+        "text": {"CUSTOM": 1, "TR_LICENSE_PLATE": 1}
+    }
+    assert document["custom"] == {
+        "request": {"PROJECT": 1},
+        "response": {"PROJECT": 1},
+    }
+
+
+@pytest.mark.parametrize("as_json", [False, True])
+def test_watch_refuses_unreadable_settings_before_starting_anything(
+    monkeypatch, tmp_path, as_json
+):
+    import json
+
+    settings = tmp_path / "shim.toml"
+    settings.write_text("enabled_entities = [\n", encoding="utf-8")
+    monkeypatch.setenv("SHIM_CONFIG", str(settings))
+    monkeypatch.setenv("COLUMNS", "1000")
+    monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
+    monkeypatch.setattr("shutil.which", lambda _: "/synthetic/claude")
+    start = Mock()
+    child = Mock()
+    monkeypatch.setattr(proxy, "start", start)
+    monkeypatch.setattr("subprocess.Popen", child)
+
+    result = CliRunner().invoke(
+        app, ["watch", *(["--json"] if as_json else []), "--", "claude"]
+    )
+
+    start.assert_not_called()
+    child.assert_not_called()
+    assert result.exit_code == 2
+    if as_json:
+        document = json.loads(result.stdout)
+        assert document["code"] == "SETTINGS_INVALID"
+        assert document["error"].startswith(f"Settings at {settings} are invalid")
+    else:
+        assert f"Settings at {settings} are invalid" in result.output

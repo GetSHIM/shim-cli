@@ -21,14 +21,10 @@ ROOT = Path(__file__).resolve().parents[2]
 SCANNED = ("src/shim_cli", "scripts")
 OLD_NAMES = ("SHIM Guard", "shim Guard", "shim_guard")
 
-# The only references that may name the old package: the module spelling each
-# client matcher recognises so `install` replaces a 0.2.0 fragment in place.
+# The only reference that may name the old package: the module spelling the
+# shared hook matcher recognises so `install` replaces a 0.2.0 fragment in place.
 _LEGACY_MODULE = 'LEGACY_HOOK_MODULE = "shim_guard.hook"'
-ALLOWED = {
-    "src/shim_cli/clients/claude/settings.py": (_LEGACY_MODULE,),
-    "src/shim_cli/clients/codex/settings.py": (_LEGACY_MODULE,),
-    "src/shim_cli/clients/copilot/settings.py": (_LEGACY_MODULE,),
-}
+ALLOWED = {"src/shim_cli/clients/hook_settings.py": (_LEGACY_MODULE,)}
 
 
 def _tracked(prefix: str) -> list[str]:

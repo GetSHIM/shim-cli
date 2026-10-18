@@ -108,11 +108,22 @@ def test_oversized_text_is_refused_rather_than_partially_scanned() -> None:
         walk(document)
 
 
-def test_too_many_leaves_are_refused() -> None:
-    document = {str(index): "value" for index in range(payload.MAX_LEAVES + 2)}
+def test_a_caller_that_bounds_leaves_has_too_many_refused() -> None:
+    document = {str(index): "value" for index in range(12)}
 
     with pytest.raises(PayloadTooLarge, match="too many text fields"):
-        walk(document)
+        walk(document, max_leaves=10)
+
+
+def test_the_hook_walk_has_no_leaf_count_to_skip_past() -> None:
+    """Its input is already bounded at 1 MB; a count below that only turned
+    the fields after it into fields nobody inspected."""
+    document = ["value"] * 20_000
+
+    found = walk(document, partial=True)
+
+    assert len(found.leaves) == 20_000
+    assert (found.skipped, found.reasons) == (0, set())
 
 
 def test_a_real_read_result_is_masked_in_place() -> None:
@@ -138,7 +149,7 @@ def test_a_real_read_result_is_masked_in_place() -> None:
     assert len(findings) == 1
 
 
-def test_partial_inspection_stops_at_deadline_and_keeps_completed_redactions():
+def test_inspection_stops_at_the_deadline_and_hands_back_nothing_to_emit():
     seen = []
 
     def deadline(text):
@@ -149,7 +160,9 @@ def test_partial_inspection_stops_at_deadline_and_keeps_completed_redactions():
 
     result = payload.inspect(["alice@example.com", "timeout", "never scan"], deadline)
     assert seen == ["alice@example.com", "timeout"]
-    assert result.value == ["<EMAIL_1>", "timeout", "never scan"]
+    # "never scan" was never scanned, so no value carrying it may be emitted.
+    assert (result.value, result.changed) == (None, False)
+    assert [path for path, _ in result.findings] == [(0,)]
     assert result.status == "partial"
     assert result.skipped == 2
     assert result.reasons == ("deadline",)

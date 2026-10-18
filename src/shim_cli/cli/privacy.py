@@ -84,9 +84,15 @@ def redact(*, as_json: bool) -> None:
             "findings" if decision.blocked else "safe",
             counts=dict(decision.counts),
         )
+    elif sys.stdout.isatty():
+        # Escape what the terminal's codec cannot show instead of crashing on it.
+        shown = terminal_text(decision.redacted_text, sys.stdout, "\n\t")
+        encoding = sys.stdout.encoding
+        sys.stdout.write(shown.encode(encoding, "backslashreplace").decode(encoding))
     else:
-        # The input's own line ending, so `shim redact < f > g` changes only values.
-        sys.stdout.write(terminal_text(decision.redacted_text, sys.stdout, "\n\t"))
+        # UTF-8 like read_stdin, not the locale's codec, and the input's own line
+        # ending, so `shim redact < f > g` changes only values.
+        sys.stdout.buffer.write(decision.redacted_text.encode("utf-8"))
 
 
 def demo(*, client: str, as_json: bool) -> None:

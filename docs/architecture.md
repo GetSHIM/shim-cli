@@ -27,9 +27,11 @@ shim keys <file> -> .env/INI parser -> detector -> names, states, entity types
 prompt event -> client codec (+ Claude @ files read from disk) -> Policy -> detector
              -> allow/report | Copilot rewrite | native block + 0600 suggestion
 
-verified Claude tool event -> Claude adapter -> shared event pipeline
-                           -> Policy -> detector, diet, markers
-                           -> Claude response + session Record
+verified tool event -> Claude or VS Code adapter -> shared event pipeline
+                    -> direction (client, tool) -> self-protection
+                    -> Policy -> detector, diet, markers
+                    -> client response + session Record
+                       (not inspected in full: deny, withhold or report)
 
 shim watch -- <client> -> loopback proxy -> configured provider, bytes unchanged
                        -> in-memory sizes, counts, usage, and report
@@ -40,24 +42,34 @@ classification and the modes and actions built on it:
 
 - user prompts are reported by default; Codex and Claude can block under
   `enforce`, while Copilot can replace the model-facing prompt;
-- structured outbound arguments may be masked before leaving the machine;
+- the arguments of tools known to send them over the network (`WebFetch`,
+  `WebSearch`, VS Code `fetch_webpage`) may be masked before leaving the
+  machine; an MCP tool's or an unknown tool's arguments are never rewritten,
+  because their destination is unknown, and `enforce` refuses such a call
+  instead;
 - inbound results may be masked before entering model context;
 - local writes and executable command text are never rewritten, because doing
-  so would change a file or command the user intended.
+  so would change a file or command the user intended;
+- a local tool's input (`Read`, `Grep`, `Glob`, a sub-agent's task) is never
+  rewritten or refused, because it names something on this machine and
+  rewriting it only breaks the call.
+
+The tool names behind each direction are per client, in `policy.TOOLS`; a name
+not there is treated as an unknown tool.
 
 ## Ownership and dependencies
 
 | Owner | Responsibility |
 | --- | --- |
 | `guard/` | Entity catalog, normalization, recognizers, findings, spans, and typed redaction. |
-| `policy.py` | Directions, modes, actions, defaults, `Policy`, classification, and action selection. |
+| `policy.py` | Directions, modes, actions, defaults, `Policy`, per-client tool classification (`TOOLS`), action selection, and reading which `shim` subcommand a shell command runs. |
 | `config.py` | Config path, TOML parsing/rendering, validation at file ingress, and loading a `Policy`. |
 | `events/` | Deterministic tool-payload traversal, context diet (`html_text` turns a whole HTML page into text when `html` is on), injection markers, and the shared tool-event pipeline. |
 | `clients/<client>/` | Native prompt codecs, verified tool codecs, settings fragments, capabilities, and coexistence rules for that client. |
 | `session/` | `Record`, timestamps, best-effort `remember()`, spool, ledger, cleanup, and summaries. |
 | `settings_files/` | Guarded inspection, pure change planning, parent creation, revalidation, and atomic publication. |
 | `watch/` | Proxy forwarding, wire measurement, and watch report values. |
-| `hook.py` | Deadline, bounded stdin, envelope dispatch, visible failure behavior, temporary prompt-file lifecycle, and stdout. |
+| `hook.py` | Deadline, bounded stdin, envelope dispatch, fail-closed answers for events it cannot inspect (including fixed fallbacks for when the adapters cannot load), which files a write may not change, temporary prompt-file lifecycle, and stdout. |
 | `cli/` | Command composition and human or JSON presentation, including findings in the gateway's schema v1 (`cli/findings.py`). |
 
 The dependency direction is deliberately small:
@@ -95,20 +107,31 @@ Claude's verified event list and encoders live together in
 `clients/claude/tool_events.py`; its settings also install `Stop` for summaries
 and `SessionEnd` for cleanup. A masked `PostToolUse` result is emitted as
 `updatedToolOutput` with `additionalContext` beside it, the one-line summary of
-what was masked for the model; the user-facing `systemMessage` is kept for
-reports and incomplete inspection. `PostToolUseFailure` is report-only: the
+what was masked for the model, and a reshaped one says so there too; a masked
+`PreToolUse` input carries a `systemMessage` for the user, because the call
+runs with input the model did not write. An event the pipeline could not read
+in full is answered with the `uninspected` encoding: a call is denied, an MCP
+result is replaced whole, and a built-in tool's result keeps the shape of its
+output schema (keys, one item per list, zeroed numbers, the words under the
+schema's enum keys in `_KIND_KEYS`) with every other string replaced, since
+Claude Code 2.1.286 sends the original when a built-in replacement does not
+match that schema. `PostToolUseFailure` is report-only: the
 client ignores a replacement there, so the pipeline caps its action at a report,
 and its encoder tells the user and, through `additionalContext`, the model; the
 summary counts it as `unmasked`. Codex and Copilot have prompt codecs and
 settings only. A new tool adapter requires a live protocol probe, a synthetic fixture,
 and a verified mutation or report channel; it is not enabled by a flag.
 
-Codex installation leaves inline `config.toml` hooks untouched. Claude
-installation changes only shim's exact groups in user `settings.json`.
+Codex installation leaves inline `config.toml` hooks untouched. A hook is
+shim's when its handler is exactly what a release wrote, whatever the
+interpreter (`clients/hook_settings.py`); installation leaves one current shim
+group per event, replacing any other installation's, and revert removes every
+shim group, while a hook that merely wraps shim's command is the user's.
 Copilot owns its dedicated `hooks/shim.json` and retains an empty
 versioned document on revert. All clients preserve unrelated settings;
-malformed, ambiguous, unsafe, or concurrently changed files require manual
-action.
+malformed, unsafe, or concurrently changed files, and a group where shim's
+handler sits beside another hook, require manual action. Install and status run
+the exact registered command on a safe and a sensitive fixture first.
 
 ## Detector and event processing
 
@@ -118,14 +141,21 @@ live in `guard/recognizers.py`; the public suffix table is compiled into
 `guard/suffixes.py`. `phonenumbers` is the one third-party module allowed on
 the hook path. No detector input or lookup is sent over the network.
 
-`events/payload.inspect` walks a tool payload once. Masking and context diet
-may rewrite eligible leaves; injection markers only report and can never reach
-a replacement. Diet runs only on rewrite-capable inbound results outside
-`observe`, and never on a view of a local file whose exact bytes a later edit
-may need. Lossless JSON compaction is the default; trailing-whitespace removal
-is available only through explicit configuration because it can change
-Markdown hard breaks, and so is HTML-to-text, which drops markup; its parser,
-stdlib `html.parser`, is imported only when `html` is enabled.
+`events/payload.inspect` walks a tool payload once, to a depth of 64 and with
+no field count, the 1 MB input bound being what bounds the work. Masking and
+context diet may rewrite eligible leaves; injection markers only report and can
+never reach a replacement. If any leaf was not read, because of depth, size,
+the deadline or a failed analysis, the inspection hands on no rewritten value
+at all, and the event is denied, withheld or reported as not inspected. Before
+every detector call the tool path compares the clock with the deadline `main`
+set before it read stdin, rather than relying on the alarm the detector
+re-arms. Diet runs only on rewrite-capable inbound results of network and MCP
+tools outside `observe`: never on a local tool's result or a command's output,
+whose exact bytes a later edit may need. Lossless JSON compaction is the default;
+trailing-whitespace removal is available only through explicit configuration
+because it can change Markdown hard breaks, and so is HTML-to-text, which drops
+markup; its parser, stdlib `html.parser`, is imported only when `html` is
+enabled.
 
 Twelve entity types are built in; `TR_LICENSE_PLATE` is opt-in
 (`OPT_IN_TYPES` in `guard/entities.py`), so the default set leaves it out and
@@ -155,10 +185,12 @@ regenerated to make a test pass; intentional differences are recorded in
 
 ## Directions
 
-`policy.py` classifies every inspected thing into one of six directions:
-`user-prompt`, `outbound`, `inbound`, `local-write`, `executable-text` and
-`model-output`. The first five come from a hook event and a tool name and can
-be masked, blocked or reported according to their mode.
+`policy.py` classifies every inspected thing into one of seven directions:
+`user-prompt`, `outbound`, `inbound`, `local-write`, `executable-text`,
+`local-tool` and `model-output`. The first six come from a hook event, the
+client and a tool name. The first five can be masked, blocked or reported
+according to their mode; `local-tool` can only be reported, so `decide`
+returns `report` for it under both `warn` and `enforce`.
 
 `model-output` is different, and deliberately so. It is the final assistant
 text of a turn, handed to the hook by Claude Code at `Stop`; the client has
@@ -170,6 +202,18 @@ Because acting is impossible, observing has to mean counting: `decide` returns
 `report` where every other direction returns `allow`, so the count reaches the
 summary. The text itself is never stored, and only the last text block of the
 turn is visible (see [Compatibility](compatibility.md)).
+
+## Self-protection
+
+Before a tool call is inspected, `events/pipeline.py` refuses, in every mode, a
+shell command that runs `shim` with `config`, `revert` or `uninstall`
+(`policy.shim_control` reads the command's quoting, separators, subshells and
+here-documents to find the program each simple command runs) and a write tool
+whose path `hook._protected` resolves to shim's settings, a client settings
+file that holds shim's hooks, or a file in the plugin folder running the hook.
+The refusal names only the file or the subcommand, and the record notes
+`self-protection`. The routes it does not see, the shell writing a file among
+them, are listed in [Privacy](privacy.md#an-agent-turning-shim-off).
 
 ## Session records
 
@@ -208,16 +252,24 @@ system, and messages is inferred from byte share and marked approximate.
 Detection walks the request with `events/payload.py`, the same bounded traversal
 the hook uses, so every text leaf is offered to the detector: message content in
 either form, tool results, tool call arguments, the system prompt and the tool
-definitions. Base64 attachment data and thinking signatures are skipped, and a
-request past a limit is reported as unmeasured rather than partly counted.
+definitions. Base64 attachment data and a `thinking` block's `signature` are skipped (a
+field named `signature` anywhere else is scanned), and a request past a limit,
+or with a text leaf the detector refused or analysed only in part, is reported
+as unmeasured rather than partly counted. A request still being measured when
+the report is written says so (`measurement unfinished`). The
+detector runs with the settings file's entity types and custom patterns, loaded
+once before the proxy starts, as `scan` and `audit` do; an unreadable file
+refuses to start.
 
 The proxy passes its own limits to that traversal. The hook's defaults bound a
 user waiting on a synchronous subprocess; measurement runs after the response
-has been relayed, on a body already capped at 8 MB. One measured Claude Code
-request held 4,402 text leaves, 256,517 characters and nested 35 levels deep
-inside an MCP tool's recursive JSON schema, against hook defaults of 2,000,
-200,000 and 24 — so the hook's limits would report almost every real request as
-unmeasured.
+has been relayed, on a body already capped at 8 MB: 50,000 leaves, 8,000,000
+characters and 200 levels. One measured Claude Code request held 4,402 text
+leaves, 256,517 characters and nested 35 levels deep inside an MCP tool's
+recursive JSON schema, against the hook's limits then of 2,000 leaves, 200,000
+characters and 24 levels, which would have reported almost every real request
+as unmeasured. The hook now has no leaf count, 1,000,000 characters and 64
+levels.
 
 Findings are held per section, and the `tools` and `system` results are memoised
 per session by content hash, sixteen entries, first in first out.

@@ -6,6 +6,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import threading
 import time
 
 import typer
@@ -15,6 +16,7 @@ from shim_cli.cli.output import emit, emit_error, emit_json, terminal_text
 # Copilot proxying requires BYOK.
 BASE_URL_VARIABLES = {"claude": "ANTHROPIC_BASE_URL"}
 UPSTREAMS = {"claude": "api.anthropic.com"}
+GRACE_SECONDS = 10
 
 # Measured on Codex 0.151.0, 8 September 2026: the base URL comes from Codex's
 # own configuration and `OPENAI_BASE_URL` reaches nothing, so starting a proxy
@@ -28,6 +30,46 @@ REFUSED = {
         "measured as empty. The Codex prompt hook is unaffected."
     )
 }
+
+
+def _supervise(process: subprocess.Popen) -> int:
+    """Wait for the client while passing signals on. The proxy outlives the
+    client: until it exits, another local process could take the port and
+    receive its credentials. Each further request escalates: the signal, then
+    terminate, then kill; the first also arms a kill after GRACE_SECONDS."""
+    requests = 0
+    killer: threading.Timer | None = None
+
+    def escalate(number: int) -> None:
+        nonlocal requests, killer
+        requests += 1
+        if requests == 1:
+            # At a terminal the whole foreground group already got Ctrl-C.
+            if number != signal.SIGINT or os.getpgid(process.pid) != os.getpgrp():
+                process.send_signal(number)
+            killer = threading.Timer(GRACE_SECONDS, process.kill)
+            killer.daemon = True
+            killer.start()
+        elif requests == 2:
+            process.terminate()
+        else:
+            process.kill()
+
+    previous = {
+        number: signal.signal(number, lambda n, _frame: escalate(n))
+        for number in (signal.SIGTERM, signal.SIGHUP)
+    }
+    try:
+        while True:
+            try:
+                return process.wait()
+            except KeyboardInterrupt:
+                escalate(signal.SIGINT)
+    finally:
+        if killer is not None:
+            killer.cancel()
+        for number, handler in previous.items():
+            signal.signal(number, handler)
 
 
 def watch(*, command: tuple, as_json: bool) -> None:
@@ -57,10 +99,12 @@ def watch(*, command: tuple, as_json: bool) -> None:
         emit_error(
             "watch",
             "BASE_URL_ALREADY_SET",
-            f"{variable} is already configured; custom upstreams are unsupported. "
-            f"Run shim watch with {variable} unset, or use the hook "
-            f"(shim install {client}), which does not need the proxy.",
-            f"Unset {variable} for this command.",
+            f"{variable} is already configured, so {client} sends its requests and "
+            f"its credential to that endpoint. The proxy only reaches "
+            f"{UPSTREAMS[client]}, which would receive the other endpoint's "
+            f"credential instead. Use the hook (shim install {client}), which "
+            f"does not need the proxy.",
+            f"shim install {client}",
             as_json=as_json,
         )
     if shutil.which(command[0]) is None and not os.path.exists(command[0]):
@@ -72,11 +116,29 @@ def watch(*, command: tuple, as_json: bool) -> None:
             as_json=as_json,
         )
 
+    from shim_cli.cli.configuration import settings_check
+    from shim_cli.config import load_policy
     from shim_cli.guard import evaluate
     from shim_cli.watch import proxy, report
 
     try:
-        running = proxy.start(UPSTREAMS[client], evaluate)
+        policy = load_policy()
+    except ValueError as error:
+        problem = settings_check(error)
+        assert problem.code is not None
+        emit_error(
+            "watch",
+            problem.code,
+            problem.detail.rstrip("."),
+            problem.fix,
+            as_json=as_json,
+        )
+
+    try:
+        running = proxy.start(
+            UPSTREAMS[client],
+            lambda text: evaluate(text, policy.entities, policy.custom),
+        )
     except OSError as error:
         emit_error(
             "watch",
@@ -95,11 +157,7 @@ def watch(*, command: tuple, as_json: bool) -> None:
     began = datetime.datetime.now(datetime.timezone.utc)
     try:
         process = subprocess.Popen(command, env=environment)
-        try:
-            code = process.wait()
-        except KeyboardInterrupt:
-            process.send_signal(signal.SIGINT)
-            code = process.wait()
+        code = _supervise(process)
     except OSError as error:
         emit_error(
             "watch",
@@ -112,6 +170,15 @@ def watch(*, command: tuple, as_json: bool) -> None:
         running.stop()
 
     elapsed = time.monotonic() - started
+    signalled = ""
+    if code < 0:
+        try:
+            signalled = signal.Signals(-code).name
+        except ValueError:
+            signalled = f"signal {-code}"
+        code = 128 - code
+        if not as_json:
+            emit("WARN", f"{client} was ended by {signalled}.", error=True)
     if as_json:
         from shim_cli.cli.findings import from_watch
 
@@ -119,8 +186,9 @@ def watch(*, command: tuple, as_json: bool) -> None:
         ended = datetime.datetime.now(datetime.timezone.utc)
         emit_json(
             "watch",
-            "ok",
+            "signalled" if signalled else "ok",
             exit_code=code,
+            **({"signal": signalled} if signalled else {}),
             findings=from_watch(document, began, ended),
             **document,
         )

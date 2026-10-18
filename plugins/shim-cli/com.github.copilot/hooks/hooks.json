@@ -3,14 +3,14 @@
     "UserPromptSubmit": [
       {
         "type": "command",
-        "command": "sh -c '[ -n \"${COPILOT_CLI:-}\" ] && exit 0; exec \"${PLUGIN_ROOT}/hooks/run-shim\" vscode \"${PLUGIN_ROOT}\"'",
+        "command": "sh -c '[ -n \"${COPILOT_CLI:-}\" ] && exit 0; exec \"${PLUGIN_ROOT}/hooks/run-shim\" vscode \"${PLUGIN_ROOT}\" prompt'",
         "timeout": 30
       }
     ],
     "PreToolUse": [
       {
         "type": "command",
-        "command": "sh -c '[ -n \"${COPILOT_CLI:-}\" ] && exit 0; exec \"${PLUGIN_ROOT}/hooks/run-shim\" vscode \"${PLUGIN_ROOT}\"'",
+        "command": "sh -c '[ -n \"${COPILOT_CLI:-}\" ] && exit 0; exec \"${PLUGIN_ROOT}/hooks/run-shim\" vscode \"${PLUGIN_ROOT}\" call'",
         "timeout": 30
       }
     ],

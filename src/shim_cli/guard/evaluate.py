@@ -7,7 +7,6 @@ from .entities import DEFAULT_ENTITIES
 from .models import Finding, GuardDecision
 from .normalize import MAX_SOURCE_CHARACTERS, InputTooLarge
 
-_SMALLEST_PIECE = MAX_SOURCE_CHARACTERS // 4
 _OVERLAP = 4_096
 
 
@@ -38,31 +37,34 @@ def _pieces(text: str, size: int = MAX_SOURCE_CHARACTERS) -> Iterator[tuple[int,
 
 
 def _findings_in_pieces(
-    text: str, enabled_entities: Iterable[str], custom: tuple
+    text: str,
+    enabled_entities: Iterable[str],
+    custom: tuple,
+    size: int = MAX_SOURCE_CHARACTERS,
 ) -> tuple[tuple[Finding, ...], bool, int]:
     """Findings over the whole text, in source order, and whether a piece failed.
 
     The detector refuses more than `MAX_SOURCE_CHARACTERS` at once, and the
     caller used to pass the whole leaf and get nothing back: a 150 KB `Read`
     result reached the model with every secret in it, under a line saying
-    inspection was incomplete.
+    inspection was incomplete. `size` is the first cut: the limit, or as much
+    as fitted when the whole text was refused.
     """
     entities = tuple(enabled_entities)
     found: list[Finding] = []
     partial = False
     bare_numbers = 0
-    pending = list(_pieces(text))[::-1]
+    pending = list(_pieces(text, size))[::-1]
     while pending:
         offset, piece = pending.pop()
         try:
             findings, bare = analyze_counting(piece, entities, custom)
-        except InputTooLarge:
-            if len(piece) <= _SMALLEST_PIECE:
-                partial = True
-                continue
-            halves = _pieces(piece, (len(piece) + 1) // 2)
+        except InputTooLarge as error:
+            # It grew past the limit when normalised, as U+FDFA does eighteen
+            # times over: cut it where it stopped fitting, so no work repeats.
+            parts = _pieces(piece, error.fits)
             pending.extend(
-                (offset + start, part) for start, part in reversed(list(halves))
+                (offset + start, part) for start, part in reversed(list(parts))
             )
             continue
         except ValueError as error:
@@ -98,11 +100,9 @@ def evaluate(
     else:
         try:
             findings, bare_numbers = analyze_counting(text, entities, custom)
-        except InputTooLarge:
-            if len(text) <= _SMALLEST_PIECE:
-                raise
+        except InputTooLarge as error:
             findings, partial, bare_numbers = _findings_in_pieces(
-                text, entities, custom
+                text, entities, custom, error.fits
             )
     if not findings:
         return GuardDecision((), text, partial, bare_numbers)

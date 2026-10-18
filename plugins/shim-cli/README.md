@@ -34,26 +34,45 @@ duplicate hook registration because the launcher simply prefers the package.
 ## What runs
 
 `hooks/run-shim <client> [plugin-root]` resolves in this order and stops at
-the first that works:
+the first that works. An optional third argument names the event: the prompt
+entries pass `prompt` and the `PreToolUse` entries pass `call`, and
+`run-shim claude prompt` takes the root from `CLAUDE_PLUGIN_ROOT`.
 
 1. `shim-hook` on `PATH` — the package install. Preferred when present: it is
    the newest build and starts faster, because a zipapp has no bytecode cache
-   and reparses its modules on every event.
-2. `<plugin-root>/bin/shim.pyz` — the bundled archive. The
-   root is the second argument when one is given, else `CLAUDE_PLUGIN_ROOT`.
-   Claude Code sets `CLAUDE_PLUGIN_ROOT`. Codex sets both that and its own
-   `PLUGIN_ROOT` (measured on 0.151.0), and `codex.json` passes
-   `${PLUGIN_ROOT}` as the argument, as the Codex plugin guide documents.
-3. Nothing runnable — the prompt is **allowed** and one line is written to
-   stderr explaining why it was not inspected.
+   and reparses its modules on every event. It runs as `<python> -E -B
+   shim-hook <client>`, with the Python its first line names, so no `PYTHON*`
+   variable reaches it (`PYTHONPATH=.` cannot put a project's `token.py` ahead
+   of the standard library). If the first line names no Python, or that Python
+   is gone or cannot run shim, as after a tool environment's base Python is
+   upgraded away, the launcher moves on to the archive.
+2. `<plugin-root>/bin/shim.pyz` — the bundled archive, run as `python -I -B
+   shim.pyz <client>`. The root is the second argument when one is given, else
+   `CLAUDE_PLUGIN_ROOT`. Claude Code sets `CLAUDE_PLUGIN_ROOT`. Codex sets both
+   that and its own `PLUGIN_ROOT` (measured on 0.151.0), and `codex.json`
+   passes `${PLUGIN_ROOT}` as the argument, as the Codex plugin guide
+   documents. Interpreters are tried newest first, `python3.14` down to
+   `python3.9`, then `python3` and `python`; one that cannot start, such as a
+   pyenv shim whose version is missing, the macOS `xcode-select` stub or a
+   Python 2, is skipped for the next, and its error stays on stderr. Python
+   older than 3.9 withholds a prompt, refuses a tool call and reports any other
+   event.
+3. Nothing runnable — the prompt is **withheld**, with the same answer the hook
+   gives when it cannot inspect (Claude Code: `shim could not inspect this
+   prompt, so it was withheld.`), and one line on stderr: `shim: no python3
+   found on PATH; the prompt was withheld.`, `shim: no python3 on PATH could
+   run the bundled archive; ...` or `shim: no hook available. ...`. A tool call
+   is refused with `shim: could not inspect this tool call, so it was not
+   allowed.`, and any other event gets `shim: <reason>; this event was not
+   inspected.` This holds in every mode, because without Python the settings
+   cannot be read.
 
 On Windows (Git Bash, MSYS, Cygwin) it does none of this: it writes
 `shim: shim-cli does not support Windows yet; nothing was inspected.` to stderr
 and allows the prompt.
 
-Case 3 never blocks. A guard that cannot run is a guard that is off, not a
-reason to refuse someone's prompt. The same holds for a tool event: an empty
-stdout leaves the tool call and its result exactly as the client produced them.
+A disabled, crashed or timed-out hook can still let a prompt through, as the
+client decides; a missing, broken or too-old Python no longer does.
 
 `shim doctor <client>` prints a coverage table of what shim sees and can change
 at each event, reports which of the three launchers is live, warns when the
@@ -84,3 +103,10 @@ already says 3.10 or newer, `pipx install shim` is enough.
 `bin/shim.pyz` is built by `scripts/build_zipapp.py` and committed on `main` and
 on every tag. A fork or partial copy without it falls back to `PATH` or to
 case 3.
+
+An agent cannot edit this folder while it runs the hook: shim refuses an
+agent's write to any file in the plugin folder running the hook, and to the
+settings that hold or switch on shim's hooks, in every mode. If you develop
+shim-cli and point `--plugin-dir` or `chat.pluginLocations` at your working
+checkout, agent edits inside `plugins/shim-cli` are refused; point the plugin
+at a separate clone.

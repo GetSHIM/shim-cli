@@ -6,6 +6,10 @@ from dataclasses import dataclass
 
 MAX_SOURCE_CHARACTERS = 100_000
 MAX_NORMALIZED_CHARACTERS = 200_000
+# NFC puts a run of combining marks in order by insertion sort, in one call
+# the hook's deadline cannot interrupt: 100,000 marks took 6 s. A run is cut
+# after 30 marks, as Unicode's stream-safe text format (UAX #15) does.
+_MOST_MARKS = 30
 
 _INVISIBLE = re.compile(r"[\u00ad\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]")
 _PERCENT_RUN = re.compile(r"(?:%[0-9A-Fa-f]{2})+")
@@ -21,11 +25,12 @@ class NormalizedText:
 
 
 class InputTooLarge(ValueError):
-    pass
+    """`fits` is how many source characters from the start fit the limits:
+    always at least one, and fewer than the text has."""
 
-
-def _too_large() -> InputTooLarge:
-    return InputTooLarge("Guard input exceeds the safe analysis limit.")
+    def __init__(self, fits: int) -> None:
+        super().__init__("Guard input exceeds the safe analysis limit.")
+        self.fits = fits
 
 
 def _decode_percent(text: str) -> tuple[str, list[_SourceSpan]]:
@@ -70,40 +75,41 @@ def _normalization_continues(previous: str, current: str) -> bool:
 def _normalize_unicode(
     text: str, spans: list[_SourceSpan]
 ) -> tuple[str, tuple[_SourceSpan, ...]]:
-    characters: list[str] = []
-    decomposed_spans: list[_SourceSpan] = []
-    origins: list[int] = []
     if len(text) != len(spans):
         raise ValueError("Guard normalization failed safely.")
+    # One entry per source character, not per character it decomposes into:
+    # U+FDFA writes eighteen.
+    decomposed: list[str] = []
+    # Where each run of characters that normalize together starts.
+    cuts: list[int] = []
+    size = marks = 0
     # No `strict=`: the zipapp runs on the 3.9 that ships with macOS, where
     # the keyword is a TypeError. The length check above is the same guard.
-    for origin, (character, span) in enumerate(zip(text, spans)):  # noqa: B905
-        decomposed = unicodedata.normalize("NFKD", character)
-        if len(characters) + len(decomposed) > MAX_NORMALIZED_CHARACTERS:
-            raise _too_large()
-        characters.extend(decomposed)
-        decomposed_spans.extend([span] * len(decomposed))
-        origins.extend([origin] * len(decomposed))
+    for character, span in zip(text, spans):  # noqa: B905
+        following = unicodedata.normalize("NFKD", character)
+        size += len(following)
+        if size > MAX_NORMALIZED_CHARACTERS:
+            raise InputTooLarge(span[0])
+        # A decomposition that starts with a mark is all marks.
+        added = len(following) if unicodedata.combining(following[0]) else 0
+        if (
+            not decomposed
+            or marks + added > _MOST_MARKS
+            or not _normalization_continues(decomposed[-1][-1], following[0])
+        ):
+            cuts.append(len(decomposed))
+            marks = 0
+        marks = marks + added if added else 0
+        decomposed.append(following)
+    cuts.append(len(decomposed))
 
     output: list[str] = []
     normalized_spans: list[_SourceSpan] = []
-    start = 0
-    for index in range(1, len(characters) + 1):
-        if index < len(characters) and (
-            origins[index] == origins[index - 1]
-            or _normalization_continues(characters[index - 1], characters[index])
-        ):
-            continue
-        normalized = unicodedata.normalize("NFC", "".join(characters[start:index]))
-        affected = decomposed_spans[start:index]
-        if not affected:
-            raise ValueError("Guard normalization failed safely.")
-        if len(output) + len(normalized) > MAX_NORMALIZED_CHARACTERS:
-            raise _too_large()
-        source_span = (affected[0][0], affected[-1][1])
-        output.extend(normalized)
+    for start, end in zip(cuts, cuts[1:]):  # noqa: B905
+        normalized = unicodedata.normalize("NFC", "".join(decomposed[start:end]))
+        source_span = (spans[start][0], spans[end - 1][1])
+        output.append(normalized)
         normalized_spans.extend([source_span] * len(normalized))
-        start = index
     return "".join(output), tuple(normalized_spans)
 
 
@@ -111,7 +117,7 @@ def normalize(text: str) -> NormalizedText:
     if not isinstance(text, str):
         raise ValueError("Guard input must be text.")
     if len(text) > MAX_SOURCE_CHARACTERS:
-        raise _too_large()
+        raise InputTooLarge(MAX_SOURCE_CHARACTERS)
     if text.isascii() and "%" not in text:
         return NormalizedText(
             text,

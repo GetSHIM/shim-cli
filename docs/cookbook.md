@@ -411,7 +411,7 @@ the plugin is not running.
 
 | Client | Your prompt | Tool input and results |
 | --- | --- | --- |
-| Claude Code | Reported; withheld under `enforce` | Masked before the model reads them |
+| Claude Code | Reported; withheld under `enforce` | Results masked before the model reads them; a web tool's input masked; an MCP call carrying a finding refused; a local tool's input reported |
 | Codex CLI | Reported; blocked under `enforce` | Not installed |
 | GitHub Copilot CLI | Replaced with the redacted text | Not installed |
 | VS Code | Reported; stopped before sending under `enforce` | A call is reported and denied under `enforce`; a **result is only reported** |
@@ -427,22 +427,35 @@ reported. Only values in the path text itself are caught, before the read.
 Terminal output is inspected in full.
 
 Because refusing is the only enforcement available there, tool events report by
-default. Ask for the refusal when you want it:
+default. Ask for the refusal when you want it, for each kind of call:
 
 ```toml
 [mode]
-outbound = "enforce"
+executable-text = "enforce"   # terminal commands and tasks
+local-write = "enforce"       # file edits
+outbound = "enforce"          # fetch_webpage, MCP tools, tools shim does not know
 ```
 
-`outbound` is a tool call before it runs, the one place VS Code lets shim
-refuse. `inbound` is a result, which VS Code lets shim report but not change,
-so `inbound = "enforce"`, already the default, refuses nothing there.
+A tool call before it runs is the one place VS Code lets shim refuse. A local
+tool such as `read_file` is never refused, only reported, and in 1.2.1
+`outbound` covered terminal commands, which now need `executable-text`.
+`inbound` is a result, which VS Code lets shim report but not change, so
+`inbound = "enforce"`, already the default, refuses nothing there.
 
 ## Let an agent run shim
 
 An agent cannot answer a question, so give it the forms that never ask one.
 `--json` turns every prompt into an answer: `install`, `revert`, `config` and
 `ledger purge` refuse to change anything without `--yes`, and say so.
+
+Two of those an agent cannot run from inside a session that shim's hook guards.
+In Claude Code and VS Code the hook refuses an agent's shell command that runs
+`shim config` or `shim revert`, in every mode, because an agent that can change
+shim's settings or remove its hook can turn shim off; it refuses an agent's
+file edit of those settings too. Run them yourself in your own terminal. An
+agent can still install, diagnose and read: `shim install`, `shim doctor`,
+`shim status`, `shim report` and `shim keys` run. Outside such a session, in a
+script or CI, nothing is refused.
 
 ```console
 $ shim install claude --json
@@ -520,9 +533,9 @@ chmod 700 ~/.config/shim && chmod 600 ~/.config/shim/config.toml
 
 `shim config --reset --yes` does not repair permissions; it refuses the same
 file. While the file is refused or invalid, every prompt is withheld, tool
-calls and results pass through uninspected with a notice saying so, `shim scan`
-and `shim redact` print `Unable to process stdin.`, and `shim keys` shows
-`not inspected`. `shim config` prints the reason.
+calls are refused and tool results withheld, each naming `settings unreadable`,
+`shim scan` and `shim redact` print `Unable to process stdin.`, and `shim keys`
+shows `not inspected`. `shim config` prints the reason.
 
 **A prompt was withheld and you do not know why.** The reason names the file
 holding the redacted copy. Read it; it shows what was found and where.

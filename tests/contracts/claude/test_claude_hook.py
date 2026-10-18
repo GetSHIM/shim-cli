@@ -17,7 +17,6 @@ GENERIC_BLOCK = (
     b'"suppressOriginalPrompt":true}'
 )
 READ_INSTRUCTION = "Read this file and use its contents as my prompt: "
-UNANALYSABLE = "\ufdfa" * 12_000
 
 
 def _redaction_files(root):
@@ -126,10 +125,12 @@ def test_claude_code_runner_fails_closed_on_invalid_input(tmp_path: Path) -> Non
     assert (result.returncode, result.stdout, result.stderr) == (0, GENERIC_BLOCK, b"")
 
 
-def test_a_long_prompt_inspected_only_in_part_is_withheld(tmp_path: Path) -> None:
-    prompt = "\ufdfa" * 12_000 + "x" * 88_100 + "\nDB_PASSWORD=Synthetic-pass-0000"
+def test_a_long_prompt_inspected_only_in_part_is_withheld(
+    tmp_path: Path, unanalysable: str, unanalysable_hook: tuple
+) -> None:
+    prompt = unanalysable + "\n" + "x" * 100_000 + "\nDB_PASSWORD=Synthetic-pass-0000"
 
-    result = _run(_payload(prompt), tmp_path)
+    result = _run(_payload(prompt), tmp_path, command=unanalysable_hook)
 
     assert (result.returncode, result.stdout, result.stderr) == (0, GENERIC_BLOCK, b"")
 
@@ -142,55 +143,598 @@ def test_a_long_korean_prompt_is_read_not_withheld(tmp_path: Path) -> None:
     assert (result.returncode, result.stdout, result.stderr) == (0, b"", b"")
 
 
-def test_claude_code_runner_does_not_block_a_truncated_tool_event(
-    tmp_path: Path,
-) -> None:
-    result = _run(b'{"hook_event_name":"PostToolUse",', tmp_path)
-    document = json.loads(result.stdout)
-
-    assert result.returncode == 0
-    assert result.stderr == b""
-    assert "decision" not in document
-    assert "could not be inspected" in document["systemMessage"]
+AWS_KEY = "AKIAIOSFODNN7EXAMPLE"
+WITHHELD = "[withheld by shim]"
+# An MCP result is not checked against a schema, so it keeps nothing at all.
+MCP_WITHHELD = [{"type": "text", "text": WITHHELD}]
+ENV_FILE = f"AWS_ACCESS_KEY_ID={AWS_KEY}\nOWNER=jane.doe@example.com\n"
 
 
-def test_an_oversized_tool_event_passes_through_and_still_reaches_the_summary(
-    tmp_path: Path,
-) -> None:
-    """Too large to inspect is still something that happened.
-
-    The event was refused before anything was recorded, so the turn left no
-    trace: the session summary under-counted, and the one thing the user needed
-    to know — which read went uninspected — was the thing that went missing.
-    """
-    raw = json.dumps(
-        {
-            "session_id": "oversized",
-            "hook_event_name": "PostToolUse",
-            "tool_name": "Read",
-            "tool_input": {"file_path": "/work/big.txt"},
-            "tool_response": {"content": "x" * 1_200_000},
+def _withheld(tool: str, reason: str, replacement: object) -> dict:
+    return {
+        "systemMessage": (
+            f"shim: withheld this {tool} result; it could not be inspected ({reason})."
+        ),
+        "hookSpecificOutput": {
+            "hookEventName": "PostToolUse",
+            "updatedToolOutput": replacement,
+            "additionalContext": (
+                f"shim withheld this {tool} result because it could not be "
+                f"inspected ({reason}). It is not empty; do not guess what it "
+                "held, and ask the user how to continue."
+            ),
         },
-        separators=(",", ":"),
-    ).encode()
+    }
 
-    result = _run(raw, tmp_path)
 
-    assert result.returncode == 0
-    assert result.stderr == b""
-    assert "could not be inspected" in json.loads(result.stdout)["systemMessage"]
+def _denied(tool: str, reason: str) -> dict:
+    return {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": (
+                f"shim: could not inspect this {tool} call ({reason}), so it was "
+                "not allowed."
+            ),
+        }
+    }
 
-    records = [
+
+def _unreplaced(tool: str, reason: str, event: str = "PostToolUse") -> dict:
+    return {
+        "systemMessage": (
+            f"shim: could not inspect this {tool} output ({reason}); the model "
+            "has it as it was."
+        ),
+        "hookSpecificOutput": {
+            "hookEventName": event,
+            "additionalContext": (
+                f"shim could not inspect this {tool} output ({reason}). Do not "
+                "repeat values from it in replies, files or commands."
+            ),
+        },
+    }
+
+
+def _spooled(tmp_path: Path) -> list:
+    return [
         json.loads(line)
         for path in tmp_path.rglob("*.jsonl")
         for line in path.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
-    assert len(records) == 1
-    assert records[0]["tool_name"] == "Read"
+
+
+def _event(event: str, tool: str, field: str, value: object, **extra) -> bytes:
+    # json.dumps escapes a lone surrogate as \udxxx, the way Node writes it.
+    return json.dumps(
+        {
+            "session_id": "contract",
+            "cwd": "/work",
+            "permission_mode": "default",
+            "hook_event_name": event,
+            "tool_name": tool,
+            **extra,
+            field: value,
+        },
+        separators=(",", ":"),
+    ).encode()
+
+
+def _env_read() -> bytes:
+    return _event(
+        "PostToolUse",
+        "Read",
+        "tool_response",
+        {
+            "type": "text",
+            "file": {
+                "filePath": "/work/service/.env",
+                "content": ENV_FILE,
+                "numLines": 2,
+                "startLine": 1,
+                "totalLines": 2,
+            },
+        },
+        tool_input={"file_path": "/work/service/.env"},
+    )
+
+
+# A withheld Read keeps the shape Claude Code checks it against: the kind,
+# every key, zero for numbers. Nothing of the file survives.
+WITHHELD_ENV_READ = {
+    "type": "text",
+    "file": {
+        "filePath": WITHHELD,
+        "content": WITHHELD,
+        "numLines": 0,
+        "startLine": 0,
+        "totalLines": 0,
+    },
+}
+
+
+def _fetch_call() -> bytes:
+    return _event(
+        "PreToolUse",
+        "WebFetch",
+        "tool_input",
+        {"url": f"https://example.com/?key={AWS_KEY}", "prompt": "summarise"},
+    )
+
+
+def test_a_lone_surrogate_beside_a_secret_in_an_mcp_result_is_masked(
+    tmp_path: Path,
+) -> None:
+    raw = _event(
+        "PostToolUse",
+        "mcp__slack__history",
+        "tool_response",
+        [{"type": "text", "text": f"bob: AWS_ACCESS_KEY_ID={AWS_KEY}\nhi \ud83d"}],
+        tool_input={"channel": "ops"},
+    )
+
+    result = _run(raw, tmp_path)
+
+    assert (result.returncode, result.stderr) == (0, b"")
+    assert AWS_KEY.encode() not in result.stdout
+    assert b"hi \\ud83d" in result.stdout
+    assert json.loads(result.stdout)["hookSpecificOutput"]["updatedToolOutput"] == [
+        {"type": "text", "text": "bob: AWS_ACCESS_KEY_ID=<SECRET_1>\nhi \ud83d"}
+    ]
+
+
+def test_a_lone_surrogate_in_an_outgoing_fetch_does_not_stop_the_mask(
+    tmp_path: Path,
+) -> None:
+    raw = _event(
+        "PreToolUse",
+        "WebFetch",
+        "tool_input",
+        {
+            "url": "https://example.com/?email=jane.doe@example.com",
+            "prompt": "summarise \ud800",
+        },
+    )
+
+    result = _run(raw, tmp_path)
+
+    assert (result.returncode, result.stderr) == (0, b"")
+    assert b"jane.doe@example.com" not in result.stdout
+    assert json.loads(result.stdout)["hookSpecificOutput"]["updatedInput"] == {
+        "url": "https://example.com/?email=<EMAIL_1>",
+        "prompt": "summarise \ud800",
+    }
+
+
+def test_a_truncated_tool_result_with_no_tool_name_is_withheld_whole(
+    tmp_path: Path,
+) -> None:
+    """Claude Code always names the tool. With no name, nothing marks this as
+    a built-in result checked against a schema, so nothing of it is kept."""
+    result = _run(b'{"hook_event_name":"PostToolUse",', tmp_path)
+
+    assert (result.returncode, result.stderr) == (0, b"")
+    assert json.loads(result.stdout) == _withheld(
+        "unknown tool", "analysis failed", MCP_WITHHELD
+    )
+
+
+def test_a_truncated_mcp_result_is_withheld(tmp_path: Path) -> None:
+    raw = (
+        b'{"hook_event_name":"PostToolUse","session_id":"cut",'
+        b'"tool_name":"mcp__slack__history","tool_response":[{"type":"text",'
+        b'"text":"AWS_ACCESS_KEY_ID=' + AWS_KEY.encode()
+    )
+
+    result = _run(raw, tmp_path)
+
+    assert (result.returncode, result.stderr) == (0, b"")
+    assert AWS_KEY.encode() not in result.stdout
+    assert json.loads(result.stdout) == _withheld(
+        "mcp__slack__history", "analysis failed", MCP_WITHHELD
+    )
+
+
+def test_a_truncated_tool_call_is_denied(tmp_path: Path) -> None:
+    raw = (
+        b'{"hook_event_name":"PreToolUse","session_id":"cut","tool_name":"WebFetch",'
+        b'"tool_input":{"url":"https://example.com/?key=' + AWS_KEY.encode()
+    )
+
+    result = _run(raw, tmp_path)
+
+    assert (result.returncode, result.stderr) == (0, b"")
+    assert json.loads(result.stdout) == _denied("WebFetch", "analysis failed")
+
+
+def test_an_oversized_mcp_result_is_withheld_and_still_reaches_the_summary(
+    tmp_path: Path,
+) -> None:
+    """Too large to inspect is still something that happened, and now it is
+    something the model does not read: the summary names it, the model gets
+    the notice instead."""
+    raw = _event(
+        "PostToolUse",
+        "mcp__drive__read",
+        "tool_response",
+        [{"type": "text", "text": f"AWS_ACCESS_KEY_ID={AWS_KEY}\n" + "x" * 1_200_000}],
+        tool_input={"path": "/work/big.txt"},
+        session_id="oversized",
+    )
+
+    result = _run(raw, tmp_path)
+
+    assert (result.returncode, result.stderr) == (0, b"")
+    assert AWS_KEY.encode() not in result.stdout
+    assert json.loads(result.stdout) == _withheld(
+        "mcp__drive__read", "too large", MCP_WITHHELD
+    )
+    [record] = _spooled(tmp_path)
+    assert record["tool_name"] == "mcp__drive__read"
     # The record keeps the path; the summary is what shortens it to a name.
-    assert records[0]["target"] == "/work/big.txt"
-    assert records[0]["note"].startswith("not inspected")
+    assert record["target"] == "/work/big.txt"
+    assert (record["action"], record["note"]) == ("deny", "not inspected: too large")
+
+
+def test_an_oversized_built_in_result_is_reported_as_reaching_the_model(
+    tmp_path: Path,
+) -> None:
+    """Claude Code 2.1.286 checks a built-in tool's replacement against that
+    tool's output schema and sends the original when it does not match. The
+    shape of a result cut at the read limit is unknown, so no withhold would
+    hold; the user and the model are told plainly instead."""
+    raw = _event(
+        "PostToolUse",
+        "Read",
+        "tool_response",
+        {"content": "x" * 1_200_000},
+        tool_input={"file_path": "/work/big.txt"},
+        session_id="oversized",
+    )
+
+    result = _run(raw, tmp_path)
+
+    assert (result.returncode, result.stderr) == (0, b"")
+    assert json.loads(result.stdout) == _unreplaced("Read", "too large")
+    [record] = _spooled(tmp_path)
+    assert (record["tool_name"], record["target"]) == ("Read", "/work/big.txt")
+    assert (record["action"], record["note"]) == (
+        "report",
+        "not inspected: too large",
+    )
+
+
+def _settings_file(tmp_path: Path, text: str, mode: int = 0o600) -> dict:
+    target = tmp_path / "config.toml"
+    target.write_text(text, encoding="utf-8")
+    target.chmod(mode)
+    return {"SHIM_CONFIG": str(target)}
+
+
+UNREADABLE_SETTINGS = (
+    ('[mode]\nuser-prompt = "block"\n', 0o600),
+    ('[mode]\ninbound = "Enforce"\n', 0o600),
+    ("ledgr = true\n", 0o600),
+    ("", 0o664),
+)
+
+
+@pytest.mark.parametrize(
+    ("text", "mode"),
+    UNREADABLE_SETTINGS,
+    ids=("invalid-value", "wrong-case", "unknown-key", "group-writable"),
+)
+def test_unreadable_settings_withhold_a_tool_result(
+    text: str, mode: int, tmp_path: Path
+) -> None:
+    result = _run(_env_read(), tmp_path, _settings_file(tmp_path, text, mode))
+
+    assert (result.returncode, result.stderr) == (0, b"")
+    assert AWS_KEY.encode() not in result.stdout
+    assert b"jane.doe" not in result.stdout
+    assert json.loads(result.stdout) == _withheld(
+        "Read", "settings unreadable", WITHHELD_ENV_READ
+    )
+    [record] = _spooled(tmp_path)
+    assert (record["action"], record["note"]) == (
+        "deny",
+        "not inspected: settings unreadable",
+    )
+
+
+@pytest.mark.parametrize(
+    ("text", "mode"),
+    UNREADABLE_SETTINGS,
+    ids=("invalid-value", "wrong-case", "unknown-key", "group-writable"),
+)
+def test_unreadable_settings_deny_a_tool_call(
+    text: str, mode: int, tmp_path: Path
+) -> None:
+    result = _run(_fetch_call(), tmp_path, _settings_file(tmp_path, text, mode))
+
+    assert (result.returncode, result.stderr) == (0, b"")
+    assert json.loads(result.stdout) == _denied("WebFetch", "settings unreadable")
+
+
+def _blocks(texts: list) -> list:
+    return [{"type": "text", "text": text} for text in texts]
+
+
+def _nested(levels: int, leaf: str) -> object:
+    node: object = leaf
+    for _ in range(levels):
+        node = {"next": node}
+    return node
+
+
+def test_unreadable_settings_withhold_a_notebook_read_without_its_cells(
+    tmp_path: Path,
+) -> None:
+    """Read's schema pins one word under `source`, and a notebook cell keeps
+    its text under the same key; the text is not that word and does not stay."""
+    raw = _event(
+        "PostToolUse",
+        "Read",
+        "tool_response",
+        {
+            "type": "notebook",
+            "file": {
+                "filePath": "/w/creds.ipynb",
+                "cells": [
+                    {
+                        "cellType": "markdown",
+                        "source": "Jane-Doe-Personal-Token/hunter",
+                        "cell_id": "c1",
+                    },
+                    {"cellType": "code", "source": f"key = '{AWS_KEY}'"},
+                ],
+            },
+        },
+        tool_input={"file_path": "/w/creds.ipynb"},
+    )
+
+    result = _run(raw, tmp_path, _settings_file(tmp_path, *UNREADABLE_SETTINGS[0]))
+
+    assert (result.returncode, result.stderr) == (0, b"")
+    for fragment in (b"Jane-Doe", b"hunter", AWS_KEY.encode()):
+        assert fragment not in result.stdout
+    assert json.loads(result.stdout) == _withheld(
+        "Read",
+        "settings unreadable",
+        {
+            "type": "notebook",
+            "file": {
+                "filePath": "",
+                "cells": [{"cellType": "", "source": WITHHELD, "cell_id": ""}],
+            },
+        },
+    )
+
+
+LONG_MCP_NAME = "mcp__" + "s" * 120 + "__lookup"
+
+
+@pytest.mark.parametrize(
+    ("response", "settings", "reason"),
+    (
+        (
+            {"jane.doe@example.com": {"role": "admin", "status": "active"}},
+            UNREADABLE_SETTINGS[0],
+            "settings unreadable",
+        ),
+        (
+            {
+                "status": "confidential",
+                "kind": "CorrectHorseBattery",
+                "secret_keyname_jane": _nested(70, "x"),
+            },
+            None,
+            "too large",
+        ),
+    ),
+    ids=("refused-before-reading", "past-the-depth-bound"),
+)
+def test_an_mcp_result_too_long_named_to_show_still_keeps_nothing(
+    response: dict, settings: tuple | None, reason: str, tmp_path: Path
+) -> None:
+    """Its label falls back to "unknown tool"; what replaces it is decided by
+    the name, which says MCP, so no key or word of it survives."""
+    raw = _event("PostToolUse", LONG_MCP_NAME, "tool_response", response)
+    extra = _settings_file(tmp_path, *settings) if settings else None
+
+    result = _run(raw, tmp_path, extra)
+
+    assert (result.returncode, result.stderr) == (0, b"")
+    for fragment in (b"jane", b"admin", b"active", b"confidential", b"CorrectHorse"):
+        assert fragment not in result.stdout
+    assert json.loads(result.stdout) == _withheld("unknown tool", reason, MCP_WITHHELD)
+
+
+def _expiring(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The hook's own deadline, raised where the detector meets the payload."""
+    from shim_cli import guard
+
+    real = guard.evaluate
+
+    def evaluate(text: str, *args, **kwargs):
+        if "AWS_ACCESS_KEY_ID" in text or AWS_KEY in text:
+            raise TimeoutError("shim hook deadline exceeded")
+        return real(text, *args, **kwargs)
+
+    monkeypatch.setattr(guard, "evaluate", evaluate)
+
+
+def test_a_result_still_unread_at_the_deadline_is_withheld(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from shim_cli import hook
+    from shim_cli.session import spool
+
+    _expiring(monkeypatch)
+
+    output = hook._output(_env_read(), "claude")
+
+    assert AWS_KEY.encode() not in output
+    assert json.loads(output) == _withheld("Read", "deadline", WITHHELD_ENV_READ)
+    [record] = spool.entries("contract")
+    assert record["action"] == "deny"
+    assert "deadline" in record["note"]
+
+
+def test_a_call_still_unread_at_the_deadline_is_denied(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from shim_cli import hook
+
+    _expiring(monkeypatch)
+
+    output = hook._output(_fetch_call(), "claude")
+
+    assert json.loads(output) == _denied("WebFetch", "deadline")
+
+
+def test_a_result_of_many_small_fields_is_inspected_to_the_last_one(
+    tmp_path: Path,
+) -> None:
+    rows = _blocks(["row"] * 2_000 + [f"AWS_ACCESS_KEY_ID={AWS_KEY}"])
+
+    result = _run(
+        _event("PostToolUse", "mcp__sheets__read", "tool_response", rows), tmp_path
+    )
+
+    assert (result.returncode, result.stderr) == (0, b"")
+    assert AWS_KEY.encode() not in result.stdout
+    masked = json.loads(result.stdout)["hookSpecificOutput"]["updatedToolOutput"]
+    assert masked == rows[:-1] + _blocks(["AWS_ACCESS_KEY_ID=<SECRET_1>"])
+
+
+def test_a_result_nested_past_the_old_depth_bound_is_masked(tmp_path: Path) -> None:
+    nested = _nested(25, f"AWS_ACCESS_KEY_ID={AWS_KEY}")
+
+    result = _run(
+        _event("PostToolUse", "mcp__db__query", "tool_response", nested), tmp_path
+    )
+
+    assert (result.returncode, result.stderr) == (0, b"")
+    assert AWS_KEY.encode() not in result.stdout
+    output = json.loads(result.stdout)["hookSpecificOutput"]["updatedToolOutput"]
+    assert output == _nested(25, "AWS_ACCESS_KEY_ID=<SECRET_1>")
+
+
+def test_a_result_nested_past_the_depth_bound_is_withheld(tmp_path: Path) -> None:
+    from shim_cli.events.payload import MAX_DEPTH
+
+    nested = _nested(MAX_DEPTH + 2, f"AWS_ACCESS_KEY_ID={AWS_KEY}")
+
+    result = _run(
+        _event("PostToolUse", "mcp__db__query", "tool_response", nested), tmp_path
+    )
+
+    assert (result.returncode, result.stderr) == (0, b"")
+    assert json.loads(result.stdout) == _withheld(
+        "mcp__db__query", "too large", MCP_WITHHELD
+    )
+
+
+def test_a_megabyte_of_tiny_fields_is_never_passed_through(tmp_path: Path) -> None:
+    """A full-size result of one-letter fields, with the deadline cut short:
+    whatever is left unread when it fires is withheld, the secret with it."""
+    rows = ["a"] * 249_950 + [f"AWS_ACCESS_KEY_ID={AWS_KEY}"]
+    raw = _event("PostToolUse", "mcp__sheets__read", "tool_response", rows)
+    assert 999_000 < len(raw) <= 1_000_000
+    code = (
+        "import sys\n"
+        "from shim_cli import hook as runner\n"
+        "sys.argv.append('claude')\n"
+        "runner.HOOK_DEADLINE_SECONDS = 1\n"
+        "runner.main()\n"
+    )
+
+    result = _run(raw, tmp_path, command=(sys.executable, "-I", "-B", "-c", code))
+
+    assert (result.returncode, result.stderr) == (0, b"")
+    assert json.loads(result.stdout) == _withheld(
+        "mcp__sheets__read", "deadline", MCP_WITHHELD
+    )
+
+
+def test_the_scan_stops_at_the_hooks_own_deadline_not_a_fresh_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """main sets the deadline before the read and the parse, and the scan
+    keeps to it on its own clock: with the alarm lost (the detector re-arms it
+    and each re-arm rounds up) and the read alone past the deadline, no field
+    is scanned and the result is withheld."""
+    import io
+    import signal
+    import time
+    import types
+
+    from shim_cli import guard, hook
+
+    tool = "mcp__sheets__read"
+    raw = _event(
+        "PostToolUse",
+        tool,
+        "tool_response",
+        _blocks(["row"] * 100 + [f"AWS_ACCESS_KEY_ID={AWS_KEY}"]),
+    )
+    scanned: list = []
+
+    def evaluate(text: str, *args, **kwargs):
+        scanned.append(text)
+        return guard.evaluate.__wrapped__(text, *args, **kwargs)
+
+    def slow_read(_size: int) -> bytes:
+        time.sleep(0.3)
+        return raw
+
+    stdout = io.BytesIO()
+    evaluate.__wrapped__ = guard.evaluate
+    monkeypatch.setattr(guard, "evaluate", evaluate)
+    monkeypatch.setattr(hook, "HOOK_DEADLINE_SECONDS", 0.2)
+    monkeypatch.setattr(signal, "setitimer", lambda *_args: (0.0, 0.0))
+    monkeypatch.setattr(sys, "argv", ["shim", "claude"])
+    monkeypatch.setattr(
+        sys,
+        "stdin",
+        types.SimpleNamespace(buffer=types.SimpleNamespace(read=slow_read)),
+    )
+    monkeypatch.setattr(sys, "stdout", io.TextIOWrapper(stdout))
+
+    hook.main()
+
+    assert json.loads(stdout.getvalue()) == _withheld(tool, "deadline", MCP_WITHHELD)
+    # The tool's name is read for the notice; no field of the result is.
+    assert set(scanned) <= {tool}, "fields were scanned after the deadline"
+
+
+def test_a_closed_stderr_does_not_stop_the_mask_or_the_record(tmp_path: Path) -> None:
+    environment = {**os.environ, "TMPDIR": str(tmp_path)}
+
+    result = subprocess.run(
+        COMMAND,
+        input=_env_read(),
+        stdout=subprocess.PIPE,
+        cwd=ROOT,
+        env=environment,
+        check=False,
+        timeout=60,
+        preexec_fn=lambda: os.close(2),
+    )
+
+    assert result.returncode == 0
+    assert AWS_KEY.encode() not in result.stdout
+    content = json.loads(result.stdout)["hookSpecificOutput"]["updatedToolOutput"]
+    assert content["file"]["content"] == (
+        "AWS_ACCESS_KEY_ID=<SECRET_1>\nOWNER=<EMAIL_1>\n"
+    )
+    [record] = _spooled(tmp_path)
+    assert (record["action"], record["entities"]) == (
+        "mask",
+        {"EMAIL": 1, "SECRET": 1},
+    )
 
 
 def _read(tool: str, tool_input: dict, response: dict) -> bytes:
@@ -272,7 +816,13 @@ def test_a_safe_read_is_still_zero_bytes(tmp_path: Path) -> None:
     assert (result.returncode, result.stdout, result.stderr) == (0, b"", b"")
 
 
-def test_a_compacted_result_says_nothing_to_the_model(tmp_path: Path) -> None:
+RESHAPED = (
+    "shim: reformatted this result to save space (json); it is not byte-for-byte "
+    "what the tool returned."
+)
+
+
+def test_a_compacted_result_tells_the_model_it_was_reshaped(tmp_path: Path) -> None:
     rows = json.dumps({"rows": [{"id": n} for n in range(4)]}, indent=4)
     raw = _read(
         "WebFetch",
@@ -286,7 +836,8 @@ def test_a_compacted_result_says_nothing_to_the_model(tmp_path: Path) -> None:
     assert result.stdout == (
         b'{"hookSpecificOutput":{"hookEventName":"PostToolUse",'
         b'"updatedToolOutput":{"type":"text","content":'
-        b'"{\\"rows\\":[{\\"id\\":0},{\\"id\\":1},{\\"id\\":2},{\\"id\\":3}]}"}}}'
+        b'"{\\"rows\\":[{\\"id\\":0},{\\"id\\":1},{\\"id\\":2},{\\"id\\":3}]}"},'
+        b'"additionalContext":"' + RESHAPED.encode() + b'"}}'
     )
 
 
@@ -350,9 +901,14 @@ def test_a_failed_command_whose_error_is_not_text_is_reported_uninspected(
     result = _run(_failure(5), tmp_path, _isolated(tmp_path))
 
     assert (result.returncode, result.stderr) == (0, b"")
-    assert result.stdout == (
-        b'{"systemMessage":"shim: this tool event could not be inspected and was '
-        b'not modified."}'
+    # The model already has the output, so it is told not to repeat from it.
+    assert json.loads(result.stdout) == _unreplaced(
+        "Bash", "analysis failed", "PostToolUseFailure"
+    )
+    [record] = _spooled(tmp_path)
+    assert (record["action"], record["note"]) == (
+        "report",
+        "not inspected: analysis failed",
     )
 
 
@@ -518,11 +1074,16 @@ def test_a_file_the_client_does_not_attach_says_nothing(
 
 @pytest.mark.parametrize("mode", ("warn", "observe", "enforce"))
 def test_an_attachment_the_detector_cannot_analyse_is_reported_not_withheld(
-    mode: str, tmp_path: Path
+    mode: str, tmp_path: Path, unanalysable: str, unanalysable_hook: tuple
 ) -> None:
-    work = _workspace(tmp_path, {"q.sql": UNANALYSABLE})
+    work = _workspace(tmp_path, {"q.sql": unanalysable})
 
-    result = _run(_attaching("@q.sql explain", work), tmp_path, _mode(tmp_path, mode))
+    result = _run(
+        _attaching("@q.sql explain", work),
+        tmp_path,
+        _mode(tmp_path, mode),
+        unanalysable_hook,
+    )
 
     assert (result.returncode, result.stderr) == (0, b"")
     if mode == "observe":
@@ -532,24 +1093,28 @@ def test_an_attachment_the_detector_cannot_analyse_is_reported_not_withheld(
 
 
 def test_an_attachment_scanned_only_in_part_is_reported_as_not_inspected(
-    tmp_path: Path,
+    tmp_path: Path, unanalysable: str, unanalysable_hook: tuple
 ) -> None:
-    dump = UNANALYSABLE + "\n" + ("x" * 99 + "\n") * 1_500
+    dump = unanalysable + "\n" + ("x" * 99 + "\n") * 1_500
     work = _workspace(tmp_path, {"dump.sql": dump})
 
-    result = _run(_attaching("@dump.sql", work), tmp_path, _isolated(tmp_path))
+    result = _run(
+        _attaching("@dump.sql", work), tmp_path, _isolated(tmp_path), unanalysable_hook
+    )
 
     assert result.stdout.startswith(b"{")
     assert json.loads(result.stdout) == _not_inspected("dump.sql")
 
 
 def test_findings_in_the_scanned_part_of_an_attachment_are_still_reported(
-    tmp_path: Path,
+    tmp_path: Path, unanalysable: str, unanalysable_hook: tuple
 ) -> None:
-    dump = UNANALYSABLE + "\n" + ("x" * 99 + "\n") * 1_500 + FIXTURE_ENV
+    dump = unanalysable + "\n" + ("x" * 99 + "\n") * 1_500 + FIXTURE_ENV
     work = _workspace(tmp_path, {"dump.sql": dump})
 
-    result = _run(_attaching("@dump.sql", work), tmp_path, _isolated(tmp_path))
+    result = _run(
+        _attaching("@dump.sql", work), tmp_path, _isolated(tmp_path), unanalysable_hook
+    )
 
     assert json.loads(result.stdout) == {
         "systemMessage": f"shim: @dump.sql holds SECRET (1), EMAIL (1). {ATTACHED}"
@@ -668,7 +1233,9 @@ def test_a_compacted_result_with_markers_carries_both(tmp_path: Path) -> None:
     assert specific["updatedToolOutput"] == {
         "content": json.dumps(document, separators=(",", ":"), ensure_ascii=False)
     }
-    assert specific["additionalContext"] == NOTE.format("INSTRUCTION_OVERRIDE")
+    assert specific["additionalContext"] == (
+        f"{RESHAPED} {NOTE.format('INSTRUCTION_OVERRIDE')}"
+    )
 
 
 def test_an_observed_result_with_findings_still_gets_the_note(tmp_path: Path) -> None:
@@ -698,6 +1265,24 @@ def test_the_note_lists_marker_ids_never_result_text(tmp_path: Path) -> None:
         assert fragment not in context
 
 
+def test_a_withheld_result_carries_no_marker_note(tmp_path: Path) -> None:
+    """The model never reads a withheld result, so there is nothing in it to
+    warn the model about; the record still names the marker."""
+    from shim_cli.events.payload import MAX_DEPTH
+
+    rows = [{"type": "text", "text": INJECTION}, _nested(MAX_DEPTH + 2, "x")]
+    raw = _event("PostToolUse", "mcp__wiki__page", "tool_response", rows)
+
+    result = _run(raw, tmp_path, _markers(tmp_path, "note"))
+
+    assert (result.returncode, result.stderr) == (0, b"")
+    assert json.loads(result.stdout) == _withheld(
+        "mcp__wiki__page", "too large", MCP_WITHHELD
+    )
+    [record] = _spooled(tmp_path)
+    assert (record["action"], record["markers"]) == ("deny", ["INSTRUCTION_OVERRIDE"])
+
+
 def test_a_failed_call_and_vs_code_never_carry_the_note(tmp_path: Path) -> None:
     fixture = (
         ROOT
@@ -724,3 +1309,160 @@ def test_a_failed_call_and_vs_code_never_carry_the_note(tmp_path: Path) -> None:
         _run(failed, tmp_path, _markers(tmp_path, "note")).stdout
         == _run(failed, tmp_path, _markers(tmp_path, "report")).stdout
     )
+
+
+def _vscode(name: str, **fields) -> bytes:
+    path = ROOT / "tests" / "fixtures" / "probe" / "vscode" / f"{name}-1.json"
+    return json.dumps(
+        {**json.loads(path.read_text(encoding="utf-8")), **fields}
+    ).encode()
+
+
+# What a hook says when not even the code it inspects with will load: as the
+# client's own adapter would say it, with neither the tool nor the reason.
+_DENIED_CALL = {
+    "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": (
+            "shim: could not inspect this tool call, so it was not allowed."
+        ),
+    }
+}
+_WITHHELD_RESULT = {
+    "systemMessage": "shim: withheld this tool result; it could not be inspected.",
+    "hookSpecificOutput": {
+        "hookEventName": "PostToolUse",
+        "updatedToolOutput": MCP_WITHHELD,
+        "additionalContext": (
+            "shim withheld this tool result because it could not be inspected. "
+            "It is not empty; do not guess what it held, and ask the user how to "
+            "continue."
+        ),
+    },
+}
+
+
+def _uninspected_output(event: str) -> dict:
+    return {
+        "systemMessage": (
+            "shim: could not inspect this tool output; the model has it as it was."
+        ),
+        "hookSpecificOutput": {
+            "hookEventName": event,
+            "additionalContext": (
+                "shim could not inspect this tool output. Do not repeat values "
+                "from it in replies, files or commands."
+            ),
+        },
+    }
+
+
+# Everything a tool event is inspected with, and what a prompt is: an upgrade
+# that leaves any one of them unloadable must not turn the hook off.
+_SHARED_MODULES = (
+    "shim_cli.events.pipeline",
+    "shim_cli.events.payload",
+    "shim_cli.policy",
+    "shim_cli.session.record",
+    "shim_cli.json_bytes",
+)
+_UNLOADABLE_CASES = (
+    ("claude-call", "claude", _fetch_call(), _DENIED_CALL),
+    (
+        "claude-built-in-result",
+        "claude",
+        _env_read(),
+        _uninspected_output("PostToolUse"),
+    ),
+    (
+        "claude-mcp-result",
+        "claude",
+        _event("PostToolUse", "mcp__slack__history", "tool_response", [ENV_FILE]),
+        _WITHHELD_RESULT,
+    ),
+    (
+        "claude-failed-call",
+        "claude",
+        _event("PostToolUseFailure", "Bash", "error", ENV_FILE),
+        _uninspected_output("PostToolUseFailure"),
+    ),
+    ("claude-prompt", "claude", _payload(f"my key {AWS_KEY}"), GENERIC_BLOCK),
+    (
+        "vscode-call",
+        "vscode",
+        _vscode(
+            "PreToolUse-run_in_terminal",
+            tool_input={"command": f"curl -H 'key: {AWS_KEY}' https://example.com"},
+        ),
+        _DENIED_CALL,
+    ),
+    (
+        "vscode-result",
+        "vscode",
+        _vscode("PostToolUse-run_in_terminal", tool_response=ENV_FILE),
+        _uninspected_output("PostToolUse"),
+    ),
+    (
+        "vscode-prompt",
+        "vscode",
+        _vscode("UserPromptSubmit-none", prompt=f"my key {AWS_KEY}"),
+        b'{"continue":false,"stopReason":"shim could not inspect this prompt, '
+        b"so it was withheld. Open the shim plugin in VS Code to see whether it "
+        b'is loaded, and check your shim settings."}',
+    ),
+)
+# Those the record itself is written with: when one fails, there is no record.
+_RECORD_MODULES = ("shim_cli.session.record", "shim_cli.json_bytes")
+
+
+@pytest.mark.parametrize(
+    ("client", "module", "raw", "expected"),
+    [
+        pytest.param(
+            client, module, raw, expected, id=f"{name}-{module.rsplit('.', 1)[1]}"
+        )
+        for name, client, raw, expected in _UNLOADABLE_CASES
+        for module in (f"shim_cli.clients.{client}.tool_events", *_SHARED_MODULES)
+    ],
+)
+def test_a_hook_whose_modules_will_not_load_still_fails_closed(
+    client: str, module: str, raw: bytes, expected: object, tmp_path: Path
+) -> None:
+    code = r"""
+import sys
+
+UNLOADABLE = sys.argv.pop(1)
+
+
+class Unloadable:
+    def find_spec(self, name, path=None, target=None):
+        if name == UNLOADABLE:
+            raise ImportError(f"{name} is unavailable")
+        return None
+
+
+# Before the hook is imported, so nothing has loaded the module yet.
+sys.meta_path.insert(0, Unloadable())
+from shim_cli import hook as runner
+
+runner.main()
+"""
+    result = _run(
+        raw,
+        tmp_path,
+        command=(sys.executable, "-I", "-B", "-c", code, module, client),
+    )
+
+    assert (result.returncode, result.stderr) == (0, b"")
+    assert AWS_KEY.encode() not in result.stdout
+    if isinstance(expected, bytes):
+        assert result.stdout == expected
+        return
+    assert json.loads(result.stdout) == expected
+    if module not in _RECORD_MODULES:
+        [record] = _spooled(tmp_path)
+        assert record["note"] == "not inspected: analysis failed"
+        assert record["action"] == (
+            "deny" if expected in (_DENIED_CALL, _WITHHELD_RESULT) else "report"
+        )

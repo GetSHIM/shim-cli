@@ -4,10 +4,12 @@ import datetime
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
 import tempfile
+from collections import Counter
 from pathlib import Path
 
 import typer
@@ -15,9 +17,11 @@ from rich import box
 from rich.table import Table
 
 from shim_cli.cli.integrations import (
-    FIX_REINSTALL,
     client_name,
     client_plan,
+    hook_argv,
+    hooks_on_disk,
+    other_installations,
     parse_error,
     plan_status,
 )
@@ -27,7 +31,12 @@ from shim_cli.clients.claude import settings as claude_settings
 from shim_cli.clients.claude.tool_events import coverage as claude_coverage
 from shim_cli.clients.codex import settings as codex_settings
 from shim_cli.clients.copilot import settings as copilot_settings
-from shim_cli.clients.hook_settings import installed_events, interpreter_path
+from shim_cli.clients.hook_settings import (
+    HOOK_MODULE,
+    LEGACY_HOOK_MODULE,
+    installed_events,
+    interpreter_path,
+)
 from shim_cli.settings_files import StateKind, inspect_file
 
 
@@ -219,10 +228,7 @@ def _legacy_state(client: str, fragment: bool) -> Check:
 def _has_legacy_fragment(client: str) -> bool:
     """Claude and Codex carry the fragment in their own settings document;
     Copilot carries it as a whole file under the old name."""
-    from shim_cli.clients.claude import settings as claude_settings
-    from shim_cli.clients.codex import settings as codex_settings
     from shim_cli.clients.copilot import settings as copilot_settings
-    from shim_cli.clients.hook_settings import remove_groups
     from shim_cli.settings_files import StateKind, inspect_file
 
     if client == "copilot":
@@ -235,19 +241,7 @@ def _has_legacy_fragment(client: str) -> bool:
             and copilot_settings.is_ours(state.content)
             and bool(json.loads(state.content)["hooks"])
         )
-    if client == "claude":
-        module = claude_settings
-    else:
-        module = codex_settings
-    state = inspect_file(module.target_path(), module.MAX_CONFIG_BYTES)
-    if state.kind is not StateKind.FILE or state.content is None:
-        return False
-    try:
-        return (
-            remove_groups(state.content, module.legacy_hook_groups()) != state.content
-        )
-    except ValueError:
-        return False
+    return any(module == LEGACY_HOOK_MODULE for _, _, module in hooks_on_disk(client))
 
 
 def _hook_state(client: str, on_disk: bool = False) -> Check | None:
@@ -270,6 +264,24 @@ def _hook_state(client: str, on_disk: bool = False) -> Check | None:
     if state == "not_installed":
         if on_disk:
             return None
+        if others := other_installations(client):
+            detail = f"{name} runs shim's hook from another installation ({', '.join(others)})"
+            if gone := [path for path in others if shutil.which(path) is None]:
+                detail += f"; {', '.join(gone)} cannot be run"
+                if all(
+                    path in gone
+                    for _, path, module in hooks_on_disk(client)
+                    if module == HOOK_MODULE
+                ):
+                    detail += ", so nothing is inspected"
+            return Check(
+                "hook_configuration",
+                "FAIL" if gone else "WARN",
+                f"{detail}; run shim install {client} to run only this one "
+                f"({interpreter_path(sys.executable)}).",
+                code="HOOK_NOT_INSTALLED",
+                fix=f"Run shim install {client}.",
+            )
         return Check(
             "hook_configuration",
             label,
@@ -368,17 +380,28 @@ def _run_hook(
 
 
 def _runner_check(client: str) -> Check:
-    command = [sys.executable, "-I", "-B", "-m", "shim_cli.hook"]
+    """Run the exact command install writes, as the client will run it."""
+    command = hook_argv(client)
     if client == "claude":
-        command.append("claude")
         timeout = claude_settings.HOOK_TIMEOUT_SECONDS
     elif client == "codex":
         timeout = codex_settings.HOOK_TIMEOUT_SECONDS
     elif client == "copilot":
-        command.append("copilot")
         timeout = copilot_settings.HOOK_TIMEOUT_SECONDS
     else:
         raise ValueError("unsupported client")
+    hook = f"{client_name(client)}'s hook command ({shlex.join(command)})"
+    fix = (
+        "Install shim with uv tool install --reinstall shim or pipx install "
+        f"--force shim, not pip --user, then run shim install {client}: the hook "
+        "runs Python with -I, which ignores the user site and PYTHONPATH."
+    )
+
+    def failed(what: str) -> Check:
+        return Check(
+            "runner", "FAIL", f"{hook} {what}.", code="HOOK_RUNNER_FAILED", fix=fix
+        )
+
     if client == "copilot":
         safe = json.dumps(
             {
@@ -406,23 +429,16 @@ def _runner_check(client: str) -> Check:
             environment["TMPDIR"] = directory
             safe_result = _run_hook(command, safe, environment, timeout)
             block_result = _run_hook(command, blocked, environment, timeout)
-        block = json.loads(block_result.stdout)
-    except (OSError, UnicodeError, subprocess.SubprocessError, json.JSONDecodeError):
-        return Check(
-            "runner",
-            "FAIL",
-            "The local hook runner fixtures did not complete.",
-            code="HOOK_RUNNER_FAILED",
-            fix=FIX_REINSTALL,
-        )
+    except (OSError, UnicodeError, subprocess.SubprocessError):
+        return failed("did not finish its fixtures")
     if safe_result.returncode or safe_result.stdout or safe_result.stderr:
-        return Check(
-            "runner",
-            "FAIL",
-            "The local hook runner did not allow the safe fixture silently.",
-            code="HOOK_RUNNER_FAILED",
-            fix=FIX_REINSTALL,
+        return failed(
+            f"did not allow a safe prompt silently (exit {safe_result.returncode})"
         )
+    try:
+        block = json.loads(block_result.stdout)
+    except json.JSONDecodeError:
+        block = None
     if client == "copilot":
         expected, field = "email <EMAIL_1>", "modifiedTransformedPrompt"
     else:
@@ -436,13 +452,7 @@ def _runner_check(client: str) -> Check:
         or not isinstance(block, dict)
         or block.get(field) != expected
     ):
-        return Check(
-            "runner",
-            "FAIL",
-            "The local hook runner did not protect the sensitive fixture.",
-            code="HOOK_RUNNER_FAILED",
-            fix=FIX_REINSTALL,
-        )
+        return failed("did not protect a sensitive prompt")
     return Check(
         "runner",
         "PASS",
@@ -485,6 +495,24 @@ def _resolution_check(client: str, installed: frozenset) -> Check:
 
 
 def _duplicate_check(client: str, installed: frozenset) -> Check:
+    hooks = [
+        (event, interpreter)
+        for event, interpreter, module in hooks_on_disk(client)
+        if module == HOOK_MODULE
+    ]
+    if len({event for event, _ in hooks}) < len(hooks):
+        runs = Counter(interpreter for _, interpreter in hooks)
+        return Check(
+            "duplicate_hooks",
+            "FAIL",
+            f"shim is in the {client_name(client)} settings file more than once, "
+            "so an event is inspected twice: "
+            + ", ".join(f"{path} ({count} entries)" for path, count in runs.items())
+            + f". Run shim install {client} to keep only this one "
+            f"({interpreter_path(sys.executable)}).",
+            code="DUPLICATE_HOOKS",
+            fix=f"Run shim install {client}.",
+        )
     if client == "copilot":
         return Check(
             "duplicate_hooks",
@@ -514,7 +542,7 @@ def _duplicate_check(client: str, installed: frozenset) -> Check:
             code="DUPLICATE_HOOKS",
             fix=f"claude plugin uninstall {alias['key']}",
         )
-    if plugins and installed:
+    if plugins and (installed or hooks):
         return Check(
             "duplicate_hooks",
             "FAIL",
@@ -524,7 +552,7 @@ def _duplicate_check(client: str, installed: frozenset) -> Check:
             code="DUPLICATE_HOOKS",
             fix="Run shim revert claude, or uninstall the plugin.",
         )
-    if not plugins and not installed:
+    if not plugins and not installed and not hooks:
         return Check(
             "duplicate_hooks",
             "PASS",
@@ -675,6 +703,7 @@ def doctor(*, client: str, as_json: bool) -> None:
     installed = _installed_events(client, _hook_state(client))
     hook_state = _hook_state(client, legacy_fragment or bool(installed))
     rows = _coverage_rows(client, installed)
+    runner = _runner_check(client)
     checks.extend(
         check
         for check in (
@@ -683,8 +712,11 @@ def doctor(*, client: str, as_json: bool) -> None:
             _entity_settings(),
             _custom_patterns(),
             _session_record_check(),
-            _runner_check(client),
-            _resolution_check(client, installed),
+            runner,
+            # The installed hook runs this package only if the runner ran it.
+            _resolution_check(
+                client, installed if runner.status == "PASS" else frozenset()
+            ),
             _duplicate_check(client, installed),
             _coverage_check(client, rows),
             _activation_check(client),

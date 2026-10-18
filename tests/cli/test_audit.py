@@ -400,12 +400,12 @@ def test_no_symlink_is_followed_out_of_the_history(
 
 
 def test_text_the_detector_cannot_analyse_is_counted_not_fatal(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, unanalysable: str
 ) -> None:
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
     _write(
         tmp_path / "claude" / "projects" / "-work-kasa" / f"{KASA}.jsonl",
-        [_user("\ufdfa" * 12_000), _user("mail alice@example.com")],
+        [_user(unanalysable), _user("mail alice@example.com")],
     )
 
     result = runner.invoke(app, ["audit", "--json"])

@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from shim_cli import policy
 from shim_cli.guard import BUILT_IN_TYPES, evaluate
 
 CORPUS_DIR = Path(__file__).resolve().parents[1] / "corpus"
@@ -15,13 +16,6 @@ PROMPTS = json.loads((CORPUS_DIR / "guard-v2.json").read_text(encoding="utf-8"))
 METRICS = json.loads((CORPUS_DIR / "guard-v2-metrics.json").read_text(encoding="utf-8"))
 TOOLS = json.loads((CORPUS_DIR / "guard-tools-v1.json").read_text(encoding="utf-8"))
 INLINE_LIMIT = 2_000
-REWRITABLE = {
-    "user-prompt": False,
-    "outbound": True,
-    "inbound": True,
-    "local-write": False,
-    "executable-text": False,
-}
 
 
 def _diff(expected: str, actual: str) -> str:
@@ -136,11 +130,41 @@ def test_published_prompt_metrics_match_the_detector() -> None:
     assert METRICS["exact_source_spans"]["ratio"] == 1.0
 
 
+def _hooked(case: dict) -> tuple:
+    """The case's fixture through the whole Claude Code hook, as installed and
+    with no settings file: what the client is sent, and what was recorded."""
+    from shim_cli.hook import _output
+    from shim_cli.session import spool
+
+    raw = (FIXTURES / case["fixture"]).read_bytes()
+    payload = json.loads(raw)
+    assert payload["hook_event_name"] == case["event"]
+    output = _output(raw, "claude")
+    # What the model reads: the payload with any replacement the hook sent.
+    emitted = json.loads(raw)
+    specific = json.loads(output).get("hookSpecificOutput", {}) if output else {}
+    for field, root in (
+        ("updatedInput", "tool_input"),
+        ("updatedToolOutput", "tool_response"),
+    ):
+        if field in specific:
+            emitted[root] = specific[field]
+    return payload, emitted, output, spool.entries(payload["session_id"])
+
+
 @pytest.mark.parametrize("case", TOOLS["cases"], ids=lambda case: case["id"])
 def test_tool_corpus_output_is_exact(case: dict) -> None:
-    payload = json.loads((FIXTURES / case["fixture"]).read_text(encoding="utf-8"))
-    assert payload["hook_event_name"] == case["event"]
+    payload, emitted, output, records = _hooked(case)
 
+    if case["direction"] is None:
+        # No hook is installed for this event: nothing answered, nothing kept.
+        assert (output, records, case["expected_action"]) == (b"", [], None)
+    else:
+        [record] = records
+        assert record["direction"] == case["direction"]
+        assert record["action"] == case["expected_action"]
+        if record["entities"]:
+            assert (record["action"] == policy.MASK) is case["rewritable"], case["id"]
     for scanned in case["scanned"]:
         value = _at(payload, scanned["path"])
         assert isinstance(value, str)
@@ -150,17 +174,23 @@ def test_tool_corpus_output_is_exact(case: dict) -> None:
         assert [f.entity_type for f in decision.findings] == scanned["categories"], (
             f"{case['id']} at {scanned['path']}"
         )
-        emitted = value if not case["rewritable"] else decision.redacted_text
+        if "expected_redaction" in scanned:
+            assert decision.redacted_text == scanned["expected_redaction"], case["id"]
+        if "expected_redaction_sha256" in scanned:
+            digest = hashlib.sha256(decision.redacted_text.encode()).hexdigest()
+            assert digest == scanned["expected_redaction_sha256"], case["id"]
+        actual = _at(emitted, scanned["path"])
+        assert (actual == value) is scanned.get("unchanged", False), case["id"]
         if "expected_output" in scanned:
-            assert emitted == scanned["expected_output"], (
+            assert actual == scanned["expected_output"], (
                 f"{case['id']} at {scanned['path']}:\n"
-                + _diff(scanned["expected_output"], emitted)
+                + _diff(scanned["expected_output"], actual)
             )
         else:
-            digest = hashlib.sha256(emitted.encode()).hexdigest()
+            digest = hashlib.sha256(actual.encode()).hexdigest()
             assert digest == scanned["expected_output_sha256"], (
                 f"{case['id']} at {scanned['path']}: "
-                f"{len(emitted)} characters hashed to {digest}"
+                f"{len(actual)} characters hashed to {digest}"
             )
 
 
@@ -168,17 +198,15 @@ def test_tool_corpus_never_rewrites_disk_or_command_payloads() -> None:
     protected = [
         case
         for case in TOOLS["cases"]
-        if case["direction"] in ("local-write", "executable-text")
+        if case["direction"] in (policy.LOCAL_WRITE, policy.EXECUTABLE_TEXT)
     ]
     assert protected, "the corpus must cover payloads that are never rewritten"
 
     for case in protected:
-        assert case["rewritable"] is False, case["id"]
-        payload = json.loads((FIXTURES / case["fixture"]).read_text(encoding="utf-8"))
+        payload, emitted, output, _records = _hooked(case)
+        assert b"updatedInput" not in output, case["id"]
         for scanned in case["scanned"]:
-            value = _at(payload, scanned["path"])
-            assert scanned["unchanged"] is True, case["id"]
-            assert scanned["expected_output"] == value, case["id"]
+            assert _at(emitted, scanned["path"]) == _at(payload, scanned["path"])
             assert scanned["categories"], f"{case['id']} should still detect"
 
 
@@ -188,16 +216,14 @@ def test_tool_corpus_schema_and_coverage() -> None:
     assert TOOLS["version"] == 1
     assert len(cases) >= 20
     assert len({case["id"] for case in cases}) == len(cases)
-    assert {case["direction"] for case in cases} <= set(REWRITABLE)
+    assert {case["direction"] for case in cases} <= {*policy.DIRECTIONS, None}
     for case in cases:
-        assert case["rewritable"] is REWRITABLE[case["direction"]], case["id"]
+        assert isinstance(case["rewritable"], bool), case["id"]
         assert (FIXTURES / case["fixture"]).is_file(), case["id"]
         assert case["scanned"], case["id"]
         for scanned in case["scanned"]:
             inline = "expected_output" in scanned
-            assert inline is (
-                scanned["input_chars"] <= INLINE_LIMIT or not case["rewritable"]
-            ), case["id"]
+            assert inline is (scanned["input_chars"] <= INLINE_LIMIT), case["id"]
 
     events = {case["event"] for case in cases}
     assert {

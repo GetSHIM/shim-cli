@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pytest
@@ -360,3 +361,90 @@ def test_a_named_html_transform_survives_a_settings_round_trip() -> None:
     rendered = render_settings(("EMAIL",), diet=("json", "html")).decode()
 
     assert parse_settings(rendered)["diet"] == ("json", "html")
+
+
+def _settings_at(path: Path, *entities: str) -> Path:
+    path.write_bytes(render_entities(entities))
+    path.chmod(0o600)
+    return path
+
+
+def _counting(monkeypatch: pytest.MonkeyPatch, after=None) -> list:
+    """Every inspection of the settings file, with what it found."""
+    from shim_cli import settings_files
+
+    real = settings_files.inspect_file
+    seen: list = []
+
+    def inspect(path, max_bytes=1_000_000):
+        state = real(path, max_bytes)
+        seen.append(state.reason)
+        if after is not None:
+            after()
+        return state
+
+    monkeypatch.setattr(settings_files, "inspect_file", inspect)
+    return seen
+
+
+def test_a_settings_file_caught_mid_create_is_read_on_a_retry(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`shim config` creates the file by linking its temporary copy into place
+    and then unlinking the copy; between the two the file has two links."""
+    target = _settings_at(tmp_path / "config.toml", "EMAIL")
+    staging = tmp_path / ".config.toml.tmp"
+    os.link(target, staging)
+    seen = _counting(monkeypatch, after=lambda: staging.unlink(missing_ok=True))
+
+    assert load_policy(target).entities == ("EMAIL",)
+    assert seen == ["target must not be hard-linked", ""]
+
+
+def test_a_settings_file_replaced_mid_read_is_read_on_a_retry(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`shim config` updates by an atomic replace; a read that straddles it
+    sees the inode change between its stat and its open."""
+    target = _settings_at(tmp_path / "config.toml", "EMAIL")
+    published = _settings_at(tmp_path / "next.toml", "SECRET")
+    real_open = os.open
+
+    def racing_open(path, flags, mode=0o777, *, dir_fd=None):
+        if path == target.name and published.exists():
+            os.replace(published, target)
+        return real_open(path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(os, "open", racing_open)
+    seen = _counting(monkeypatch)
+
+    assert load_policy(target).entities == ("SECRET",)
+    assert seen == ["target changed during inspection", ""]
+
+
+def test_a_hard_link_that_stays_is_still_refused_after_the_retries(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from shim_cli.config import SettingsRefused
+
+    target = _settings_at(tmp_path / "config.toml", "EMAIL")
+    os.link(target, tmp_path / "elsewhere.toml")
+    seen = _counting(monkeypatch)
+
+    with pytest.raises(SettingsRefused, match="hard-linked"):
+        load_policy(target)
+    assert seen == ["target must not be hard-linked"] * 3
+
+
+def test_a_refusal_that_no_save_explains_is_not_retried(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from shim_cli.config import SettingsRefused
+
+    target = _settings_at(tmp_path / "config.toml", "EMAIL")
+    target.chmod(0o664)
+    seen = _counting(monkeypatch)
+
+    with pytest.raises(SettingsRefused, match="writable by another user"):
+        load_policy(target)
+    assert seen == ["target is writable by another user"]

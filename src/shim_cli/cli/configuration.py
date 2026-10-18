@@ -35,6 +35,7 @@ from shim_cli.guard.entities import (
     unsafe_pattern,
 )
 from shim_cli.settings_files import (
+    Action,
     InstallationError,
     apply,
     ensure_parent,
@@ -227,11 +228,10 @@ def configure(
             "Unset SHIM_CONFIG or set it to an absolute path.",
             as_json=as_json,
         )
-    changing = bool(
+    options = bool(
         only
         or enable
         or disable
-        or reset
         or ledger is not None
         or diet is not None
         or custom
@@ -240,11 +240,9 @@ def configure(
         or reveal
         or no_reveal
     )
+    changing = reset or options
     for conflicting, message in (
-        (
-            reset and (only or enable or disable),
-            "--reset cannot be combined with entity options.",
-        ),
+        (reset and options, "--reset cannot be combined with other options."),
         (
             only and (enable or disable),
             "--only cannot be combined with --enable or --disable.",
@@ -278,7 +276,7 @@ def configure(
         policy = policy_from_state(state)
     except ValueError as error:
         policy = None
-        if not (reset or only):
+        if not reset:
             problem = settings_check(error)
             assert problem.code is not None
             emit_error(
@@ -293,19 +291,19 @@ def configure(
             keep_reveal: dict = {}
             keep_markers = "report"
         else:
-            assert policy is not None or only
-            modes = policy.modes if policy else {}
-            tool_entities = policy.tool_entities if policy else {}
-            keep_ledger = policy.ledger if policy else False
+            assert policy is not None
+            modes = policy.modes
+            tool_entities = policy.tool_entities
+            keep_ledger = policy.ledger
             if ledger is not None:
                 keep_ledger = ledger
-            keep_diet = policy.diet if policy else DEFAULT_TRANSFORMS
-            keep_markers = policy.markers if policy else "report"
+            keep_diet = policy.diet
+            keep_markers = policy.markers
             if diet is not None:
                 keep_diet = DEFAULT_TRANSFORMS if diet else ()
             try:
                 keep_custom = _with_custom(
-                    [pattern.entry for pattern in policy.custom] if policy else [],
+                    [pattern.entry for pattern in policy.custom],
                     custom,
                     custom_literal,
                     remove_custom,
@@ -320,9 +318,7 @@ def configure(
                     as_json=as_json,
                 )
             try:
-                keep_reveal = _with_reveal(
-                    policy.reveal if policy else {}, reveal, no_reveal
-                )
+                keep_reveal = _with_reveal(policy.reveal, reveal, no_reveal)
             except ValueError as error:
                 emit_error(
                     "config",
@@ -331,16 +327,12 @@ def configure(
                     "Use --reveal IBAN=N, CREDIT_CARD=N or PHONE=N with N from 1 to 4.",
                     as_json=as_json,
                 )
-            if only:
-                enabled = normalize_entities(set(only))
-            else:
-                assert policy is not None
-                selected = set(policy.entities)
-                selected.update(enable)
-                if custom or custom_literal:
-                    selected.add(CUSTOM)
-                selected.difference_update(disable)
-                enabled = normalize_entities(selected)
+            selected = set(only) if only else set(policy.entities)
+            selected.update(enable)
+            if custom or custom_literal:
+                selected.add(CUSTOM)
+            selected.difference_update(disable)
+            enabled = normalize_entities(selected)
     except ValueError:
         emit_error(
             "config",
@@ -395,6 +387,15 @@ def configure(
             keep_markers,
         ),
     )
+    if plan.action is Action.REFUSE:
+        refusal = SettingsRefused(plan.message)
+        emit_error(
+            "config",
+            "SETTINGS_REFUSED",
+            describe_settings_error(refusal),
+            refusal_fix(plan.message, target),
+            as_json=as_json,
+        )
     if as_json and not yes:
         emit_error(
             "config",

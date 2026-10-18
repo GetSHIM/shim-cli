@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING
 
+from shim_cli import json_bytes
 from shim_cli.clients import user_prompt_hook
 
 if TYPE_CHECKING:
@@ -34,11 +34,10 @@ def parse_input(raw: bytes | dict[str, object]) -> str:
 def _rewrite(text: str) -> bytes:
     if not text:
         raise ValueError("Copilot prompt rewrite must not be empty")
-    return json.dumps(
+    return json_bytes.dumps(
         {"modifiedTransformedPrompt": text},
-        ensure_ascii=False,
         separators=(",", ":"),
-    ).encode()
+    )
 
 
 def warn_output(decision: GuardDecision) -> bytes:

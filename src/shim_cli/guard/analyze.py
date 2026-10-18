@@ -100,6 +100,9 @@ def _resolve_overlaps(items: Iterable[Finding]) -> list[Finding]:
     def collapse() -> None:
         if not component:
             return
+        if len(component) == 1:
+            resolved.append(component[0])
+            return
         winner = min(
             component,
             key=lambda item: (
@@ -205,7 +208,10 @@ def analyze_counting(
         raise
     except Exception as error:
         raise ValueError("Guard analysis failed safely.") from error
-    return (
-        tuple(_source_findings(normalized_findings, normalized.source_spans)),
-        _unclaimed(bare, normalized_findings),
+    # The ASCII fast path hands the text back unchanged, every character its own.
+    findings = (
+        normalized_findings
+        if normalized.text is text
+        else _source_findings(normalized_findings, normalized.source_spans)
     )
+    return tuple(findings), _unclaimed(bare, normalized_findings)

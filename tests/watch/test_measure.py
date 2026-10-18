@@ -433,7 +433,7 @@ def test_the_memo_is_bounded_and_keeps_counts_rather_than_text() -> None:
     assert "tool-0" not in stored
     assert all(
         isinstance(entity, str) and isinstance(count, int)
-        for counts, _named in memo._counts.values()
+        for counts, _named, _partial in memo._counts.values()
         for entity, count in counts.items()
     )
 

@@ -361,6 +361,8 @@ _INCOMPLETE_SENTENCES = {
     measure.BODY_TOO_LARGE: "had a body over the scan limit",
     measure.NOT_JSON: "could not be read as JSON",
     measure.TOO_MANY_FIELDS: "had more text fields than shim scans at once",
+    measure.NOT_ANALYSED: "held text the detector could only analyse in part",
+    measure.UNFINISHED: "had not finished inspection when the report was written",
 }
 
 

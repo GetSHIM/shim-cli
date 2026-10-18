@@ -5,6 +5,8 @@ import math
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from shim_cli import json_bytes
+
 if TYPE_CHECKING:
     from shim_cli.guard import GuardDecision
 
@@ -75,7 +77,7 @@ def _json_block(reason: str, suppress_original_prompt: bool) -> bytes:
     document: dict[str, object] = {"decision": "block", "reason": reason}
     if suppress_original_prompt:
         document["suppressOriginalPrompt"] = True
-    output = json.dumps(document, ensure_ascii=False, separators=(",", ":")).encode()
+    output = json_bytes.dumps(document, separators=(",", ":"))
     if len(output) > MAX_OUTPUT_BYTES:
         raise ValueError("block output exceeds 4,096 bytes")
     return output
@@ -151,7 +153,7 @@ def warn_output(decision: GuardDecision, held: tuple = (), unread: tuple = ()) -
     if not parts:
         return b""
     document = {"systemMessage": " ".join(parts)}
-    output = json.dumps(document, ensure_ascii=False, separators=(",", ":")).encode()
+    output = json_bytes.dumps(document, separators=(",", ":"))
     if len(output) > MAX_OUTPUT_BYTES:
         raise ValueError("warn output exceeds 4,096 bytes")
     return output

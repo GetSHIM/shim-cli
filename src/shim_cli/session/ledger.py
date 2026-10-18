@@ -6,6 +6,8 @@ import json
 import os
 from pathlib import Path
 
+from shim_cli import json_bytes
+
 from . import _files
 
 RETENTION_DAYS = 30
@@ -95,7 +97,7 @@ def prune(now: datetime.datetime | None = None) -> int:
 
 def append(entry: dict, now: datetime.datetime | None = None) -> bool:
     moment = now or datetime.datetime.now(datetime.timezone.utc)
-    line = json.dumps(entry, ensure_ascii=False, sort_keys=True).encode() + b"\n"
+    line = json_bytes.dumps(entry, sort_keys=True) + b"\n"
     prune(moment)
     root = _open_root()
     try:

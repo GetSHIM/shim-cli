@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -17,6 +18,11 @@ except ModuleNotFoundError:
     import tomli as tomllib
 
 MAX_CONFIG_BYTES = 16_384
+# `shim config` publishes by linking a copy into place and unlinking the copy,
+# or by an atomic replace. A read in that instant sees a second link or a
+# changed inode; it is a save in progress, not an unsafe file, so look again.
+_PUBLISHING = ("target changed during inspection", "target must not be hard-linked")
+_READS = 3
 
 
 class SettingsRefused(ValueError):
@@ -210,15 +216,26 @@ def parse_settings(text: str) -> dict:
     }
 
 
+def _inspect(path: Path) -> FileState:
+    from shim_cli import settings_files
+
+    for _ in range(_READS - 1):
+        state = settings_files.inspect_file(path, MAX_CONFIG_BYTES)
+        if state.reason not in _PUBLISHING:
+            return state
+        time.sleep(0.01)
+    return settings_files.inspect_file(path, MAX_CONFIG_BYTES)
+
+
 def load_policy(path: Path | None = None) -> policy.Policy:
-    from shim_cli.settings_files import StateKind, inspect_file
+    from shim_cli.settings_files import StateKind
 
     if path is not None:
-        return policy_from_state(inspect_file(_validated_path(path), MAX_CONFIG_BYTES))
-    state = inspect_file(config_path(), MAX_CONFIG_BYTES)
+        return policy_from_state(_inspect(_validated_path(path)))
+    state = _inspect(config_path())
     # The hook reads the 0.2.0 file until a CLI command moves it. It never writes.
     if state.kind is StateKind.ABSENT and (legacy := legacy_config_path()) is not None:
-        state = inspect_file(legacy, MAX_CONFIG_BYTES)
+        state = _inspect(legacy)
     return policy_from_state(state)
 
 

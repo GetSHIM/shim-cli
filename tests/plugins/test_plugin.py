@@ -62,6 +62,102 @@ def test_the_plugin_and_the_installer_register_the_same_events(
     assert set(document["hooks"]) == expected
 
 
+def _registered_commands(client: str) -> list[tuple[str, tuple[str, ...]]]:
+    """Every (event, argv) a client runs from this plugin's hook file."""
+    if client == "vscode":
+        document = json.loads(
+            (PLUGIN_ROOT / "com.github.copilot" / "hooks" / "hooks.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        handlers = [
+            (event, handler)
+            for event, entries in document["hooks"].items()
+            for handler in entries
+        ]
+    else:
+        document = json.loads(_declared_hooks(client).read_text(encoding="utf-8"))
+        handlers = [
+            (event, handler)
+            for event, groups in document["hooks"].items()
+            for group in groups
+            for handler in group["hooks"]
+        ]
+    if client == "claude":
+        # Claude Code runs the command itself, with the plugin root substituted.
+        return [
+            (
+                event,
+                (
+                    handler["command"].replace(
+                        "${CLAUDE_PLUGIN_ROOT}", str(PLUGIN_ROOT)
+                    ),
+                    *handler.get("args", ()),
+                ),
+            )
+            for event, handler in handlers
+        ]
+    return [
+        (event, ("/bin/sh", "-c", handler["command"])) for event, handler in handlers
+    ]
+
+
+@pytest.mark.parametrize("client", ("claude", "codex", "vscode"))
+def test_missing_runtime_fails_closed(client: str, tmp_path) -> None:
+    """With no Python to run the hook, a prompt is withheld, never sent unread.
+
+    A tool call is denied, as the hook denies one it cannot inspect. Every
+    other event is told it was not inspected, on stdout where the client
+    shows it, rather than passing in silence.
+    """
+    import subprocess
+
+    from shim_cli.hook import _DENIED_CALL, _error_output
+
+    shell_only = tmp_path / "bin"
+    shell_only.mkdir()
+    (shell_only / "sh").symlink_to("/bin/sh")
+    environment = {
+        "PATH": str(shell_only),
+        "HOME": str(tmp_path),
+        "TMPDIR": str(tmp_path),
+        "CLAUDE_PLUGIN_ROOT" if client == "claude" else "PLUGIN_ROOT": str(PLUGIN_ROOT),
+    }
+    commands = _registered_commands(client)
+    assert "UserPromptSubmit" in {event for event, _argv in commands}
+
+    for event, argv in commands:
+        result = subprocess.run(
+            argv,
+            input=json.dumps(
+                {"hook_event_name": event, "prompt": "AKIAIOSFODNN7EXAMPLE"}
+            ).encode(),
+            capture_output=True,
+            env=environment,
+            check=False,
+            timeout=60,
+        )
+
+        assert result.returncode == 0, event
+        assert b"AKIAIOSFODNN7EXAMPLE" not in result.stdout + result.stderr
+        if event == "UserPromptSubmit":
+            assert result.stdout == _error_output(client), event
+            assert result.stderr == (
+                b"shim: no python3 found on PATH; the prompt was withheld.\n"
+            )
+        elif event == "PreToolUse":
+            assert result.stdout == _DENIED_CALL, event
+            assert result.stderr == (
+                b"shim: no python3 found on PATH; the tool call was not allowed.\n"
+            )
+        else:
+            assert json.loads(result.stdout) == {
+                "systemMessage": "shim: no python3 found on PATH; "
+                "this event was not inspected."
+            }, event
+            assert result.stderr == b"", event
+
+
 def _manifest(home, *keys: str) -> None:
     import json as _json
 

@@ -18,13 +18,26 @@ file read, grep, the output of a command that succeeded, or an MCP response is
 masked in place before the model sees it. Codex and Copilot currently install no
 tool-event adapter.
 
-Four things follow, and all four are limits rather than features:
+Five things follow, and all five are limits rather than features:
 
 - Masking an outbound tool argument is **egress control**, not model
   protection. The model produced that argument, so it has already seen the
-  value; masking stops it leaving the machine. It does not approve the call:
-  Claude Code's permission rules still decide whether it runs, and they see
-  the masked arguments.
+  value; masking stops it leaving the machine. Only the arguments of tools
+  known to send them over the network are masked: `WebFetch` and `WebSearch`
+  in Claude Code. The user is shown `shim: masked EMAIL (1) in WebFetch.`
+  Masking does not approve the call: Claude Code's permission rules still
+  decide whether it runs, and they see the masked arguments.
+- An MCP tool's arguments, and those of any tool shim does not know, are
+  **never rewritten**, because shim cannot tell where they go. Under the
+  default `enforce`, a call carrying a finding is refused (`shim cannot tell
+  where this tool sends its input, so it refuses the call rather than rewrite
+  it.`); `outbound = "warn"`, or a key for that tool such as
+  `"mcp__crm__lookup" = "warn"` under `[mode]`, reports it instead. The input
+  of a local tool (`Read`, `Grep`, `Glob`, a sub-agent's task, a question to
+  you) is never rewritten or refused at all: it names a file or a pattern on
+  this machine, so rewriting it breaks the call and keeps nothing from
+  leaving. A finding there is reported (`shim: found EMAIL (1) in Read. Not
+  modified.`), under the `local-tool` direction.
 - `Bash` commands and `Write`/`Edit` content are **never rewritten**. Editing a
   command changes what runs, and editing a write payload puts a placeholder
   into a real file. Both are detected and can be warned about or denied.
@@ -88,7 +101,10 @@ Users may enable or disable public entity types with `shim config`. The default
 preset enables all supported types. The local settings file contains policy
 labels and booleans, never prompt-derived data. An invalid or unsafe settings
 file causes the hook to return its generic fail-closed response rather than
-silently ignoring the policy.
+silently ignoring the policy: while the file is refused, every prompt is
+withheld, tool calls are denied and tool results are withheld, each naming
+`settings unreadable`. A file that `shim config` is in the middle of saving is
+read again, up to three times, rather than refused.
 
 Where a checksum exists it is verified, so a mistyped IBAN or Turkish national
 ID is not reported. An email address counts only on a public domain, one on the
@@ -165,7 +181,11 @@ succeeds can still show its work. No entry holds prompt text, tool input or
 response bodies, command strings, or detected values. Records keep decisions,
 counts, byte measurements, bounded labels, and a scrubbed file path or URL
 because those are what make the summary useful. A target is run through the
-detector first, so a secret inside a path is masked there too. A shell command
+detector first, so a secret inside a path is masked there too. For an event
+shim could not inspect, and for the name of a file attached with `@`, that
+scrub uses the built-in default types only, so a value that only your custom
+pattern or an opt-in type matches is recorded as written; 1.2.3 scrubs every
+record with your settings. A shell command
 is never kept at all — the probe corpus contains one carrying a live
 credential.
 
@@ -238,9 +258,11 @@ and the value itself is still replaced.
 
 Four digits of a mobile number identify a person within a small team, so
 `PHONE` is the least conservative of the three; it is allowed, off by default,
-and worth a deliberate decision. Session records never quote a placeholder
-today, so a revealed tail does not reach the record or the ledger; if that ever
-changes, this sentence is the boundary it would cross.
+and worth a deliberate decision. A session record's target is scrubbed with the
+same setting, so a file path that holds an IBAN is recorded as
+`/<IBAN_1:5432>/...` and the revealed tail reaches the record and the ledger.
+That crosses the boundary this section draws, and 1.2.3 scrubs records without
+the tail.
 
 ### Patterns you named yourself
 
@@ -285,24 +307,51 @@ given, from a file you attached for example.
 
 ### When shim cannot inspect something
 
-Some payloads cannot be scanned: a tool result past the size bound, or an
-analysis that fails. What happens next depends on which side it is, and the
-asymmetry is deliberate.
+Some payloads cannot be scanned: an event past the 1 MB input bound, nesting
+deeper than 64 levels, JSON that does not parse, a settings file that is
+refused, an analysis that fails or runs out of time, or a shim module that
+will not load. shim then fails closed, in every mode, `observe` included.
 
-On a **prompt**, shim fails closed. The prompt is withheld and the message
-names `shim doctor`, because the usual cause is a settings file that will not
-parse, and that blocks every prompt of the session until it is fixed. A
-prompt longer than 100,000 characters is scanned in pieces, and one piece that
-cannot be scanned withholds the whole prompt. A file attached with `@` is the
-exception: it is reported as not inspected, and the prompt goes through.
+On a **prompt**, the prompt is withheld and the message names `shim doctor`,
+because the usual cause is a settings file that will not parse, and that blocks
+every prompt of the session until it is fixed. A prompt longer than 100,000
+characters is scanned in pieces, and one piece that cannot be scanned withholds
+the whole prompt. A file attached with `@` is the exception: it is reported as
+not inspected, and the prompt goes through.
 
-On a **tool event**, uninspectable content passes through unchanged. Validated
-redactions in independently rewritable sibling fields are preserved according
-to policy. The client and session summary explicitly report incomplete
-inspection, with bounded reason codes and skipped field or subtree counts.
-Commands and local writes are never rewritten. If no inspection is possible,
-the event passes through unchanged and unmasked with a visible warning; prompt
-errors still fail closed.
+On a **tool event**, an event read only in part is treated as one not read at
+all, never partly masked:
+
+- A **call** (`PreToolUse` in Claude Code and VS Code) is refused:
+  `shim: could not inspect this WebFetch call (settings unreadable), so it was
+  not allowed.` A `Write` or `Edit` over 1 MB is refused the same way.
+- A **Claude Code result** is withheld. An MCP tool's result is replaced whole
+  by `[withheld by shim]`. A built-in tool's result keeps its shape — every
+  key, one item of each list, zero for each number, and the few words its
+  output schema pins, such as `type: "text"` — and every other string becomes
+  `[withheld by shim]`, because Claude Code 2.1.286 checks a built-in tool's
+  replacement against that tool's output schema and, when it does not match,
+  sends the model the original instead. Two results are sent to the API as
+  more than text, and a blanked one would be refused on every later request of
+  the session: `ToolSearch` keeps the tool names it found, which are Claude
+  Code's own and not content, and a `Read` of an image or a PDF is withheld as
+  a text `Read`. You see `shim: withheld this Read result; it could not be
+  inspected (settings unreadable).`, and the model is told the result is not
+  empty and to ask you how to continue.
+- Where the client can do neither — a failed call's output
+  (`PostToolUseFailure`), any VS Code result, or a built-in result whose shape
+  never arrived because the event was over 1 MB, cut short, or on Python 3.10
+  nested beyond about 1,000 levels — you and the model are told it was not
+  inspected (`the model has it as it was`), and the model is told not to repeat
+  values from it.
+
+The reason is one of four words: `deadline`, `too large`,
+`settings unreadable` or `analysis failed`. No message and no record carries
+text from the payload. The session summary counts such events as
+`skipped N not inspected, withheld or refused`, or `passed through` where the
+client allowed nothing else. If a shim module fails to import after an upgrade,
+the hook still answers from fixed text: prompts are blocked, calls refused, an
+MCP result withheld and any other result reported.
 
 **The output of a failed tool call cannot be masked.** Claude Code delivers
 it, including everything the command printed before it failed, to
@@ -325,17 +374,28 @@ limit is cut where it must be, and the next piece starts 4,096 characters
 earlier, so a value on one line up to that length is read whole wherever the
 cut falls. A value written across a line break — a PEM block, a wrapped key,
 an IBAN broken between two groups — can still fall in a seam and go
-unreported. A piece that grows past the
-detector's limit when it is normalized, as Korean text does, is cut in half and
-scanned again, down to pieces of 25,000 characters. If one piece fails, the
-others are still masked and the summary counts the event as partially
-inspected. When the hook's own 25-second deadline runs out in the middle of a
-field, that field and every later one pass through unmasked, and the summary
-says the event was only partly inspected.
+unreported. A piece that grows past the detector's 200,000-character limit when
+it is normalized, as Korean text does, is cut where it stopped fitting and the
+rest scanned as the next piece, so even text in which every character expands
+eighteen-fold (U+FDFA) is read in pieces of 11,111 characters: expanding
+Unicode cannot switch detection off for a field. If any piece fails, or the
+hook's own 25-second deadline runs out, the whole event is withheld or refused
+as described above.
 
-A field so large that the whole event exceeds shim's 1 MB input bound is not
-scanned at all. It passes through unchanged and is now counted in the session
-summary by tool and file, so a skipped read is visible rather than absent.
+The detector reads most text up to the 1 MB input bound well inside that
+deadline. Measured on an M1 under load, 1 MB took about 2.5 s for a numeric
+CSV, 3 s for a run of base64, 1 s for e-mail punctuation and 5 s for a list of
+IP addresses; text that expands eighteen-fold costs about 3 s per 100,000
+characters. Not all text: the phone scan reads a long line dense with short
+numbers, such as `- 0 - 0 - 0` repeated, at about 6 s per 100,000 characters,
+so a field of a few hundred thousand such characters reaches the deadline and
+is handled as above, as an event shim could not inspect. A phone-shaped number
+deep in a long table is still checked: the phone library's limit of 65,535
+tries per text no longer applies.
+
+An event over shim's 1 MB input bound is not scanned at all. It is refused or
+withheld as above, and counted in the session summary by tool and file, so a
+skipped read is visible rather than absent.
 
 ## What is changed on the way in
 
@@ -347,10 +407,11 @@ shim: masked EMAIL (1), SECRET (1) in Read. Placeholders such as <EMAIL_1> stand
 ```
 
 It carries entity names, their counts and the tool name, nothing else. Codex
-and Copilot do not mask tool results, and a masked tool argument gets no such
-sentence.
+and Copilot do not mask tool results. A masked tool argument gets no sentence
+for the model; you are shown `shim: masked EMAIL (1) in WebFetch.` instead,
+because the call runs with input the model did not write.
 
-The one other sentence shim can add is opt-in. With `markers = "note"` in the
+One more sentence is opt-in. With `markers = "note"` in the
 settings file, a Claude Code `PostToolUse` result that reads as instructions
 gets, beside it:
 
@@ -363,7 +424,12 @@ reaches the model unchanged. Without the setting, markers are counted for the
 session summary and nothing reaches the model.
 
 At Claude's verified result event, shim can also compact tool results so they
-take less of the model's context. Every transform is deterministic and
+take less of the model's context. Only the results of network tools (`WebFetch`,
+`WebSearch`) and MCP tools are reshaped, never a local tool's, a command's
+(`curl` through `Bash` included) or an unknown tool's. A reshaped result always
+carries one sentence for the model, `shim: reformatted this result to save
+space (json); it is not byte-for-byte what the tool returned.` Every transform
+is deterministic and
 idempotent, because the provider's prompt cache only hits if the history is
 byte-identical on every request, so a transform that drifts costs money instead
 of saving it.
@@ -375,12 +441,13 @@ trailing spaces. It never changes a line count. `html` is opt in because it is
 not lossless: a result that is a whole HTML page reaches the model as text, its
 markup, scripts and styles dropped and a header line saying so. Masking runs
 first, and a placeholder stays a placeholder. The converted text is then scanned
-again, because decoding entities and joining text split across tags can
-assemble a value the first scan could not see (`ops&#64;example&#46;com`, an IBAN
-split across `<span>`s); what it finds is masked and counted, and if that scan
-fails the page is left unconverted. Injection markers are read from the
-converted text too. Like every transform, the record keeps only its name and
-the sizes before and after, never the page.
+again, because decoding entities can assemble a value the first scan could not
+see: `ops&#64;example&#46;com` is masked and counted, and if that scan fails the
+page is left unconverted. A value split across tags is not yet caught whole: the
+first scan masks part of an IBAN split across two `<span>`s, so the second sees
+only the rest and its first groups reach the model (fixed in 1.2.3). Injection
+markers are read from the converted text too. Like every transform, the record
+keeps only its name and the sizes before and after, never the page.
 
 JSON is compacted by a lexer rather than by parsing and re-serialising:
 re-serialising rewrites number literals (`1.10` becomes `1.1`, a long decimal
@@ -390,14 +457,15 @@ keep their line count, so blank lines are never collapsed. Nothing is ever
 truncated or summarised.
 
 Diet applies to tool **results** only — never a tool's arguments, never a local
-write, and never under `mode = "observe"`. It also stops at any result that is
-a *view of a file*: the model reproduces those bytes to edit the file, and
+write, and never under `mode = "observe"`. It never touches a local tool's
+result or a command's output, which may be a file the model goes on to edit:
 `Edit` matches `old_string` against what is on disk rather than against what
 the model was shown, so reshaping a file on the way in makes the next edit of
-it miss. `shim config --no-diet` turns it off. To opt in to whitespace while
-keeping JSON, set `diet = ["json", "whitespace"]`; for HTML pages,
-`diet = ["json", "html"]`. No PDF, Word or other binary document is read,
-decoded or converted.
+it miss. An MCP server that reads files is the exception: its result is
+compacted, with the sentence above. `shim config --no-diet` turns it off. To
+opt in to whitespace while keeping JSON, set `diet = ["json", "whitespace"]`;
+for HTML pages, `diet = ["json", "html"]`. No PDF, Word or other binary
+document is read, decoded or converted.
 
 shim also flags text in a result that reads as an instruction to the model.
 Invisible-character detection covers the zero-width space, the invisible
@@ -432,14 +500,20 @@ was replaced.
 
 Some clients require review and trust for non-managed hooks. A hook can be
 disabled, untrusted after a change, missing, unable to start, crash, or time
-out; those outcomes are client-controlled and may fail open. shim does not
+out; those outcomes are client-controlled and may fail open. The plugin's
+launcher closes one of them: with no Python that can run the hook, or only one
+older than 3.9, it withholds the prompt and refuses a tool call itself, and
+tells you a tool result was not inspected. A hook written into the client's
+settings by `shim install` has no launcher, so there an interpreter that has
+gone missing may still fail open, as the client decides; `shim install` and
+`shim status` run that exact command before calling it working. shim does not
 promise detection of every value, inspection of automatic context, or secure
 erasure of Python process memory. Only events listed by `shim doctor <client>`
 are inspected; anything reaching the model by another route is outside that
 list. VS Code, which has no doctor target, hands shim the prompt, a tool call
 before it runs and the tool's result, but a `read_file` result arrives empty:
 an agent reading `.env` in VS Code is neither masked nor reported, and only
-values in the file's path are caught, before the read.
+values in the file's path are reported, before the read.
 
 Installer checks detect unsafe paths and observed drift, but they are not an
 isolation boundary against a malicious process already running as the same OS
@@ -450,6 +524,91 @@ Review every temporary redaction before resubmission. The detector can miss
 sensitive content. Turkish licence plates are looked for only after `shim
 config --enable TR_LICENSE_PLATE`; with the defaults a plate reaches the model
 as typed.
+
+## An agent turning shim off
+
+An agent that can rewrite shim's settings or hooks can switch shim off from
+inside the session it guards. So in every mode, and whatever else it finds, the
+hook refuses an agent's tool call that would do it, and says only the name of
+the file or the subcommand:
+
+```text
+shim: refused this change to config.toml, which holds shim's settings or hooks; an agent that can change it can turn shim off. To change it, edit it yourself in your own terminal.
+shim: refused `shim config`; an agent that can run it can turn shim off. To run it, run it yourself in your own terminal.
+```
+
+**Files.** A write by `Write`, `Edit`, `MultiEdit` or `NotebookEdit`, or by VS
+Code's `create_file`, `replace_string_in_file`, `multi_replace_string_in_file`,
+`insert_edit_into_file`, `edit_notebook_file` or `apply_patch` (every `Add`,
+`Update`, `Delete` and `Move to` file it names), is refused when it would
+change:
+
+- shim's settings: `SHIM_CONFIG`, or `$XDG_CONFIG_HOME/shim/config.toml` or
+  `~/.config/shim/config.toml`, and the 0.2.0 `~/.config/shim-guard/config.toml`
+  unless `SHIM_CONFIG` pins the path;
+- while it holds shim's hooks: `~/.claude/settings.json` (or under
+  `CLAUDE_CONFIG_DIR`), `~/.codex/hooks.json` and `~/.codex/config.toml`,
+  which can switch Codex's hooks off (or under `CODEX_HOME`), and
+  `~/.copilot/hooks/shim.json` (or under `COPILOT_HOME`). Claude Code's
+  settings also count while `enabledPlugins` turns on `shim-cli` or
+  `shim-guard`;
+- any file in the plugin folder running the hook (`CLAUDE_PLUGIN_ROOT`, or VS
+  Code's `PLUGIN_ROOT`, recognised by its `hooks/run-shim`): the hook files,
+  the launcher, `bin/shim.pyz`, and new files there.
+
+A path is read as the tool reads it: relative to the event's folder, with `~`
+expanded and links followed, and a hard link to a settings file that exists is
+caught. It is compared without regard to case or Unicode normalisation, as
+macOS's default disk compares names, so another spelling of a settings file
+that does not exist yet is refused too, on Linux as well. VS Code's URI
+spellings are read as its edit tools read them: `file:///p`, `file://host/p`,
+percent escapes, `vscode-userdata:`, and any path not starting with `/` that
+holds `scheme:`.
+
+**Commands.** A command run by `Bash`, `PowerShell` or `Monitor`, or by VS
+Code's `run_in_terminal`, `send_to_terminal` or `create_and_run_task` (its
+command and arguments as VS Code quotes them for bash or zsh, per-platform
+overrides included), is refused when it runs `shim` with the subcommand
+`config`, `revert` or `uninstall`. Every `shim config` is refused, including
+the one that only shows the settings. The program counts as `shim` when it is
+named `shim` or a path ending in `/shim`, in any case (macOS runs `SHIM`), or
+as zsh's `=shim`. shim looks past `--` before the subcommand, `VAR=value`,
+`command`, `exec` and `env` with their options, the shell's reserved words,
+`coproc`, and zsh's `noglob`, `nocorrect` and `-`, and inside `;`, `&&`, `||`,
+`|`, `&`, new lines, `( )`, `$( )` and backticks. Quoted text and the body of a
+here-document are data, so `grep "shim config" README.md` runs.
+
+The record says `deny`, with the note `self-protection` and the scrubbed
+target; neither the command nor the content is stored. The session summary
+does not list these refusals yet.
+
+**What is not caught.** For these routes the client's permission prompt
+remains the guard, and under `bypassPermissions` there is none:
+
+- the shell writing or removing the file: `>`, `sed -i`, `tee`, `cp`, `mv`,
+  `rm`, `ln`, including a hard link into the plugin folder;
+- an interpreter running shim or writing the file (`python -c ...`,
+  `node -e ...`);
+- wrappers whose command is a string or another program's argument:
+  `bash -c`, `sh -c`, `eval`, `env -S`, `xargs`, `sudo`, `nohup`, `timeout`,
+  `uvx`, `uv run`, `pipx run`;
+- a program name that is not written out: `$S config`,
+  `$(command -v shim) config`, an alias or a function, and substitutions inside
+  an unquoted here-document;
+- `uv tool uninstall shim` and `pipx uninstall shim`;
+- an MCP server's file writes, which are refused only when they carry a
+  finding and `outbound` is `enforce`, the default;
+- a project's `.claude/settings.json` or `settings.local.json` setting
+  `"disableAllHooks": true` or turning the plugin off in `enabledPlugins`, and
+  Claude Code's own `/hooks` and `/plugin` screens;
+- `~/.claude/plugins/installed_plugins.json` and the marketplace clone under
+  `~/.claude/plugins/marketplaces/`, which the next plugin update reads;
+- VS Code's user `settings.json` entry `chat.pluginLocations`, profiles
+  included, which is the only switch for the VS Code plugin, and a VS Code
+  task's `options.shell` override.
+
+Codex and GitHub Copilot CLI send shim no tool event, so nothing an agent runs
+there is seen.
 
 
 ## `shim watch`
@@ -462,7 +621,8 @@ Every text field of that body is offered to the detector: message content in
 either form, the text inside a tool result, the arguments of a tool call, the
 system prompt and the tool definitions. Two kinds of field are skipped because
 they are opaque rather than prose — the `data` of a base64 attachment and a
-thinking block's `signature`. Findings are attributed to the section they came
+thinking block's `signature` (a field named `signature` in a tool call or
+anywhere else is scanned). Findings are attributed to the section they came
 from, so the summary can say what was in your prompt separately from what the
 client's own scaffolding carried.
 

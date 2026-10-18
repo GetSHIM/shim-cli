@@ -22,9 +22,46 @@ Apply the `ponytail:ponytail` and `code-writing-guidelines` skills to every impl
 - Safe hook input must produce exactly empty stdout and stderr.
 - Handled prompt errors must block with a generic native response. On Windows
   the hook stands down with one line and inspects nothing: that is the absence
-  of the inspector, not a handled error, so it does not block. A verified
-  tool event that cannot be inspected must pass through unchanged and report
-  the failure without denying already-created work.
+  of the inspector, not a handled error, so it does not block.
+- A tool event shim cannot finish inspecting fails closed in every mode,
+  `observe` included, as a prompt does. That covers the deadline, analysis
+  failure, nesting deeper than `MAX_DEPTH` (64), input over 1 MB, malformed
+  JSON, unreadable settings and a shim module that fails to import. A call
+  (`PreToolUse` on Claude Code and VS Code) is denied. A Claude Code result is
+  withheld: a built-in tool's result keeps its schema shape down to depth 64
+  (keys, kind words, zeroed numbers) with every other string replaced by
+  `[withheld by shim]`, and an MCP result is replaced whole. Where the client
+  can do neither (`PostToolUseFailure`, VS Code `PostToolUse`, a built-in
+  result whose shape never arrived), the user and the model are told it was
+  not inspected and the model is told not to repeat values from it. Messages
+  and records carry only the category (`deadline`, `too large`,
+  `settings unreadable`, `analysis failed`), never payload text. If even the
+  client adapter cannot load, the static answers in `hook.py` still deny the
+  call, withhold an MCP result, report any other result and block the prompt.
+- Tool inputs are classified per client by where they go (`policy.TOOLS`).
+  The input of a local built-in tool (`Read`, `Grep`, `Glob`, VS Code
+  `read_file`, ...: the `local-tool` direction) is never rewritten or refused,
+  only reported. Known network tools (`WebFetch`, `WebSearch`, VS Code
+  `fetch_webpage`) are masked under `enforce`. An MCP tool, or any tool shim
+  does not know, is never rewritten: under `enforce` a call carrying a finding
+  is denied. Commands and local writes keep their own directions. The diet
+  reshapes only results of network and MCP tools.
+- In every mode, and whatever else it finds, the hook refuses an agent's write
+  to shim's settings, to a client settings file that holds or switches on
+  shim's hooks, or to a file in the plugin folder running the hook, and an
+  agent's shell command that runs `shim` with `config`, `revert` or
+  `uninstall`. The reason names only the file or the subcommand. Other routes
+  (the shell writing the file, an interpreter, `sh -c`, MCP tools) are not
+  caught, and `docs/privacy.md` must keep saying so. If your active plugin
+  folder (`claude --plugin-dir`, `chat.pluginLocations`, `CLAUDE_PLUGIN_ROOT`)
+  is your working checkout of `plugins/shim-cli`, agent edits inside it are
+  refused: point the plugin at a separate clone.
+- The plugin launcher withholds a prompt and denies a tool call when no hook
+  can run, falls through interpreters that cannot start, and runs Python
+  isolated (`-I` for the archive, `-E` for the package script).
+  `scripts/build_zipapp.py` `INCLUDED` must list every module the hook imports,
+  for write tools too; `tests/plugins/test_u07_plugin_self_defense.py` runs the
+  archive through the launcher.
 - Entity settings default to every built-in type except the opt-in types in
   `guard/entities.py`; malformed or unsafe settings fail closed, and no
   settings field may contain prompt-derived data.
@@ -40,12 +77,26 @@ Apply the `ponytail:ponytail` and `code-writing-guidelines` skills to every impl
   and costs a reviewer time. `tests/contracts/test_no_local_leakage.py` checks
   every tracked file, with the markers read from the environment so it protects
   whoever runs it.
-- Install may create a missing client settings file or append shim's exact hook
-  groups last while preserving unrelated settings and hooks; revert removes
-  only those groups and retains the document even when empty.
+- A hook is shim's when its handler is exactly what a release wrote, whatever
+  the interpreter: type `command`, the release's keys, and
+  `<python> -I -B -m shim_cli.hook` (or the 0.2.0 `shim_guard.hook`) plus the
+  client's argument, a shell command quoted exactly as shim quotes it. Any
+  other hook is the user's and is never changed or removed, including one that
+  runs shim and something else, another hook type, an extra argument or an
+  extra key.
+- Install may create a missing client settings file. It leaves exactly one
+  current shim group per registered event: it removes every other shim group
+  (another installation's, a 0.2.0 group, a stray event, a duplicate) and
+  appends its own last, preserving unrelated settings and hooks. Revert removes
+  every shim group and retains the document even when empty.
+- Install and status run the exact isolated hook command they register on a
+  safe and a sensitive fixture before calling it working. It is the only guard
+  against a hook that fails open at the client, as a `pip install --user`
+  shim does under `-I`.
 - Keep install and revert idempotent, leave Codex inline `config.toml` hooks
-  untouched, preview only shim's fragment, and require manual setup for malformed,
-  ambiguous, unsafe, or concurrently changed files.
+  untouched, preview only shim's fragment, and require manual setup for
+  malformed, unsafe, or concurrently changed files and for a group where
+  shim's handler sits beside another hook.
 - Do not add clients, auth, telemetry, daemons, plugin frameworks, or
   compatibility shims without an approved requirement. `shim watch` is the only
   approved proxy and it is opt-in per command: nothing may route a client
@@ -67,3 +118,8 @@ floor and 3.14. Run the complete local check from the repository root:
 ```bash
 python scripts/check.py
 ```
+
+`scripts/benchmark_hook.py` gates hook latency in CI and in `release.yml`: a
+fixture whose median passes its ceiling in `CEILINGS_MS` fails the run. Do not
+pass `--ceiling-scale` in a workflow, and raise a ceiling only with a measured
+reason.

@@ -5,6 +5,7 @@ import errno
 import io
 import json
 import os
+import shlex
 import stat
 import subprocess
 import sys
@@ -558,6 +559,12 @@ def test_demo_shows_the_sentence_before_and_after_and_what_the_client_does(
 def test_confirmation_and_doctor(monkeypatch, tmp_path: Path) -> None:
     _codex_home(monkeypatch, tmp_path)
     _codex(monkeypatch, tmp_path)
+    # A uv or pipx install puts shim-hook on PATH beside shim. Pin it here, so
+    # the result does not depend on whether the runner's .venv/bin is on PATH.
+    # Without it nothing is runnable: test_no_hook_anywhere_is_still_a_failure.
+    hook = tmp_path / "shim-hook"
+    hook.write_text("#!/bin/sh\nexit 0\n")
+    hook.chmod(hook.stat().st_mode | stat.S_IXUSR)
 
     cancelled = runner.invoke(app, ["install", "codex"], input="n\n")
     doctor = runner.invoke(app, ["doctor", "codex", "--json"])
@@ -632,7 +639,7 @@ def test_doctor_fails_a_020_hook_that_1_0_does_not_run(
     from shim_cli.clients.claude import settings as claude_settings
     from shim_cli.clients.codex import settings as codex_settings
     from shim_cli.clients.copilot import settings as copilot_settings
-    from shim_cli.clients.hook_settings import add_groups
+    from shim_cli.clients.hook_settings import LEGACY_HOOK_MODULE, add_groups
 
     make_home, make_client, events = _CLIENT_FIXTURES[client]
     make_home(monkeypatch, tmp_path)
@@ -642,9 +649,7 @@ def test_doctor_fails_a_020_hook_that_1_0_does_not_run(
         legacy.parent.mkdir(parents=True)
         legacy.write_text(
             json.dumps(
-                copilot_settings.hook_document(
-                    module=copilot_settings.LEGACY_HOOK_MODULE
-                ),
+                copilot_settings.hook_document(module=LEGACY_HOOK_MODULE),
                 indent=2,
             )
             + "\n"
@@ -652,7 +657,7 @@ def test_doctor_fails_a_020_hook_that_1_0_does_not_run(
     else:
         module = {"claude": claude_settings, "codex": codex_settings}[client]
         client_plan(client, "install").target.write_bytes(
-            add_groups(b"{}", module.legacy_hook_groups())
+            add_groups(b"{}", module.hook_groups(module=LEGACY_HOOK_MODULE))
         )
 
     text, table, installed = _coverage(client)
@@ -812,20 +817,19 @@ def test_install_refuses_malformed_hook_document(monkeypatch, tmp_path: Path) ->
     assert target.read_bytes() == b'{"hooks":'
 
 
-def test_install_refuses_when_detector_warmup_fails(
+def test_install_refuses_when_the_hook_command_cannot_run(
     monkeypatch, tmp_path: Path
 ) -> None:
     home = _codex_home(monkeypatch, tmp_path)
     target = home / ".codex" / "hooks.json"
+    _hook_cannot_import(monkeypatch)
 
-    def fail(_: str) -> None:
-        raise RuntimeError
-
-    monkeypatch.setattr("shim_cli.guard.evaluate", fail)
     result = runner.invoke(app, ["install", "codex", "--yes"])
+    text = " ".join(unstyle(result.output).split())
 
     assert result.exit_code == 2
-    assert "detector could not start" in result.output
+    assert "did not allow a safe prompt silently (exit 1)" in text
+    assert "WARN Install shim with uv tool install" in text and "pipx install" in text
     assert not target.exists()
 
 
@@ -1411,10 +1415,10 @@ def test_no_hook_anywhere_is_still_a_failure(monkeypatch, tmp_path) -> None:
 
 
 def _legacy_claude_settings(home: Path, *, foreign: bool = False) -> Path:
-    from shim_cli.clients.claude.settings import legacy_hook_groups
-    from shim_cli.clients.hook_settings import add_groups
+    from shim_cli.clients.claude.settings import hook_groups
+    from shim_cli.clients.hook_settings import LEGACY_HOOK_MODULE, add_groups
 
-    document = json.loads(add_groups(None, legacy_hook_groups()))
+    document = json.loads(add_groups(None, hook_groups(module=LEGACY_HOOK_MODULE)))
     if foreign:
         document["hooks"]["UserPromptSubmit"].append(
             {"hooks": [{"type": "command", "command": "existing-hook"}]}
@@ -1759,10 +1763,11 @@ def test_doctor_counts_a_1_0_2_install_as_five_of_six(
     assert "PASS Coverage: 6 of 6 events installed." in _coverage("claude")[0]
 
 
-def test_scan_and_redact_fail_when_part_of_the_input_cannot_be_read() -> None:
-    text = (
-        "x" * 90_000 + "\n" + "\ufdfa" * 12_000 + "\nDB_PASSWORD=Synthetic-pass-0000\n"
-    )
+def test_scan_and_redact_fail_when_part_of_the_input_cannot_be_read(
+    unanalysable: str,
+) -> None:
+    # The first 100,000 characters are read; the rest, key included, is not.
+    text = "x" * 99_999 + "\n" + unanalysable + "\nDB_PASSWORD=Synthetic-pass-0000\n"
 
     scan = runner.invoke(app, ["scan"], input=text)
     redact = runner.invoke(app, ["redact"], input=text)
@@ -1880,6 +1885,41 @@ def _fails(target: str, error: type[BaseException] = OSError):
         }
 
     return setup
+
+
+def _hook_cannot_import(monkeypatch) -> None:
+    """What the hook answers when shim is installed with pip --user: -I cannot see it."""
+    from shim_cli.cli import diagnostics
+
+    def cannot_import(command, *_args):
+        return subprocess.CompletedProcess(
+            command,
+            1,
+            "",
+            f"{command[0]}: Error while finding module specification for "
+            "'shim_cli.hook' (ModuleNotFoundError: No module named 'shim_cli')\n",
+        )
+
+    monkeypatch.setattr(diagnostics, "_run_hook", cannot_import)
+
+
+def _isolated_import_fails(monkeypatch, tmp_path: Path) -> dict:
+    from shim_cli.cli.integrations import hook_argv
+
+    found = _valid_settings(monkeypatch, tmp_path)
+    _claude_home(monkeypatch, tmp_path)
+    _hook_cannot_import(monkeypatch)
+    return {**found, "hook": shlex.join(hook_argv("claude"))}
+
+
+_FIX_HOOK = (
+    "Install shim with uv tool install --reinstall shim or pipx install --force "
+    "shim, not pip --user, then run shim install claude: the hook runs Python "
+    "with -I, which ignores the user site and PYTHONPATH."
+)
+_HOOK_FAILED = (
+    "Claude Code's hook command ({hook}) did not allow a safe prompt silently (exit 1)."
+)
 
 
 def _claude_settings(content: bytes | None, link: bool = False):
@@ -2128,8 +2168,8 @@ _ERROR_CASES: dict[str, tuple] = {
         "Make {settings} a regular file owned by you, then run the command again.",
         {"client": "claude", "target": "{settings}"},
         "FAIL Claude Code hook configuration cannot be removed safely.\n"
-        "WARN Review Claude Code hooks manually; shim removes only its exact hook "
-        "group.\n",
+        "WARN Review Claude Code hooks manually; shim removes only its own hook "
+        "groups.\n",
     ),
     "CLIENT_SETTINGS_CHANGED": (
         ["install", "claude", "--yes"],
@@ -2152,12 +2192,12 @@ _ERROR_CASES: dict[str, tuple] = {
     ),
     "DETECTOR_UNAVAILABLE": (
         ["install", "claude", "--yes"],
-        _fails("shim_cli.guard.evaluate", RuntimeError),
+        _isolated_import_fails,
         2,
-        "shim detector could not start.",
-        "Reinstall shim: uv tool install --reinstall shim, or pipx reinstall shim.",
+        _HOOK_FAILED,
+        _FIX_HOOK,
         {"client": "claude"},
-        "FAIL shim detector could not start.\n",
+        f"FAIL {_HOOK_FAILED}\nWARN {_FIX_HOOK}\n",
     ),
     "INVALID_DATE": (
         ["audit", "--since", "2026/09/01"],
@@ -2276,14 +2316,17 @@ _ERROR_CASES: dict[str, tuple] = {
         ["watch", "--", "claude"],
         _watch(base_url=True),
         2,
-        "ANTHROPIC_BASE_URL is already configured; custom upstreams are "
-        "unsupported. Run shim watch with ANTHROPIC_BASE_URL unset, or use the hook "
-        "(shim install claude), which does not need the proxy.",
-        "Unset ANTHROPIC_BASE_URL for this command.",
+        "ANTHROPIC_BASE_URL is already configured, so claude sends its requests "
+        "and its credential to that endpoint. The proxy only reaches "
+        "api.anthropic.com, which would receive the other endpoint's credential "
+        "instead. Use the hook (shim install claude), which does not need the proxy.",
+        "shim install claude",
         {},
-        "FAIL ANTHROPIC_BASE_URL is already configured; custom upstreams are "
-        "unsupported. Run shim watch with ANTHROPIC_BASE_URL unset, or use the hook "
-        "(shim install claude), which does not need the proxy.\n",
+        "FAIL ANTHROPIC_BASE_URL is already configured, so claude sends its requests "
+        "and its credential to that endpoint. The proxy only reaches "
+        "api.anthropic.com, which would receive the other endpoint's credential "
+        "instead. Use the hook (shim install claude), which does not need the "
+        "proxy.\n",
     ),
     "EXECUTABLE_NOT_FOUND": (
         ["watch", "--", "claude"],

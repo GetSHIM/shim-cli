@@ -33,7 +33,16 @@ SLOTS_BUSY = "slots busy"
 BODY_TOO_LARGE = "body too large"
 NOT_JSON = "not JSON"
 TOO_MANY_FIELDS = "too many fields"
-INCOMPLETE_REASONS = (SLOTS_BUSY, BODY_TOO_LARGE, NOT_JSON, TOO_MANY_FIELDS)
+NOT_ANALYSED = "not fully analysed"
+UNFINISHED = "measurement unfinished"
+INCOMPLETE_REASONS = (
+    SLOTS_BUSY,
+    BODY_TOO_LARGE,
+    NOT_JSON,
+    TOO_MANY_FIELDS,
+    NOT_ANALYSED,
+    UNFINISHED,
+)
 
 MAX_MODEL_CHARS = 120
 UNKNOWN_MODEL = "unknown"
@@ -252,7 +261,12 @@ class UsageReader:
         if document.get("type") == "content_block_delta":
             delta = document.get("delta")
             if isinstance(delta, dict):
-                kind = _DELTA_KINDS.get(delta.get("type"))
+                delta_type = delta.get("type")
+                kind = (
+                    _DELTA_KINDS.get(delta_type)
+                    if isinstance(delta_type, str)
+                    else None
+                )
                 if kind is not None:
                     self._keep(kind, document.get("index"), delta.get(kind))
             return
@@ -269,6 +283,8 @@ class UsageReader:
 
     def _keep(self, kind: str, index: object, text: object) -> None:
         if not isinstance(text, str) or not text:
+            return
+        if not isinstance(index, (str, int, type(None))):
             return
         room = MAX_RESPONSE_CHARACTERS - self._characters
         if len(text) >= room:
@@ -433,7 +449,9 @@ def images_and_results(document: dict) -> tuple[list[str], dict]:
 
 def _bytes(value: object) -> bytes:
     try:
-        return json.dumps(value, ensure_ascii=False).encode()
+        # Clients send compact JSON; spaced separators would inflate a section
+        # past the request it came from.
+        return json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode()
     except (TypeError, ValueError):
         return b""
 
@@ -530,9 +548,8 @@ def _section(path: tuple) -> str:
 def _opaque(document: dict, path: tuple) -> bool:
     """Base64 payloads and thinking signatures are large and are not prose."""
     key = path[-1] if path else None
-    if key == "signature":
-        return True
-    if key != "data":
+    kind = {"data": "base64", "signature": "thinking"}.get(key)
+    if kind is None:
         return False
     parent: object = document
     for step in path[:-1]:
@@ -540,32 +557,47 @@ def _opaque(document: dict, path: tuple) -> bool:
             parent = parent[step]  # type: ignore[index]
         except (KeyError, IndexError, TypeError):
             return False
-    return isinstance(parent, dict) and parent.get("type") == "base64"
+    return isinstance(parent, dict) and parent.get("type") == kind
 
 
-def _tally(leaves: list, evaluate) -> tuple[dict, dict]:
+def _decide(text: str, evaluate):
+    """The detector's decision, or None when it refuses the text outright."""
+    try:
+        return evaluate(text)
+    except ValueError:  # InputTooLarge and the detector's other safe refusals
+        return None
+
+
+def _tally(leaves: list, evaluate) -> tuple[dict, dict, bool]:
+    """Counts, custom counts, and whether any leaf was not fully analysed."""
     counts: dict = {}
     named: dict = {}
+    partial = False
     for _path, text in leaves:
-        decision = evaluate(text)
+        decision = _decide(text, evaluate)
+        if decision is None or getattr(decision, "partial", False):
+            partial = True
         for entity, count in getattr(decision, "counts", ()):
             counts[entity] = counts.get(entity, 0) + count
         for name, count in getattr(decision, "custom_counts", ()):
             named[name] = named.get(name, 0) + count
-    return counts, named
+    return counts, named, partial
 
 
-def scan_response(reader: UsageReader, evaluate) -> tuple[dict, dict]:
+def scan_response(reader: UsageReader, evaluate) -> tuple[dict, dict, bool]:
     counts: dict[str, dict] = {}
     named: dict = {}
+    partial = False
     for kind, text in reader.response_texts():
-        decision = evaluate(text)
+        decision = _decide(text, evaluate)
+        if decision is None or getattr(decision, "partial", False):
+            partial = True
         found = counts.setdefault(kind, {})
         for entity, count in getattr(decision, "counts", ()):
             found[entity] = found.get(entity, 0) + count
         for label, count in getattr(decision, "custom_counts", ()):
             named[label] = named.get(label, 0) + count
-    return {kind: found for kind, found in counts.items() if found}, named
+    return {kind: found for kind, found in counts.items() if found}, named, partial
 
 
 def _flatten(by_section: dict) -> dict:
@@ -585,7 +617,7 @@ class SectionMemo:
     """
 
     def __init__(self) -> None:
-        self._counts: dict[str, tuple[dict, dict]] = {}
+        self._counts: dict[str, tuple[dict, dict, bool]] = {}
         self._lock = threading.Lock()
 
     def tally(self, section: str, value: object, leaves: list, evaluate) -> tuple:
@@ -709,12 +741,14 @@ def inspect_request(body: bytes | bytearray, evaluate=None, memo=None) -> Exchan
                 grouped.setdefault(_section(leaf[0]), []).append(leaf)
         found: dict[str, dict] = {}
         named: dict = {}
+        unanalysed = False
         for name, group in grouped.items():
-            counts, custom = (
+            counts, custom, partial = (
                 memo.tally(name, document.get(name), group, evaluate)
                 if memo is not None and name in MEMOISED
                 else _tally(group, evaluate)
             )
+            unanalysed = unanalysed or partial
             if counts:
                 found[name] = counts
             for label, count in custom.items():
@@ -722,6 +756,10 @@ def inspect_request(body: bytes | bytearray, evaluate=None, memo=None) -> Exchan
         exchange.entities_by_section = found
         exchange.entities = _flatten(found)
         exchange.custom = named
+        if unanalysed:
+            # A count taken from half a leaf reads as a whole one.
+            exchange.measured = False
+            exchange.incomplete_reason = NOT_ANALYSED
     return exchange
 
 

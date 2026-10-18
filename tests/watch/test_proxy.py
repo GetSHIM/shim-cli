@@ -207,7 +207,7 @@ def test_response_headers_with_line_breaks_are_dropped() -> None:
     sent = []
     handler.session = proxy.Session()
     handler.wfile = io.BytesIO()
-    handler.send_response = lambda _status: None
+    handler.send_response_only = lambda _status: None
     handler.send_header = lambda name, value: sent.append((name, value))
     handler.end_headers = lambda: None
 
@@ -279,6 +279,17 @@ def test_the_proxy_binds_to_loopback_only() -> None:
         running.stop()
 
 
+def test_the_proxy_starts_without_a_reverse_dns_lookup(monkeypatch) -> None:
+    # HTTPServer looks up the name of 127.0.0.1, which on GitHub's macOS
+    # runners held `shim watch` for more than 20 s before the client started.
+    def lookup(address: str):
+        raise AssertionError(f"reverse DNS lookup of {address}")
+
+    monkeypatch.setattr(socket, "gethostbyaddr", lookup)
+
+    proxy.start("api.anthropic.com").stop()
+
+
 def test_the_stream_is_relayed_in_pieces_rather_than_at_the_end(
     monkeypatch,
 ) -> None:
@@ -332,7 +343,13 @@ def test_a_failed_upstream_read_is_not_framed_as_a_complete_response(
         def __init__(self, *_args, **_kwargs):
             self.response = Response()
 
-        def request(self, *_args, **_kwargs):
+        def putrequest(self, *_args, **_kwargs):
+            pass
+
+        def putheader(self, *_args):
+            pass
+
+        def endheaders(self, body):
             pass
 
         def getresponse(self):
@@ -597,7 +614,7 @@ def test_slow_measurement_does_not_delay_response_or_shutdown(watched, monkeypat
         running.session.drain(2)
 
 
-@pytest.mark.parametrize("failure", ["request", "getresponse"])
+@pytest.mark.parametrize("failure", ["endheaders", "getresponse"])
 def test_upstream_connection_closes_on_failure(monkeypatch, failure):
     from unittest.mock import Mock
 
@@ -621,7 +638,7 @@ def test_incomplete_request_body_has_bounded_failure(monkeypatch, truncated):
     from unittest.mock import Mock
 
     connection = Mock()
-    connection.request.side_effect = lambda *args, **kwargs: list(kwargs["body"])
+    connection.endheaders.side_effect = lambda body: list(body)
     monkeypatch.setattr(
         http.client, "HTTPSConnection", lambda *args, **kwargs: connection
     )
@@ -681,7 +698,7 @@ def test_decompression_budget_never_changes_forwarded_bytes(monkeypatch):
     handler = object.__new__(proxy._Handler)
     handler.session = proxy.Session()
     handler.wfile = io.BytesIO()
-    handler.send_response = lambda status: None
+    handler.send_response_only = lambda status: None
     handler.send_header = lambda name, value: None
     handler.end_headers = lambda: None
     monkeypatch.setattr(proxy, "MAX_BODY_BYTES", 100)

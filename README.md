@@ -54,7 +54,10 @@ CLI use `shim install codex` or `copilot`; [Install](https://github.com/GetSHIM/
   a tool call before it runs. A tool result can only be reported.
 - **In Claude Code, shell commands and file writes are reported or denied, not
   masked;** the output of a failed command is reported, not masked; a file
-  attached with `@` is read and reported, not masked.
+  attached with `@` is read and reported, not masked. A path or pattern given
+  to a local tool such as `Read` or `Grep` is only reported, and an MCP tool's
+  arguments are never masked: a call carrying a finding is refused by
+  default.
 - **Windows is not supported.** macOS and Linux are; WSL is not yet verified.
 
 Detection is best-effort and misses some values. [Privacy](https://github.com/GetSHIM/shim-cli/blob/main/docs/privacy.md) lists every limit.
@@ -145,7 +148,10 @@ Larger requests still pass through in full; skipped or unfinished measurements
 are reported as incomplete. Usage can be known, partial, or unavailable.
 
 `shim watch` refuses a non-empty `ANTHROPIC_BASE_URL` before startup. Custom
-upstreams are not supported. Requests need an unambiguous non-negative
+upstreams are not supported, and unsetting the variable alone would send that
+endpoint's credential to `api.anthropic.com`; use the hook instead. The proxy
+reaches the provider through `HTTPS_PROXY` when set (`http://` proxies only;
+`SSL_CERT_FILE` for a custom CA). Requests need an unambiguous non-negative
 `Content-Length`; transfer coding (including chunked requests) is rejected.
 Request-body reads have a 30-second deadline.
 
@@ -204,10 +210,10 @@ own, after `cleanupPeriodDays` in its settings (30 by default).
 
 | Client | Your typed prompt | Tool input and results |
 | --- | --- | --- |
-| [Claude Code](https://github.com/anthropics/claude-code) | Reports what it found and lets it through; blocks under `enforce` | Eligible structured arguments and inbound results are masked, and a call with masked arguments still goes through your permission rules; commands and local writes are report-or-deny only; the output of a failed call is reported, not masked |
+| [Claude Code](https://github.com/anthropics/claude-code) | Reports what it found and lets it through; blocks under `enforce` | Results are masked. `WebFetch` and `WebSearch` arguments are masked, and the call still goes through your permission rules; an MCP or unknown tool's arguments are never rewritten, and a call carrying a finding is refused by default; a local tool's input (`Read`, `Grep`) is reported only; commands and local writes are report-or-deny only; the output of a failed call is reported, not masked |
 | [Codex CLI](https://github.com/openai/codex) | Reports what it found and lets it through; blocks under `enforce` | Not inspected: shim never sees a tool call or its result (no verified native tool-event adapter) |
 | [GitHub Copilot CLI](https://github.com/github/copilot-cli) | Replaces the model-facing prompt with the redacted text | Not inspected: shim never sees a tool call or its result (no verified native tool-event adapter) |
-| [VS Code](https://code.visualstudio.com/docs/agent-customization/agent-plugins) | Reports what it found and lets it through; stops the prompt before it is sent under `enforce` | A call is reported, and denied under `enforce`, before it runs. A **result** can only be reported: by then the model has it, and nothing takes it back. Never masked |
+| [VS Code](https://code.visualstudio.com/docs/agent-customization/agent-plugins) | Reports what it found and lets it through; stops the prompt before it is sent under `enforce` | A call is reported, and denied under `enforce`, before it runs; a local tool such as `read_file` is only reported. A **result** can only be reported: by then the model has it, and nothing takes it back. Never masked |
 
 Tool coverage is verified against a running client, not derived from
 documentation. `shim doctor <client>` prints exactly which events are installed
@@ -243,6 +249,14 @@ What it does not detect: person names, postal addresses, a password with no key
 name or known prefix (`the login is Synthetic-pass-0000`), and an email address
 at an internal domain such as `ops@acme.internal`. [Your own
 patterns](https://github.com/GetSHIM/shim-cli/blob/main/README.md#your-own-patterns) cover what your project has that these do not.
+Until 1.2.3 it also misses PGP and DSA private key blocks, Stripe restricted
+keys (`rk_live_`), Slack app tokens (`xapp-`), GitLab runner and deploy
+tokens, the user and password in a connection string with a driver suffix
+(`postgresql+asyncpg://`) or another scheme (`amqp`, `smtp`, `ssh`), a key
+with the secret word glued on (`PGPASSWORD`), and a value used as a JSON key
+or sent as a JSON number; the [1.2.2 release
+notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/1.2.2.md#known-gaps-fixed-in-123)
+list every known gap.
 
 Checksums are verified where they exist, so a mistyped IBAN or national ID is
 not reported.
@@ -302,6 +316,16 @@ Replace `claude` with `codex` or `copilot` as needed. Run `shim help` for all
 commands. `--dry-run` shows the target file and the exact fragment; without it,
 `shim install` asks before writing but does not show the change.
 
+Before it writes anything, `--dry-run` included, `shim install` runs the exact
+hook command it registers on a synthetic safe prompt and a synthetic sensitive
+one, and refuses with exit `2` if that command does not answer correctly. Every
+hook runs Python with `-I`, which ignores the user site and `PYTHONPATH`, so a
+shim installed with `pip install --user`, or by Ubuntu's silent fallback to a
+user install, is refused rather than registered as a hook that would let
+everything through: install with `uv tool` or `pipx`. A hook another shim
+installation wrote, such as a pipx install beside a uv one, is replaced rather
+than doubled, and the output names it.
+
 One more step in Codex: **a hook does not run until you trust it.** Codex keeps
 a trust record per hook and skips any hook without one — no warning, and your
 prompts reach the model uninspected. Open `/hooks` in Codex, review the shim
@@ -343,7 +367,7 @@ and the `shim` package does not carry the plugin folder. Clone the newest
 release tag to a folder you keep:
 
 ```console
-git clone --depth 1 --branch v1.2.1 https://github.com/GetSHIM/shim-cli ~/.local/share/shim-cli
+git clone --depth 1 --branch v1.2.2 https://github.com/GetSHIM/shim-cli ~/.local/share/shim-cli
 ```
 
 Then add the plugin folder to your user `settings.json` (Command Palette,
@@ -378,21 +402,24 @@ measured against VS Code 1.137.0 rather than read out of its documentation:
 Nothing is ever masked: no VS Code hook output replaces a prompt, a tool input
 or a tool result. And a `read_file` result reaches the hook empty, so file
 contents are never inspected: an agent reading `.env` is neither masked nor
-reported. Only values in the path text itself are caught, before the read. A
+reported. Only values in the path text itself are reported, before the read. A
 terminal result does arrive in full and is inspected.
 
 Because a refusal is the only enforcement available, tool events report by
-default there, and refusing waits until you ask for it:
+default there, and refusing waits until you ask for it, per kind of tool:
 
 ```toml
 [mode]
-outbound = "enforce"
+executable-text = "enforce"   # run_in_terminal, send_to_terminal, tasks
+local-write = "enforce"       # create_file, replace_string_in_file, apply_patch
+outbound = "enforce"          # fetch_webpage, MCP tools, tools shim does not know
 ```
 
-That refuses a call carrying a finding, such as a `run_in_terminal` command,
-before it runs. `inbound` covers results, which VS Code lets shim report but
-not change, so `inbound = "enforce"`, already the default, refuses nothing
-there.
+Each line refuses a call carrying a finding before it runs. A local tool such
+as `read_file`, `grep_search` or `list_dir` is never refused, only reported.
+`inbound` covers results, which VS Code lets shim report but not change, so
+`inbound = "enforce"`, already the default, refuses nothing there. A call shim
+cannot inspect at all is refused whatever the mode.
 
 The same plugin file is read by GitHub Copilot CLI and the Copilot app, where
 `shim install copilot` is the supported route. The hook stands down in those
@@ -550,27 +577,32 @@ With `--json`, `shim doctor`, `shim report` and `shim watch` also list
 
 ## Shrink tool results
 
-At Claude's verified `PostToolUse` event, shim compacts eligible tool results
-before the model reads them, so the context window fills more slowly. Nothing
-is ever truncated or summarised, and a result that cannot be shrunk safely is
-left unchanged by the diet. Three transforms ship; only lossless JSON
-compaction is on by default:
+At Claude's verified `PostToolUse` event, shim compacts the results of web and
+MCP tools before the model reads them, so the context window fills more slowly.
+Nothing is ever truncated or summarised, a result that cannot be shrunk safely
+is left unchanged by the diet, and a result that was reshaped tells the model
+so in one sentence: `shim: reformatted this result to save space (json); it is
+not byte-for-byte what the tool returned.` Three transforms ship; only lossless
+JSON compaction is on by default:
 
 | Transform | What it does |
 | --- | --- |
 | `json` | Removes the whitespace *between* JSON tokens. Every number literal, duplicate key and string survives byte-for-byte, because this is a lexer rather than a parse and re-serialise. Lossless. |
-| `html` | Turns a whole HTML page in command or MCP output into text. Not lossless: markup, scripts and styles are dropped; links keep their address. Opt in. |
+| `html` | Turns a whole HTML page in a web or MCP tool result into text. Not lossless: markup, scripts and styles are dropped; links keep their address. Opt in. |
 | `whitespace` | Strips trailing spaces and tabs from the end of each line. Line count is never changed. Not byte-for-byte: a Markdown hard line break is two trailing spaces, and it does not survive this. |
 
 It applies to tool *results* only — never to a tool's arguments, never to
 anything written to your disk, and never under `mode = "observe"`.
 
-**The diet also never touches a result that shows you a file.** `Edit` matches its
-`old_string` against what is on disk, not against what the model was shown, so
-compacting a pretty-printed file on the way in makes the next edit of that file
-miss. Reads, notebooks and edit results are unchanged by the diet; sensitive
-values can still be masked according to policy. Fetched pages, command output
-and tool results are where the saving comes from.
+**The diet never touches a local tool's result or a command's output.** Either
+may be a file the model goes on to edit, and `Edit` matches its `old_string`
+against what is on disk, not against what the model was shown, so compacting a
+pretty-printed file on the way in makes the next edit of that file miss. Reads,
+searches, notebooks, edit results and everything `Bash` prints, `curl`
+included, are unchanged by the diet; sensitive values are still masked
+according to policy. Fetched pages and MCP results are where the saving comes
+from; an MCP server that reads files is compacted too, with the sentence
+above.
 
 Turn it off with `shim config --no-diet`, or name individual transforms in the
 config file. Trailing-whitespace removal is opt in because it can remove a
@@ -588,24 +620,24 @@ told so in the first line, `[shim: converted from HTML to text; markup removed.
 Save the page to a file and Read it to see the markup.]`, and a masked value
 such as `<EMAIL_1>` stays as it is. The text is scanned again before the model
 reads it, because conversion can assemble a value the markup hid: an address
-written as `ops&#64;example&#46;com`, or an IBAN split across two `<span>`s, is
-masked and counted like any other. A page cut short, as Claude Code cuts long
-command output, is converted without its last unfinished tag (up to 4,096
+written as `ops&#64;example&#46;com` is masked and counted like any other. An
+IBAN split across two `<span>`s is not yet caught whole: the first scan masks
+part of it, and its first groups reach the model (fixed in 1.2.3). A page cut
+short is converted without its last unfinished tag (up to 4,096
 characters of it); a page that leaves more unparsed, or leaves a `<script>`,
 `<svg>`, `<iframe>`, `<noscript>` or `<template>` open, is left unchanged,
 because the rest of it would be dropped without a word. `shim config --diet`
 keeps meaning the default, so it never turns `html` on.
 
 **Documents.** WebFetch already returns text: Claude Code hands the model its
-own summary of the page, not the HTML. A PDF or Word file you `Read` is a file
-view and is never converted: the model receives the document as Claude Code
-sends it, a PDF as the document itself and a `.docx` not at all (Claude Code
-refuses to read it). An HTML file you `cat` through Bash, or a page an MCP
-server returns, is converted when `html` is on, while `Read` of the same file
-shows the markup. Claude Code keeps only the first 30,000 characters of a
-command's output and shows the model a 2 KB preview of anything longer, so a
-long page fetched through Bash reaches the model as the start of its text; an
-MCP result arrives whole.
+own summary of the page, not the HTML. A PDF or Word file you `Read` is a local
+tool's result and is never converted: the model receives the document as Claude
+Code sends it, a PDF as the document itself and a `.docx` not at all (Claude
+Code refuses to read it). A page an MCP server returns is converted when `html`
+is on. An HTML file you `cat` or a page you `curl` through Bash is not, and
+neither is `Read` of the same file: both show the markup. (1.2.1 converted
+command output; 1.2.2 stopped, because a command can print a file the model
+then edits.)
 
 While reading results shim also flags text that is trying to give the model
 orders, in English or Turkish — "ignore all previous instructions", "önceki tüm
@@ -761,7 +793,17 @@ reported.
   `cat .env && cat missing-file` exits non-zero, and the model reads `.env` as
   it is.
 - A disabled, untrusted, crashed, or timed-out hook may fail open according to
-  client behavior.
+  client behavior. A hook that runs but cannot inspect an event fails closed,
+  in every mode: the prompt is withheld, the tool call refused, and a Claude
+  Code tool result withheld; where the client allows neither, as for a failed
+  call's output or any VS Code result, you and the model are told it was not
+  inspected. Through the plugin, a missing, broken or too-old Python withholds
+  the prompt and refuses the call too.
+- An agent cannot turn shim off through its file tools or by running
+  `shim config` or `shim revert`: the hook refuses those calls in every mode.
+  It can still do it through the shell (`sed -i`, `sh -c`) and other routes
+  that [Privacy](https://github.com/GetSHIM/shim-cli/blob/main/docs/privacy.md#an-agent-turning-shim-off)
+  lists.
 - Clients, providers, and other tools may retain data independently of shim.
 - Redacted temporary files may still contain missed sensitive content. Review
   them before resubmission and delete them when finished.
@@ -775,8 +817,8 @@ Every figure here was measured on the released build, not estimated.
 
 | | |
 | --- | --- |
-| Tests | **2,300+**, one command: `python scripts/check.py` — lock, lint, format, types, suite, wheel, sdist |
-| Hook cost | **70 ms** median end to end, interpreter start included; **42 ms** for a session summary |
+| Tests | **4,000+**, one command: `python scripts/check.py` — lock, lint, format, types, suite, wheel, sdist |
+| Hook cost | **70 ms** median end to end, interpreter start included; **42 ms** for a session summary. CI and the release fail when a median passes 420 ms, or 2,000 ms for a prompt built from the shapes that once made the detector quadratic |
 | With 32 custom patterns | **+0.6 ms** median against the same prompt with none |
 | Detector corpus | **752 cases** in five corpora (`guard-v2` 235, `parity-v1` 475, `guard-tools-v1` 24, `custom-v1` 10, `reveal-v1` 8), graded on exact redacted output rather than category presence, and the gateway's own 140-case corpus, against which every difference is pinned with its reason |
 | Release evidence | SBOM, provenance and Sigstore bundles on the release page from 0.3.2, with the `gh attestation verify` command in [the compatibility record](https://github.com/GetSHIM/shim-cli/blob/main/docs/compatibility.md#100-release-evidence) |
@@ -787,9 +829,9 @@ Every figure here was measured on the released build, not estimated.
 </p>
 
 Hook output is asserted byte for byte, not by shape: a safe event must produce
-exactly zero bytes on stdout and stderr. 428 contract tests hold that, plus the
-import boundaries, the rule that no committed file carries the machine it was
-written on, and a byte-identical rebuild of the shipped plugin archive.
+exactly zero bytes on stdout and stderr. Over 700 contract tests hold that,
+plus the import boundaries, the rule that no committed file carries the machine
+it was written on, and a byte-identical rebuild of the shipped plugin archive.
 
 The detector scores 1.0 precision and recall on that corpus, and the metrics
 file states in the same breath why that is a weaker claim than it looks:
@@ -802,7 +844,9 @@ reasoning about it, and each one changed the code:
 
 - One working request carried **4,402 text fields across 35 levels of nesting**,
   the depth coming from an MCP tool's recursive JSON schema. The hook's own
-  traversal stops at 24, so `shim watch` carries its own budget.
+  traversal stopped at 24 levels and 2,000 fields then, so `shim watch` carries
+  its own budget. The hook now reads 64 levels with no field count, and fails
+  closed on an event nested deeper.
 - The **tools array was 88% of the input tokens** on a real session, before a
   single line of the user's own code.
 - Claude Code's `Stop` event hands the hook **only the turn's last text block**,
@@ -827,8 +871,9 @@ If you also used the Claude Code plugin, remove it with
 `/plugin uninstall shim-cli@shim-cli`; for VS Code, delete the
 `chat.pluginLocations` entry and the folder you cloned.
 
-`shim revert` removes only shim's own hook group and leaves every other hook in
-the file in place, though it writes the file back as 2-space JSON and leaves a
+`shim revert` removes every hook group that runs shim, from any installation,
+and leaves every other hook in the file in place, one that wraps shim's command
+included, though it writes the file back as 2-space JSON and leaves a
 settings file it created itself as `{}`; for Copilot it also deletes the hook
 file, which is shim's alone. `shim ledger purge` deletes the retained records —
 skip it and they age out after 30 days on their own. Uninstalling the package
@@ -859,6 +904,7 @@ In a script, `shim ledger purge --yes` skips the question.
 - [Architecture](https://github.com/GetSHIM/shim-cli/blob/main/docs/architecture.md)
 - [Compatibility](https://github.com/GetSHIM/shim-cli/blob/main/docs/compatibility.md)
 - [Privacy](https://github.com/GetSHIM/shim-cli/blob/main/docs/privacy.md)
+- [1.2.2 release notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/1.2.2.md)
 - [1.2.1 release notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/1.2.1.md)
 - [1.2.0 release notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/1.2.0.md)
 - [1.1.2 release notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/1.1.2.md)

@@ -145,8 +145,10 @@ DOCTOR = {
     "HOOK_NOT_INSTALLED": Rule(
         "Hook not installed",
         (
-            "shim's hook is not in the {name} settings file, so nothing is inspected.",
-            "shim'in kancası {name} ayar dosyasında yok; hiçbir şey denetlenmiyor.",
+            "The {name} settings file does not hold exactly this shim "
+            "installation's hook; without any shim hook there, nothing is inspected.",
+            "{name} ayar dosyasında tam olarak bu shim kurulumunun kancası yok; "
+            "orada hiç shim kancası yoksa hiçbir şey denetlenmiyor.",
         ),
         (
             f"Run {_INSTALL}, then start a new {{name}} session.",
@@ -244,10 +246,13 @@ DOCTOR = {
             "shim, {name} için iki kez kayıtlı; her olay iki kez denetleniyor.",
         ),
         (
-            "Keep one: shim revert {client} --yes removes the settings hook, or "
-            "uninstall the plugin shim doctor {client} names.",
-            "Birini bırakın: shim revert {client} --yes ayar kancasını kaldırır ya "
-            "da shim doctor {client} çıktısının belirttiği eklentiyi kaldırın.",
+            "Keep one, as shim doctor {client} names: shim install {client} --yes "
+            "leaves a single settings hook; beside the plugin, uninstall the plugin "
+            "or remove the settings hook with shim revert {client} --yes.",
+            "Birini bırakın, shim doctor {client} çıktısının belirttiği gibi: shim "
+            "install {client} --yes tek bir ayar kancası bırakır; eklenti de "
+            "kuruluysa eklentiyi kaldırın ya da ayar kancasını shim revert {client} "
+            "--yes ile kaldırın.",
         ),
         risk_class="privacy",
     ),
@@ -390,20 +395,18 @@ SESSION = {
         playbook=_playbook("cli.session.unmasked_values"),
     ),
     "cli.session.not_inspected": Rule(
-        "Tool events passed uninspected",
+        "Tool events shim could not inspect",
         (
-            "In this {name} session {not_inspected} event(s) passed through "
-            "uninspected and {incomplete} were inspected only in part.",
-            "Bu {name} oturumunda {not_inspected} olay denetlenmeden geçti, "
-            "{incomplete} olay yalnızca kısmen denetlendi.",
+            "In this {name} session shim could not inspect {not_inspected} "
+            "event(s) and inspected {incomplete} only in part.",
+            "Bu {name} oturumunda shim {not_inspected} olayı denetleyemedi, "
+            "{incomplete} olayı yalnızca kısmen denetleyebildi.",
         ),
         (
             "Run shim report to see which tool or file it was, and shim doctor "
-            "{client} to check the install; a result past the inspection limits "
-            "passes through unchanged.",
+            "{client} to check the install.",
             "Hangi araç ya da dosya olduğunu görmek için shim report, kurulumu "
-            "denetlemek için shim doctor {client} komutunu çalıştırın; denetim "
-            "sınırlarını aşan bir sonuç değişmeden geçer.",
+            "denetlemek için shim doctor {client} komutunu çalıştırın.",
         ),
         "medium",
         "privacy",

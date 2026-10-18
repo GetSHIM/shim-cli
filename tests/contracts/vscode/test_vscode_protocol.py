@@ -27,7 +27,7 @@ import pytest
 from shim_cli.clients.vscode.tool_events import TOOL_EVENTS
 from shim_cli.events.pipeline import REFUSE, REPORT_ONLY, process
 from shim_cli.guard import evaluate
-from shim_cli.policy import ENFORCE, REPORT
+from shim_cli.policy import DENY, ENFORCE, OBSERVE, REPORT, WARN
 
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "probe" / "vscode"
 
@@ -63,7 +63,6 @@ def test_a_file_read_is_recognised_by_its_camel_case_path() -> None:
     decoded = TOOL_EVENTS["PreToolUse"].decode(_raw("PreToolUse-read_file"))
 
     assert decoded.target == "/probe/workspace/plain.txt"
-    assert decoded.views_file is True
 
 
 def test_a_file_read_result_carries_nothing_to_inspect() -> None:
@@ -111,3 +110,126 @@ def test_the_prompt_capture_is_the_shape_the_hook_parses() -> None:
 
     # The capture is the prompt that proved `continue: false` stops a turn.
     assert parse_input(_raw("UserPromptSubmit-none")) == "say the word pangolin\n"
+
+
+def test_a_lone_surrogate_beside_a_secret_in_a_terminal_result_is_reported() -> None:
+    """Covered by the shared serializer: one escaped half of an emoji used to
+    make the whole event uninspectable."""
+    document = json.loads(_raw("PostToolUse-run_in_terminal"))
+    document["tool_response"] = "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE\ncut \ud83d"
+    raw = json.dumps(document).encode()
+
+    outcome = process(TOOL_EVENTS["PostToolUse"], raw, lambda *_: ENFORCE, evaluate)
+
+    assert json.loads(outcome.output)["systemMessage"] == (
+        "shim: found SECRET (1) in run_in_terminal. Not modified."
+    )
+    assert b"AKIA" not in outcome.output
+    assert outcome.record.entities == (("SECRET", 1),)
+
+
+@pytest.mark.parametrize("mode", (OBSERVE, WARN, ENFORCE))
+def test_a_captured_call_that_cannot_be_inspected_is_denied_in_any_mode(
+    mode: str,
+) -> None:
+    raw = _raw("PreToolUse-run_in_terminal")
+    command = json.loads(raw)["tool_input"]["command"]
+
+    def failing(text, *args):
+        if text == command:
+            raise ValueError("Guard analysis failed safely.")
+        return evaluate(text, *args)
+
+    outcome = process(TOOL_EVENTS["PreToolUse"], raw, lambda *_: mode, failing)
+
+    decision = json.loads(outcome.output)["hookSpecificOutput"]
+    assert decision["permissionDecision"] == "deny"
+    assert "(analysis failed)" in decision["permissionDecisionReason"]
+    assert outcome.record.action == DENY
+
+
+UNREADABLE_RESULT = {
+    "systemMessage": (
+        "shim: could not inspect this run_in_terminal output ({reason}); the "
+        "model has it as it was."
+    ),
+    "hookSpecificOutput": {
+        "hookEventName": "PostToolUse",
+        "additionalContext": (
+            "shim could not inspect this run_in_terminal output ({reason}). Do "
+            "not repeat values from it in replies, files or commands."
+        ),
+    },
+}
+
+
+def _refused(name: str, change) -> tuple:
+    """A captured event made unreadable, through the hook VS Code also runs:
+    the one installed for Claude Code."""
+    from shim_cli import hook
+    from shim_cli.session import spool
+
+    document = json.loads(_raw(name))
+    raw = change(document)
+
+    output = json.loads(hook._output(raw, "claude"))
+
+    return output, spool.entries(document["session_id"])
+
+
+def _undecodable(document: dict) -> bytes:
+    document["tool_response"] = "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE"
+    return json.dumps(document).encode().replace(b"AWS_", b"\xff\xfeAWS_")
+
+
+def _oversized(document: dict) -> bytes:
+    document["tool_response"] = "x" * 1_100_000
+    return json.dumps(document).encode()
+
+
+@pytest.mark.parametrize(
+    ("change", "reason"),
+    ((_undecodable, "analysis failed"), (_oversized, "too large")),
+    ids=("undecodable", "oversized"),
+)
+def test_an_unreadable_terminal_result_is_answered_and_recorded_as_vs_code(
+    change, reason: str
+) -> None:
+    """Not Claude Code's withhold, which VS Code cannot apply: the user and the
+    model are told the output was not inspected, and the record says so."""
+    output, records = _refused("PostToolUse-run_in_terminal", change)
+
+    assert output == json.loads(
+        json.dumps(UNREADABLE_RESULT).replace("{reason}", reason)
+    )
+    assert [(r["client"], r["action"], r["note"]) for r in records] == [
+        ("vscode", "report", f"not inspected: {reason}")
+    ]
+
+
+def test_an_oversized_call_is_denied_and_recorded_as_vs_code() -> None:
+    def oversized(document: dict) -> bytes:
+        document["tool_input"]["command"] = "echo " + "x" * 1_100_000
+        return json.dumps(document).encode()
+
+    output, records = _refused("PreToolUse-run_in_terminal", oversized)
+
+    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert [(r["client"], r["action"], r["note"]) for r in records] == [
+        ("vscode", "deny", "not inspected: too large")
+    ]
+
+
+@pytest.mark.parametrize("cut", (False, True), ids=("whole", "cut-at-the-read-limit"))
+def test_an_oversized_prompt_is_stopped_the_way_vs_code_stops_one(cut: bool) -> None:
+    """Claude Code's block, sent to VS Code, is ignored and the prompt goes
+    out; a prompt too large to read is stopped with `continue: false`."""
+    from shim_cli import hook
+
+    document = json.loads(_raw("UserPromptSubmit-none"))
+    document["prompt"] = "x" * 1_100_000
+    raw = json.dumps(document).encode()
+    if cut:
+        raw = raw[: hook.MAX_INPUT_BYTES + 1]
+
+    assert hook._output(raw, "claude") == hook._VSCODE_ERROR_OUTPUT

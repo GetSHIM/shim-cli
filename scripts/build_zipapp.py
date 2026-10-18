@@ -16,16 +16,21 @@ INCLUDED = (
     "py.typed",
     "config.py",
     "hook.py",
+    "json_bytes.py",
     "policy.py",
     "clients/__init__.py",
+    "clients/hook_settings.py",
     "clients/user_prompt_hook.py",
     "clients/claude/__init__.py",
     "clients/claude/hook.py",
+    "clients/claude/settings.py",
     "clients/claude/tool_events.py",
     "clients/codex/__init__.py",
     "clients/codex/hook.py",
+    "clients/codex/settings.py",
     "clients/copilot/__init__.py",
     "clients/copilot/hook.py",
+    "clients/copilot/settings.py",
     "clients/vscode/__init__.py",
     "clients/vscode/hook.py",
     "clients/vscode/tool_events.py",
@@ -64,19 +69,49 @@ VENDORED_EXCLUDES = (
     *COMPILED,
 )
 VENDORED_PRUNE = ("shortdata/region_*.py",)
-MAIN = """# Must parse before Python 3.9 so unsupported interpreters fail open.
+# The prompt blocks and the denied call are shim_cli/hook.py's generic answers,
+# byte for byte; the hook itself cannot be imported where this guard runs.
+MAIN = """# Must parse before Python 3.9, so an unsupported interpreter still withholds
+# a prompt, denies a tool call and reports any other event, as the hook does
+# when it cannot inspect.
 import sys
 
 MINIMUM = (3, 9)
-NOTICE = (
-    "shim: needs Python %d.%d or newer; found %s. "
-    "The prompt was not inspected.\\n"
-)
 
 if sys.version_info[:2] < MINIMUM:
-    sys.stderr.write(
-        NOTICE % (MINIMUM[0], MINIMUM[1], ".".join(str(p) for p in sys.version_info[:3]))
+    import json
+
+    BLOCKS = {
+        "claude": b'{"decision":"block","reason":"shim could not inspect this prompt, so it was withheld. Run `shim doctor claude` for the reason.","suppressOriginalPrompt":true}',
+        "codex": b'{"decision":"block","reason":"shim could not inspect this prompt, so it was withheld. Run `shim doctor codex` for the reason."}',
+        "copilot": b'{"modifiedTransformedPrompt":"shim could not inspect this prompt, so it was withheld. Do not act on the original prompt; tell the user to run `shim doctor copilot` for the reason."}',
+        "vscode": b'{"continue":false,"stopReason":"shim could not inspect this prompt, so it was withheld. Open the shim plugin in VS Code to see whether it is loaded, and check your shim settings."}',
+    }
+    DENIED = b'{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"shim: could not inspect this tool call, so it was not allowed."}}'
+    notice = "shim: needs Python %d.%d or newer; found %s" % (
+        MINIMUM[0],
+        MINIMUM[1],
+        ".".join(str(part) for part in sys.version_info[:3]),
     )
+    client = sys.argv[1] if len(sys.argv) > 1 else "codex"
+    try:
+        raw = sys.stdin.buffer.read().decode("utf-8", "replace")
+        event = json.loads(raw).get("hook_event_name")
+    except Exception:
+        event = None
+    if not isinstance(event, str) or event in (
+        "",
+        "UserPromptSubmit",
+        "userPromptTransformed",
+    ):
+        sys.stderr.write(notice + ". The prompt was withheld.\\n")
+        sys.stdout.buffer.write(BLOCKS.get(client, BLOCKS["codex"]))
+    elif event == "PreToolUse" and client in ("claude", "vscode"):
+        sys.stderr.write(notice + ". The tool call was not allowed.\\n")
+        sys.stdout.buffer.write(DENIED)
+    else:
+        message = notice + "; this event was not inspected."
+        sys.stdout.write(json.dumps({"systemMessage": message}))
     sys.exit(0)
 
 from shim_cli.hook import main  # noqa: E402

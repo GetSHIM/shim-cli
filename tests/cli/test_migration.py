@@ -177,7 +177,7 @@ def _legacy_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     from shim_cli.clients.claude import settings as claude_settings
     from shim_cli.clients.codex import settings as codex_settings
     from shim_cli.clients.copilot import settings as copilot_settings
-    from shim_cli.clients.hook_settings import add_groups
+    from shim_cli.clients.hook_settings import LEGACY_HOOK_MODULE, add_groups
 
     home = _home(monkeypatch, tmp_path)
     _write_legacy_settings()
@@ -190,19 +190,19 @@ def _legacy_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
             json.dumps(
                 {"model": "opus", "hooks": {"Notification": [_foreign()]}}
             ).encode(),
-            claude_settings.legacy_hook_groups(),
+            claude_settings.hook_groups(module=LEGACY_HOOK_MODULE),
         )
     )
     codex = home / ".codex"
     codex.mkdir(parents=True)
     (codex / "hooks.json").write_bytes(
-        add_groups(b"{}", codex_settings.legacy_hook_groups())
+        add_groups(b"{}", codex_settings.hook_groups(module=LEGACY_HOOK_MODULE))
     )
     hooks = home / ".copilot" / "hooks"
     hooks.mkdir(parents=True)
     (hooks / "shim-guard.json").write_bytes(
         json.dumps(
-            copilot_settings.hook_document(module=copilot_settings.LEGACY_HOOK_MODULE),
+            copilot_settings.hook_document(module=LEGACY_HOOK_MODULE),
             ensure_ascii=False,
             indent=2,
         ).encode()
