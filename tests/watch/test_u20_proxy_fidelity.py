@@ -8,6 +8,7 @@ import http.server
 import json
 import socket
 import socketserver
+import sys
 import threading
 import urllib.request
 
@@ -306,7 +307,10 @@ def test_the_upstream_leg_tunnels_through_the_clients_https_proxy(
         running.stop()
 
     assert caught.value.code == 502
-    assert egress.requests[0][0] == "CONNECT api.anthropic.com:443 HTTP/1.1"
+    # http.client writes this line itself: HTTP/1.0 up to 3.11, the
+    # connection's own HTTP/1.1 from 3.12 on.
+    version = "HTTP/1.1" if sys.version_info >= (3, 12) else "HTTP/1.0"
+    assert egress.requests[0][0] == f"CONNECT api.anthropic.com:443 {version}"
     assert running.session.errors == 1
 
 
