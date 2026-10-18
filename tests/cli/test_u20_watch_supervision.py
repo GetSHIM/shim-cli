@@ -92,6 +92,7 @@ def _watch(tmp_path: Path, program: Path) -> subprocess.Popen:
         [
             sys.executable,
             "-I",
+            "-u",  # what it printed survives the kill in _wait_for
             "-c",
             "from shim_cli.cli.app import main; main()",
             "watch",
