@@ -223,6 +223,28 @@ tool listings). `history.jsonl`, beside `projects/`, holds one line per
 interactive prompt with the keys `display`, `pastedContents`, `project`,
 `sessionId` and `timestamp`; `sessionId` is the transcript's file name.
 
+## 1.2.2 release evidence
+
+Recorded 18 October 2026 on macOS 26.4 arm64 (8 GB), uv 0.12.5, on the 1.2.2
+candidate tree and its rebuilt `bin/shim.pyz`. Every hook run used a scratch
+`HOME` and `TMPDIR`. Claude Code live sessions used the real home for sign-in
+only, with `claude -p --setting-sources project --settings <scratch
+settings.json>` and shim's config and temporary folders from a scratch home.
+Every value was synthetic.
+
+| Evidence | Recorded result |
+| --- | --- |
+| Local gate | `python scripts/check.py` green on the candidate: lint, format, types, 4,097 tests, build, `git diff --check`. |
+| Reported bugs | Each reproduces on 1.2.1 and is gone on the candidate: a `Read` or `Grep` input holding an email is reported, not rewritten; an MCP write holding an AWS key is refused under the default `outbound = "enforce"` instead of written with `<SECRET_1>`; a 1 MB `a.a.a…@` field is inspected inside the deadline with the nearby key masked; a lone surrogate beside a key no longer stops masking (GHSA-p6p2-3w76-pc9p). |
+| Claude Code | tested: 2.1.291, run on 2.1.286. 16 live sessions in the release review: a `Read` of a file holding a key reached the model masked; `Read` and `Edit` of a file under `GoogleDrive-<email>/My Drive/` worked with the real path, where 1.2.1 rewrote it to `/<EMAIL_1>/…`; an MCP write holding a key was refused; a `Read` result shim could not inspect (settings made unreadable during the call) was withheld; an agent `Write` to shim's own settings was refused. The shape kept for a withheld `ToolSearch`, image or PDF result was checked against Claude Code's result mapper, not in a live session. |
+| 1.2.1 comparison | 95 recorded events: identical output except the intended MCP refusal and the Stop summary's timing. 70+ safe events on every client: exactly empty under the defaults, under `enforce` everywhere, and with `diet`, `markers = "note"` and the ledger on. 47 unusual payload shapes (images, PDFs, notebooks, empty and null results): no new failure. |
+| Plugin archive on 3.9 | The rebuilt archive run with the stock macOS `python3` 3.9.6 (`-I -S -B`) masked a key beside a lone surrogate. CI builds a fresh archive and runs it on 3.9 and 3.13. |
+| Hook cost | 1 KB prompt holding secrets, median of 60: 82 ms through the package on 3.13, 154 ms through the archive on 3.10 and 179 ms on 3.13, each 4–8% below the pre-release tree. |
+| Codex CLI | tested: 0.159.0. Replayed events only, **no live session**: prompt reports and blocks, and the D1 tool directions for `apply_patch`, shell and MCP tools. |
+| GitHub Copilot CLI | tested: 1.0.83. Replayed events only, **no live session**: prompt reports and the rewrite under `enforce`. |
+| VS Code | tested: 1.137.0. Replayed events only, **no live session**: the D1 directions for `run_in_terminal`, the edit tools and `fetch_webpage`, the D2 refusals, and the D5 refusals for `file:` URIs. |
+| Windows | Unchanged: every command still refuses with exit 2 before touching a file. |
+
 ## 1.2.1 release evidence
 
 Recorded 11 October 2026 on macOS 26.4 arm64 (8 GB), uv 0.12.5, pipx 1.11.0.
