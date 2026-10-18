@@ -3,6 +3,7 @@ on once, and reports how the client ended. Real processes, real signals."""
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import signal
@@ -64,10 +65,19 @@ def _lines(log: Path) -> list[str]:
     return log.read_text().splitlines() if log.exists() else []
 
 
-def _wait_for(log: Path, line: str, seconds: float = 20) -> None:
+def _wait_for(
+    log: Path, line: str, shim: subprocess.Popen, seconds: float = 20
+) -> None:
     deadline = time.monotonic() + seconds
     while line not in _lines(log):
-        assert time.monotonic() < deadline, f"{line!r} never logged: {_lines(log)}"
+        if time.monotonic() > deadline:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(shim.pid, signal.SIGKILL)
+            stdout, stderr = shim.communicate()
+            pytest.fail(
+                f"{line!r} never logged: {_lines(log)}; shim watch exited "
+                f"{shim.returncode}\nstdout: {stdout!r}\nstderr: {stderr!r}"
+            )
         time.sleep(0.05)
 
 
@@ -119,7 +129,7 @@ def test_a_terminated_watch_hands_the_signal_to_the_client_and_waits_for_it(
         """,
     )
     shim = _watch(tmp_path, program)
-    _wait_for(log, "ready")
+    _wait_for(log, "ready", shim)
 
     os.kill(shim.pid, number)
 
@@ -139,7 +149,7 @@ def test_one_ctrl_c_reaches_the_client_once(tmp_path):
         """,
     )
     shim = _watch(tmp_path, program)
-    _wait_for(log, "ready")
+    _wait_for(log, "ready", shim)
 
     os.killpg(shim.pid, signal.SIGINT)  # what a terminal does on Ctrl-C
 
@@ -163,10 +173,10 @@ def test_repeated_ctrl_c_escalates_and_the_proxy_stays_until_the_client_exits(
         """,
     )
     shim = _watch(tmp_path, program)
-    _wait_for(log, "ready")
+    _wait_for(log, "ready", shim)
 
     os.killpg(shim.pid, signal.SIGINT)
-    _wait_for(log, "interrupt")
+    _wait_for(log, "interrupt", shim)
     time.sleep(0.6)  # signals do not queue: let the first one be handled
     os.killpg(shim.pid, signal.SIGINT)
 
@@ -186,7 +196,7 @@ def test_ctrl_c_is_forwarded_when_the_client_is_in_another_process_group(tmp_pat
         """,
     )
     shim = _watch(tmp_path, program)
-    _wait_for(log, "ready")
+    _wait_for(log, "ready", shim)
 
     os.kill(shim.pid, signal.SIGINT)
 
