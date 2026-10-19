@@ -22,6 +22,10 @@ MAX_ENTRY_BYTES = 2_048
 # only by issuing numbers far apart, event after event.
 MAX_NAMES_BYTES = 65_536
 _FILE_MODE = 0o600
+# An empty file beside the log: a record that could not be appended left it, so
+# the summary can say it undercounts. Its mere existence is the whole record.
+_LOST = ".lost"
+_CAPPED_MARK = "capped"
 
 
 class SpoolError(RuntimeError):
@@ -87,10 +91,16 @@ def append(session_id: str, entry: dict) -> bool:
                 root, _name(session_id, ".jsonl"), line, MAX_SPOOL_BYTES
             )
         except OSError as error:
+            _files.mark_lost(root, _name(session_id, _LOST))
             raise SpoolError("session spool could not be written safely") from error
 
 
 def _at_cap(root: int, name: str) -> bool:
+    try:
+        os.stat(f"{name.removesuffix('.jsonl')}{_LOST}", dir_fd=root)
+        return True
+    except OSError:
+        pass
     try:
         descriptor = os.open(
             name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=root
@@ -104,6 +114,8 @@ def _at_cap(root: int, name: str) -> bool:
 
 
 def capped(session_id: str) -> bool:
+    """True when the log is known to undercount: at its size cap, or a record
+    could not be appended."""
     return capped_for_stem(session_key(session_id))
 
 
@@ -125,16 +137,19 @@ def entries_for_stem(stem: str) -> list:
         return _parse(_read(root, f"{stem}.jsonl", MAX_SPOOL_BYTES))
 
 
-def summarized(session_id: str) -> int:
+def summarized(session_id: str) -> tuple:
+    """(records, whether it said the log undercounts) as of the last summary:
+    `3` or `3 capped` in the mark."""
     with _root() as root:
         content = _read(root, _name(session_id, ".mark"), 32)
+    count, _, flag = content.decode("ascii", "replace").strip().partition(" ")
     try:
-        return max(0, int(content.decode("ascii", "replace").strip() or 0))
+        return max(0, int(count or 0)), flag == _CAPPED_MARK
     except ValueError:
-        return 0
+        return 0, False
 
 
-def mark_summarized(session_id: str, count: int) -> None:
+def mark_summarized(session_id: str, count: int, capped: bool = False) -> None:
     with _root() as root:
         try:
             descriptor = os.open(
@@ -145,8 +160,9 @@ def mark_summarized(session_id: str, count: int) -> None:
             )
             try:
                 _files.validate(descriptor)
-                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                content = str(max(0, int(count))).encode("ascii")
+                _files.lock(descriptor, fcntl.LOCK_EX)
+                content = f"{max(0, int(count))}{' ' + _CAPPED_MARK if capped else ''}"
+                content = content.encode("ascii")
                 if os.write(descriptor, content) != len(content):
                     raise OSError("session mark write was incomplete")
                 os.ftruncate(descriptor, len(content))
@@ -196,7 +212,7 @@ def issue(session_id: str, runs: tuple) -> None:
 def clear(session_id: str) -> None:
     with _root() as root:
         try:
-            for suffix in (".jsonl", ".mark", ".names"):
+            for suffix in (".jsonl", ".mark", ".names", _LOST):
                 with contextlib.suppress(FileNotFoundError):
                     os.unlink(_name(session_id, suffix), dir_fd=root)
         except OSError as error:

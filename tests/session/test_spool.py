@@ -135,16 +135,26 @@ def test_lines_that_are_not_records_are_skipped() -> None:
 
 def test_an_absent_session_reads_as_empty() -> None:
     assert spool.entries("never-seen") == []
-    assert spool.summarized("never-seen") == 0
+    assert spool.summarized("never-seen") == (0, False)
     assert spool.newest() == ""
 
 
 def test_the_summarized_mark_survives_between_processes() -> None:
     spool.append(SESSION, _entry())
-    assert spool.summarized(SESSION) == 0
+    assert spool.summarized(SESSION) == (0, False)
 
     spool.mark_summarized(SESSION, 1)
-    assert spool.summarized(SESSION) == 1
+    assert spool.summarized(SESSION) == (1, False)
+
+
+def test_the_summarized_mark_remembers_that_the_undercount_was_said() -> None:
+    spool.append(SESSION, _entry())
+
+    spool.mark_summarized(SESSION, 2, capped=True)
+    assert spool.summarized(SESSION) == (2, True)
+
+    spool.mark_summarized(SESSION, 3)
+    assert spool.summarized(SESSION) == (3, False)
 
 
 def test_a_corrupt_mark_reads_as_nothing_shown() -> None:
@@ -153,7 +163,7 @@ def test_a_corrupt_mark_reads_as_nothing_shown() -> None:
     mark = next(spool.root_path().glob("*.mark"))
     mark.write_text("garbage", encoding="utf-8")
 
-    assert spool.summarized(SESSION) == 0
+    assert spool.summarized(SESSION) == (0, False)
 
 
 def test_clearing_removes_the_session_entirely() -> None:
@@ -163,7 +173,7 @@ def test_clearing_removes_the_session_entirely() -> None:
     spool.clear(SESSION)
 
     assert spool.entries(SESSION) == []
-    assert spool.summarized(SESSION) == 0
+    assert spool.summarized(SESSION) == (0, False)
     assert list(spool.root_path().iterdir()) == []
     spool.clear(SESSION)
 
@@ -296,3 +306,70 @@ def test_bare_numbers_round_trip_through_the_spool() -> None:
     assert entry["bare_numbers"] == 3
     spool.append(SESSION, entry)
     assert spool.entries(SESSION)[0]["bare_numbers"] == 3
+
+
+def _lock_held(seconds: float):
+    """Another hook's append in flight on this session's log."""
+    import fcntl
+    import threading
+    import time
+
+    spool.append(SESSION, _entry())
+    descriptor = os.open(
+        next(spool.root_path().glob("*.jsonl")), os.O_RDWR | os.O_NOFOLLOW
+    )
+    fcntl.flock(descriptor, fcntl.LOCK_EX)
+
+    def release() -> None:
+        time.sleep(seconds)
+        os.close(descriptor)
+
+    thread = threading.Thread(target=release)
+    thread.start()
+    return thread
+
+
+def test_a_record_waits_out_a_lock_held_for_a_moment() -> None:
+    holder = _lock_held(0.03)
+
+    assert spool.append(SESSION, _entry("report")) is True
+    holder.join()
+    assert [record["action"] for record in spool.entries(SESSION)] == [
+        "mask",
+        "report",
+    ]
+    assert spool.capped(SESSION) is False
+
+
+def test_the_summarized_mark_waits_out_a_lock_held_for_a_moment() -> None:
+    import fcntl
+    import threading
+    import time
+
+    spool.mark_summarized(SESSION, 1)
+    mark = next(spool.root_path().glob("*.mark"))
+    descriptor = os.open(mark, os.O_RDWR | os.O_NOFOLLOW)
+    fcntl.flock(descriptor, fcntl.LOCK_EX)
+    holder = threading.Thread(target=lambda: (time.sleep(0.03), os.close(descriptor)))
+    holder.start()
+
+    spool.mark_summarized(SESSION, 4)
+    holder.join()
+
+    assert spool.summarized(SESSION) == (4, False)
+
+
+def test_a_record_lost_to_a_stuck_lock_makes_the_log_say_it_undercounts() -> None:
+    holder = _lock_held(1.0)
+    assert spool.capped(SESSION) is False
+
+    with pytest.raises(spool.SpoolError):
+        spool.append(SESSION, _entry("report"))
+
+    assert spool.capped(SESSION) is True
+    assert spool.capped_for_stem(spool.session_key(SESSION)) is True
+    assert spool.capped("another-session") is False
+    holder.join()
+    spool.clear(SESSION)
+    assert spool.capped(SESSION) is False
+    assert list(spool.root_path().iterdir()) == []

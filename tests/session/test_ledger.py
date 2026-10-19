@@ -128,6 +128,40 @@ def test_a_full_month_reports_rather_than_growing(
     assert ledger.files()[0].stat().st_size <= 200
 
 
+def test_a_month_says_when_it_can_take_no_more_records(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(ledger, "MAX_LEDGER_BYTES", 5_000)
+    assert ledger.capped() is False
+
+    ledger.append(_entry(), JANUARY)
+    assert ledger.capped() is False
+    while ledger.append(_entry(), JANUARY):
+        pass
+
+    assert ledger.capped() is True
+
+
+def test_a_capped_month_is_still_said_to_be_short_after_the_month_rolls_over(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(ledger, "MAX_LEDGER_BYTES", 5_000)
+    while ledger.append(_entry(), JANUARY):
+        pass
+    assert ledger.append(_entry(), FEBRUARY) is True
+
+    assert [path.name for path in ledger.files()] == [
+        "ledger-2026-01.jsonl",
+        "ledger-2026-02.jsonl",
+    ]
+    assert ledger.capped() is True
+
+
+def test_asking_whether_the_ledger_is_capped_creates_nothing() -> None:
+    assert ledger.capped() is False
+    assert not ledger.root_path().exists()
+
+
 def test_purge_deletes_everything() -> None:
     ledger.append(_entry(), JANUARY)
     ledger.append(_entry(), FEBRUARY)

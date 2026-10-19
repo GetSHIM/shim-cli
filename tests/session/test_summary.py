@@ -85,15 +85,62 @@ def test_many_places_are_counted_rather_than_listed() -> None:
 def test_a_capped_session_says_the_count_is_short() -> None:
     text = summary.render([_record()], capped=True)
 
-    assert "size cap" in text
+    assert text.endswith(
+        "\n  (session log is incomplete: it reached its size cap or a record "
+        "could not be written; some events are not counted)"
+    )
 
 
-@pytest.mark.parametrize("field", ["entities", "latency_ms", "action"])
-def test_a_record_missing_a_field_does_not_break_the_summary(field: str) -> None:
-    record = _record()
-    del record[field]
+HEADER = "shim — this session\n"
+MASKED = "  masked    {count} SECRET  (Read .env)\n"
+OVERHEAD = "  overhead  {ms} ms median, {ms} ms p95"
 
-    summary.render([record, _record()])
+
+@pytest.mark.parametrize(
+    ("field", "expected"),
+    [
+        # Nothing found, so nothing to count; the intact record stands alone.
+        pytest.param(
+            "entities", MASKED.format(count=1) + OVERHEAD.format(ms=9), id="entities"
+        ),
+        # No latency sample: the record is still counted, the overhead ignores it.
+        pytest.param(
+            "latency_ms", MASKED.format(count=2) + OVERHEAD.format(ms=9), id="latency"
+        ),
+        # Findings with no action: never dropped, shown as not inspected.
+        pytest.param(
+            "action",
+            MASKED.format(count=1)
+            + "  skipped   1 not inspected, passed through  (Read .env)\n"
+            + OVERHEAD.format(ms=9),
+            id="action",
+        ),
+    ],
+)
+def test_a_record_missing_a_field_is_counted_or_shown_never_dropped(
+    field: str, expected: str
+) -> None:
+    broken = _record(latency_ms=9)
+    del broken[field]
+
+    assert summary.render([broken, _record(latency_ms=9)]) == HEADER + expected
+
+
+def test_a_record_with_findings_and_an_action_shim_does_not_know_is_shown() -> None:
+    text = summary.render([_record(action="bogus"), _record(latency_ms=6)])
+
+    assert "skipped   1 not inspected, passed through  (Read .env)" in text
+    assert "masked    1 SECRET" in text
+
+
+def test_the_json_counts_a_record_without_an_action_as_not_inspected() -> None:
+    broken = _record()
+    del broken["action"]
+
+    document = summary.as_json([broken, _record()])
+
+    assert document["not_inspected"] == 1
+    assert document["actions"]["mask"]["entities"] == {"SECRET": 1}
 
 
 def test_json_carries_the_same_facts_as_the_text() -> None:
@@ -423,4 +470,13 @@ def test_an_attached_file_is_named_by_its_target() -> None:
 def test_the_model_line_does_not_claim_the_values_were_invented() -> None:
     assert (
         summary.NOT_LEAKS == "written by the model; it may repeat values it was given"
+    )
+
+
+def test_an_undercount_with_nothing_counted_is_still_said() -> None:
+    assert summary.render([]) == ""
+    assert summary.render([], capped=True) == (
+        "shim — this session\n"
+        "  (session log is incomplete: it reached its size cap or a record "
+        "could not be written; some events are not counted)"
     )

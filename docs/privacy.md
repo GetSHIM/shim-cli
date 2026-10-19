@@ -232,7 +232,13 @@ with `0600` files). shim refuses to use that directory if it finds it readable
 by other users, and `shim doctor` reports when that has happened — recording
 never breaks the guard, so without that check the failure would be silent.
 
-The spool is capped at 1 MB; past that the summary undercounts and says so.
+Parallel hooks (Claude Code runs read-only tools side by side) append to the
+same file, so each append, and each read by the summary, waits up to 100 ms for
+the lock another hook holds for a moment; a record is not dropped because two
+events met. If a record still could not be written, or the spool reaches its
+1 MB cap, the summary undercounts and says so: the next `Stop` shows it even
+when no other record landed since the last summary, and a session whose first
+record was lost shows the note alone.
 Claude installs `Stop` and `SessionEnd`: `Stop` renders only records not shown
 in an earlier turn, and `SessionEnd` deletes that session's `.jsonl` spool and
 summary marker. Codex and Copilot currently install prompt events only, so they
@@ -252,7 +258,16 @@ that is where the numbers came from.
 `shim config --ledger` opts in to keeping the same records after the session
 ends. It is off unless you turn it on, and `shim config --no-ledger` turns it
 back off. Files live under `$XDG_STATE_HOME/shim` (or `~/.local/state/shim`),
-one per month, `0600`, capped at 5 MB each. A 0.2.0 install kept them under
+one per month, `0600`, capped at 5 MB each. Once a month has no room for
+another record, or an event could not be written because another process held
+the file past the 100 ms wait, the hook drops that event, and `shim ledger show` and the
+`shim report` fallback say so (`"capped": true` in `--json`); the next month
+starts a new file, and the warning stays for as long as the short month is
+retained. A live session whose records were all lost reads as incomplete in
+`shim report`, never as a session with nothing found. `shim doctor` checks, while the ledger is on, that the folder can be
+created or opened as private and yours and that this month's file is private
+and not a symlink, because the hook ignores a refused folder rather than fail a
+prompt. A 0.2.0 install kept them under
 `shim-guard/`; those files are read and moved once, by the first `shim report`,
 `shim ledger purge` or `shim install` after the upgrade.
 

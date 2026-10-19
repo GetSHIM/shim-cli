@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import datetime
 import errno
 import io
 import json
@@ -2256,7 +2257,8 @@ _ERROR_CASES: dict[str, tuple] = {
         _fails("shim_cli.session.ledger.entries", LedgerError),
         2,
         "The ledger could not be read.",
-        "Run shim doctor claude (or codex, copilot).",
+        "Run shim doctor claude (or codex, copilot); its ledger line names the "
+        "folder and the chmod 700 that fixes it.",
         {},
         "FAIL The ledger could not be read.\n",
     ),
@@ -2843,6 +2845,13 @@ def _doctor_check(code: str, monkeypatch, tmp_path: Path):
     if code == "SESSION_RECORDS_UNWRITABLE":
         monkeypatch.setattr(spool, "append", refuse)
         return diagnostics._session_record_check()
+    if code == "LEDGER_FOLDER_UNSAFE":
+        folder = home / ".local" / "state" / "shim"
+        shim_settings.write_text("ledger = true\n")
+        monkeypatch.setenv("XDG_STATE_HOME", str(folder.parent))
+        folder.mkdir(parents=True)
+        folder.chmod(0o755)
+        return diagnostics._ledger_check()
     if code == "HOOK_EVENTS_MISSING":
         return diagnostics._coverage_check("claude", [{"installed": False}])
     if code == "HOOK_ACTIVATION_UNVERIFIED":
@@ -2875,6 +2884,7 @@ _DOCTOR_CODES = (
     "PLUGIN_NOT_DISCOVERABLE",
     "DUPLICATE_HOOKS",
     "SESSION_RECORDS_UNWRITABLE",
+    "LEDGER_FOLDER_UNSAFE",
     "HOOK_EVENTS_MISSING",
     "HOOK_ACTIVATION_UNVERIFIED",
 )
@@ -3006,3 +3016,154 @@ def test_config_shows_and_keeps_the_marker_note(monkeypatch, tmp_path: Path) -> 
     assert json.loads(changed.stdout)["markers"] == "note"
     assert 'markers = "note"' in target.read_text()
     assert default["markers"] == "report"
+
+
+def _fill_ledger(monkeypatch) -> None:
+    from shim_cli.session import ledger
+
+    monkeypatch.setattr(ledger, "MAX_LEDGER_BYTES", 5_000)
+    entry = {
+        "session_id": "ended",
+        "ts": "2026-08-30T09:00:00Z",
+        "action": "mask",
+        "tool_name": "Read",
+        "target": "/work/.env",
+        "entities": {"SECRET": 1},
+        "latency_ms": 4,
+    }
+    while ledger.append(entry):
+        pass
+    assert ledger.capped()
+
+
+CAPPED = (
+    "The ledger reached its size cap in a retained month, or an event could not be written; "
+    "some events were not kept"
+)
+
+
+def test_a_capped_ledger_says_so_in_show_and_in_json(monkeypatch) -> None:
+    _fill_ledger(monkeypatch)
+
+    text = " ".join(unstyle(runner.invoke(app, ["ledger", "show"]).output).split())
+    payload = json.loads(runner.invoke(app, ["ledger", "show", "--json"]).output)
+
+    assert f"WARN {CAPPED}" in text
+    assert payload["capped"] is True
+    assert payload["events"] > 0
+
+
+def test_a_ledger_with_room_does_not_claim_a_cap(monkeypatch) -> None:
+    from shim_cli.session import ledger
+
+    ledger.append({"ts": "2026-08-30T09:00:00Z", "entities": {"SECRET": 1}})
+
+    shown = runner.invoke(app, ["ledger", "show"])
+    payload = json.loads(runner.invoke(app, ["ledger", "show", "--json"]).output)
+
+    assert CAPPED not in " ".join(unstyle(shown.output).split())
+    assert payload["capped"] is False
+
+
+def test_the_report_fallback_to_a_capped_ledger_says_so(monkeypatch) -> None:
+    _fill_ledger(monkeypatch)
+
+    text = " ".join(unstyle(runner.invoke(app, ["report"]).output).split())
+    document = json.loads(runner.invoke(app, ["report", "--json"]).output)
+
+    assert "retained ledger" in text
+    assert f"WARN {CAPPED}" in text
+    assert document["source"] == "ledger"
+    assert document["capped"] is True
+
+
+def test_doctor_checks_the_ledger_folder_only_when_the_ledger_is_on(
+    monkeypatch, tmp_path: Path
+) -> None:
+    _claude_home(monkeypatch, tmp_path)
+    _claude(monkeypatch, tmp_path)
+    _guard_config(monkeypatch, tmp_path)
+    folder = tmp_path / "state" / "shim"
+    monkeypatch.setenv("XDG_STATE_HOME", str(folder.parent))
+    folder.mkdir(parents=True, mode=0o755)
+    folder.chmod(0o755)
+
+    def ledger_check() -> dict | None:
+        checks = json.loads(runner.invoke(app, ["doctor", "claude", "--json"]).output)[
+            "checks"
+        ]
+        return next((c for c in checks if c["name"] == "ledger"), None)
+
+    assert ledger_check() is None, "the ledger is off, so its folder is not checked"
+
+    assert runner.invoke(app, ["config", "--ledger", "--yes"]).exit_code == 0
+    unsafe = ledger_check()
+    assert unsafe is not None
+    assert unsafe["status"] == "WARN"
+    assert unsafe["code"] == "LEDGER_FOLDER_UNSAFE"
+    assert f"chmod 700 {folder}" in unsafe["fix"]
+    assert str(folder) in unsafe["detail"]
+
+    folder.chmod(0o700)
+    safe = ledger_check()
+    assert safe is not None
+    assert (safe["status"], safe["code"]) == ("PASS", None)
+
+
+def _ledger_doctor(monkeypatch, tmp_path: Path, state: Path) -> dict:
+    _claude_home(monkeypatch, tmp_path)
+    _claude(monkeypatch, tmp_path)
+    _guard_config(monkeypatch, tmp_path)
+    monkeypatch.setenv("XDG_STATE_HOME", str(state))
+    assert runner.invoke(app, ["config", "--ledger", "--yes"]).exit_code == 0
+    checks = json.loads(runner.invoke(app, ["doctor", "claude", "--json"]).output)[
+        "checks"
+    ]
+    return next(c for c in checks if c["name"] == "ledger")
+
+
+def _this_month() -> str:
+    now = datetime.datetime.now(datetime.timezone.utc)
+    return f"ledger-{now.year:04d}-{now.month:02d}.jsonl"
+
+
+def test_doctor_passes_a_ledger_the_hook_can_write(monkeypatch, tmp_path: Path) -> None:
+    check = _ledger_doctor(monkeypatch, tmp_path, tmp_path / "state")
+
+    assert (check["status"], check["code"]) == ("PASS", None)
+    assert (tmp_path / "state" / "shim").is_dir()
+
+
+def test_doctor_warns_when_the_ledger_folder_cannot_be_created(
+    monkeypatch, tmp_path: Path
+) -> None:
+    parent = tmp_path / "ro"
+    parent.mkdir(mode=0o555)
+    parent.chmod(0o555)
+    try:
+        check = _ledger_doctor(monkeypatch, tmp_path, parent / "state")
+    finally:
+        parent.chmod(0o700)
+
+    assert (check["status"], check["code"]) == ("WARN", "LEDGER_FOLDER_UNSAFE")
+    assert not (parent / "state").exists()
+
+
+@pytest.mark.parametrize("kind", ("readable", "symlink"))
+def test_doctor_warns_when_this_months_ledger_file_cannot_be_appended_to(
+    monkeypatch, tmp_path: Path, kind: str
+) -> None:
+    folder = tmp_path / "state" / "shim"
+    folder.mkdir(parents=True, mode=0o700)
+    month = folder / _this_month()
+    if kind == "readable":
+        month.write_text("", encoding="utf-8")
+        month.chmod(0o644)
+    else:
+        (tmp_path / "elsewhere").write_text("", encoding="utf-8")
+        month.symlink_to(tmp_path / "elsewhere")
+
+    check = _ledger_doctor(monkeypatch, tmp_path, tmp_path / "state")
+
+    assert (check["status"], check["code"]) == ("WARN", "LEDGER_FOLDER_UNSAFE")
+    assert str(folder) in check["detail"]

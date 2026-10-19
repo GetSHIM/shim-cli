@@ -326,6 +326,23 @@ DOCTOR = {
             "klasörünü 700 izniyle size ait yapın.",
         ),
     ),
+    "LEDGER_FOLDER_UNSAFE": Rule(
+        "Ledger folder unsafe",
+        (
+            "The ledger is on but its folder or this month's file is not private and "
+            "yours, so no event is retained; masking still works.",
+            "Kayıt defteri açık ama klasörü ya da bu ayın dosyası size ait ve özel "
+            "değil; hiçbir olay saklanmıyor, maskeleme çalışıyor.",
+        ),
+        (
+            "Run chmod 700 on the ledger folder doctor names and chmod 600 on its "
+            "ledger files (remove one that is a symlink), or point XDG_STATE_HOME "
+            "at a folder you own.",
+            "Doctor'ın belirttiği kayıt defteri klasörüne chmod 700, içindeki "
+            "dosyalara chmod 600 uygulayın (sembolik bağlantı olanı silin) ya da "
+            "XDG_STATE_HOME'u size ait bir klasöre yönlendirin.",
+        ),
+    ),
     "HOOK_EVENTS_MISSING": Rule(
         "Hook events missing",
         (

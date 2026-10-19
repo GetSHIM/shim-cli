@@ -1,6 +1,9 @@
+import fcntl
 import os
 import subprocess
 import sys
+import threading
+import time
 
 import pytest
 
@@ -65,10 +68,7 @@ root = _files.open_root(Path(sys.argv[1]))
 count = 0
 try:
     for _ in range(100):
-        try:
-            count += _files.append(root, "entries", b"0123456789\\n", 110)
-        except BlockingIOError:
-            pass
+        count += _files.append(root, "entries", b"0123456789\\n", 110)
     print(count)
 finally:
     os.close(root)
@@ -91,5 +91,107 @@ finally:
         assert len(content) <= 110
         assert content == b"0123456789\n" * written
         assert written == 10
+    finally:
+        os.close(root)
+
+
+def _held(root: int, name: str, mode: int, seconds: float) -> threading.Thread:
+    """Hold a lock on `name` the way an append or a read in flight does, then
+    let go: a thread, because a lock belongs to its open file description."""
+    descriptor = os.open(name, os.O_RDWR | os.O_CREAT, 0o600, dir_fd=root)
+    fcntl.flock(descriptor, mode)
+
+    def release() -> None:
+        time.sleep(seconds)
+        os.close(descriptor)
+
+    thread = threading.Thread(target=release)
+    thread.start()
+    return thread
+
+
+def test_concurrent_processes_each_land_their_record_under_a_held_lock(tmp_path):
+    path = tmp_path / "journal"
+    root = _files.open_root(path)
+    code = """
+import os, sys
+from pathlib import Path
+from shim_cli.session import _files
+root = _files.open_root(Path(sys.argv[1]))
+print("ready", flush=True)
+sys.stdin.readline()
+try:
+    print(_files.append(root, "entries", sys.argv[2].encode() + b"\\n", 1000))
+finally:
+    os.close(root)
+"""
+    children = []
+    try:
+        for index in range(6):
+            children.append(
+                subprocess.Popen(
+                    [sys.executable, "-c", code, str(path), f"record-{index}"],
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+            )
+        for child in children:
+            assert child.stdout.readline() == b"ready\n"
+        holder = _held(root, "entries", fcntl.LOCK_EX, 0.03)
+        for child in children:
+            child.stdin.write(b"go\n")
+            child.stdin.flush()
+        for child in children:
+            stdout, stderr = child.communicate(timeout=10)
+            assert child.returncode == 0, stderr
+            assert stdout.endswith(b"True\n")
+        holder.join()
+        content = _files.read(root, "entries", 1000)
+        assert sorted(content.splitlines()) == [
+            f"record-{index}".encode() for index in range(6)
+        ]
+    finally:
+        for child in children:
+            child.kill()
+            child.communicate()
+        os.close(root)
+
+
+def test_a_reader_waits_for_an_append_in_flight(tmp_path):
+    root = _files.open_root(tmp_path / "journal")
+    try:
+        assert _files.append(root, "entries", b"first\n", 100)
+        holder = _held(root, "entries", fcntl.LOCK_EX, 0.03)
+
+        assert _files.read(root, "entries", 100) == b"first\n"
+        holder.join()
+    finally:
+        os.close(root)
+
+
+def test_a_writer_waits_for_a_reader(tmp_path):
+    root = _files.open_root(tmp_path / "journal")
+    try:
+        holder = _held(root, "entries", fcntl.LOCK_SH, 0.03)
+
+        assert _files.append(root, "entries", b"first\n", 100) is True
+        holder.join()
+        assert _files.read(root, "entries", 100) == b"first\n"
+    finally:
+        os.close(root)
+
+
+def test_a_lock_that_is_never_released_is_given_up_after_a_bound(tmp_path):
+    root = _files.open_root(tmp_path / "journal")
+    try:
+        holder = _held(root, "entries", fcntl.LOCK_EX, 1.0)
+        started = time.monotonic()
+
+        with pytest.raises(BlockingIOError):
+            _files.append(root, "entries", b"first\n", 100)
+
+        assert 0.05 < time.monotonic() - started < 0.9
+        holder.join()
     finally:
         os.close(root)

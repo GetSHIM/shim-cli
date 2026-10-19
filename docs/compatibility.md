@@ -460,7 +460,7 @@ could pass. It has been superseded by:
 
 | Corpus | Cases | Contract |
 | --- | ---: | --- |
-| `guard-v2.json` | 210 | Exact redacted output for every case, with every built-in type enabled, plus source spans for normalization-sensitive cases. |
+| `guard-v2.json` | 335 | Exact redacted output for every case, with every built-in type enabled, plus source spans for normalization-sensitive cases. |
 | `guard-tools-v1.json` | 24 | Exact output at 25 scanned paths in captured tool payloads, per event and policy direction. From 1.2.2 each case runs through the whole hook with no settings file; the `PostToolBatch` cases, an event shim does not install, are graded as no output, and their detector redaction is kept as `expected_redaction`. |
 | `parity-v1.json` | 475 | Exact findings, spans, scores, and redacted output from the previous Presidio implementation. |
 | `custom-v1.json` | 10 | Exact output with your own patterns, including where they overlap a built-in type. |

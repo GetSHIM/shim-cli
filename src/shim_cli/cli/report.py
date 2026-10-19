@@ -15,21 +15,30 @@ from shim_cli.cli.output import (
 )
 from shim_cli.session import spool, summary
 
-_FIX_LEDGER = "Run shim doctor claude (or codex, copilot)."
+_FIX_LEDGER = (
+    "Run shim doctor claude (or codex, copilot); its ledger line names the "
+    "folder and the chmod 700 that fixes it."
+)
+_LEDGER_CAPPED = (
+    "The ledger reached its size cap in a retained month, or an event could not be written; "
+    "some events were not kept, so what it shows ends before they do."
+)
 
 
-def _retained() -> list:
+def _retained() -> tuple:
+    """The newest retained session, and whether the ledger is at its cap."""
     from shim_cli.session import ledger
 
     try:
         entries = ledger.entries()
+        capped = ledger.capped()
     except (ledger.LedgerError, OSError):
-        return []
+        return [], False
     if not entries:
-        return []
+        return [], capped
     newest = max(entries, key=lambda entry: str(entry.get("ts", "")))
     session = newest.get("session_id")
-    return [entry for entry in entries if entry.get("session_id") == session]
+    return [entry for entry in entries if entry.get("session_id") == session], capped
 
 
 def report(*, as_json: bool) -> None:
@@ -49,8 +58,8 @@ def report(*, as_json: bool) -> None:
         )
 
     source = "session"
-    if not records:
-        records = _retained()
+    if not records and not truncated:
+        records, truncated = _retained()
         source = "ledger" if records else "none"
 
     if as_json:
@@ -67,7 +76,7 @@ def report(*, as_json: bool) -> None:
         )
         return
 
-    if not records:
+    if source == "none":
         emit(
             "WARN",
             "No session on record. shim writes one while a client session is open "
@@ -75,7 +84,7 @@ def report(*, as_json: bool) -> None:
         )
         raise typer.Exit(1)
 
-    text = summary.render(records, truncated)
+    text = summary.render(records, truncated and source == "session")
     if not text:
         count = len(records)
         plural = "" if count == 1 else "s"
@@ -84,6 +93,8 @@ def report(*, as_json: bool) -> None:
     print(terminal_text(text, sys.stdout, "\n"))
     if source == "ledger":
         emit("WARN", "From the retained ledger; the live session has ended.")
+        if truncated:
+            emit("WARN", _LEDGER_CAPPED)
 
 
 def purge(*, yes: bool, as_json: bool) -> None:
@@ -143,6 +154,7 @@ def show_ledger(*, as_json: bool) -> None:
 
     try:
         entries = ledger.entries()
+        capped = ledger.capped()
     except (ledger.LedgerError, OSError):
         emit_error(
             "ledger-show",
@@ -154,7 +166,9 @@ def show_ledger(*, as_json: bool) -> None:
 
     if not entries:
         if as_json:
-            emit_json("ledger-show", "ok", days=0, events=0, entries=[])
+            emit_json("ledger-show", "ok", days=0, events=0, entries=[], capped=capped)
+        elif capped:
+            emit("WARN", _LEDGER_CAPPED)
         else:
             from shim_cli.config import load_policy
 
@@ -177,6 +191,7 @@ def show_ledger(*, as_json: bool) -> None:
             days=len({str(entry.get("ts", ""))[:10] for entry in entries}),
             events=len(entries),
             entries=entries,
+            capped=capped,
         )
         return
 
@@ -205,3 +220,5 @@ def show_ledger(*, as_json: bool) -> None:
         detail = f"   {listed}" if listed else "   nothing found"
         lines.append(f"  {day}   {len(records)} event{day_plural}{detail}")
     print(terminal_text("\n".join(lines), sys.stdout, "\n"))
+    if capped:
+        emit("WARN", _LEDGER_CAPPED)

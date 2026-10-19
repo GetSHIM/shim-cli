@@ -673,6 +673,39 @@ def _session_record_check() -> Check:
     )
 
 
+def _ledger_check() -> Check | None:
+    """The ledger folder is checked only when a write would reach it: the
+    hook swallows a refused folder, so `shim config --ledger` says on while
+    nothing is retained. None when the ledger is off or its settings cannot be
+    read: the entity check already says why."""
+    from shim_cli.config import load_policy
+    from shim_cli.session import ledger
+
+    try:
+        if not load_policy().ledger:
+            return None
+    except (OSError, ValueError):
+        return None
+    root = None
+    try:
+        root = ledger.root_path()
+        ledger.probe()
+    except (OSError, ledger.LedgerError):
+        return Check(
+            "ledger",
+            "WARN",
+            f"The ledger is on but {root or 'its folder'} is not a private folder "
+            "you own with private ledger files, so no event is retained; "
+            "masking still works.",
+            code="LEDGER_FOLDER_UNSAFE",
+            fix=f"Run chmod 700 {root} and chmod 600 on the ledger files in it, "
+            "or remove a ledger file that is a symlink."
+            if root
+            else "Set XDG_STATE_HOME to an absolute folder you own.",
+        )
+    return Check("ledger", "PASS", f"The ledger folder {root} is private.")
+
+
 def _installed_events(client: str, hook_state: Check | None) -> frozenset:
     if client == "copilot":
         passed = hook_state is not None and hook_state.status == "PASS"
@@ -788,6 +821,7 @@ def doctor(*, client: str, as_json: bool) -> None:
             _custom_patterns(),
             _mode_defaults(),
             _session_record_check(),
+            _ledger_check(),
             runner,
             # The installed hook runs this package only if the runner ran it.
             _resolution_check(

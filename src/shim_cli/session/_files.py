@@ -1,11 +1,19 @@
-"""Private journal descriptors, bounded reads, and non-blocking capped writes."""
+"""Private journal descriptors, bounded reads, and capped writes. A lock is
+waited for briefly, never indefinitely: the hook has a deadline."""
 
+import contextlib
 import fcntl
 import os
 import stat
+import time
 from pathlib import Path
 
 _CREATE_ATTEMPTS = 3
+# A lock is held for the length of one append or one read, microseconds to a
+# few milliseconds, so a collision between parallel hooks is waited out here
+# instead of dropping the record.
+LOCK_WAIT_SECONDS = 0.1
+_LOCK_POLL_SECONDS = 0.001
 
 
 def open_root(path: Path) -> int:
@@ -33,6 +41,19 @@ def validate(descriptor: int) -> os.stat_result:
     return info
 
 
+def lock(descriptor: int, kind: int) -> None:
+    """Take `LOCK_SH` or `LOCK_EX`; BlockingIOError once the wait is over."""
+    deadline = time.monotonic() + LOCK_WAIT_SECONDS
+    while True:
+        try:
+            fcntl.flock(descriptor, kind | fcntl.LOCK_NB)
+            return
+        except BlockingIOError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(_LOCK_POLL_SECONDS)
+
+
 def read(root: int, name: str, limit: int) -> bytes:
     try:
         descriptor = os.open(
@@ -42,7 +63,7 @@ def read(root: int, name: str, limit: int) -> bytes:
         return b""
     try:
         validate(descriptor)
-        fcntl.flock(descriptor, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        lock(descriptor, fcntl.LOCK_SH)
         result = bytearray()
         while len(result) < limit:
             chunk = os.read(descriptor, min(65_536, limit - len(result)))
@@ -69,7 +90,7 @@ def append(root: int, name: str, line: bytes, limit: int) -> bool:
     descriptor = _open_for_append(root, name)
     try:
         validate(descriptor)
-        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        lock(descriptor, fcntl.LOCK_EX)
         size = os.fstat(descriptor).st_size
         if size + len(line) > limit:
             return False
@@ -86,3 +107,17 @@ def append(root: int, name: str, line: bytes, limit: int) -> bool:
         return True
     finally:
         os.close(descriptor)
+
+
+def mark_lost(root: int, name: str) -> None:
+    """Leave an empty `name` beside a journal: a record could not be appended,
+    and the file's existence is all that says so."""
+    with contextlib.suppress(OSError):
+        os.close(
+            os.open(
+                name,
+                os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK,
+                0o600,
+                dir_fd=root,
+            )
+        )

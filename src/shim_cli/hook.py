@@ -458,10 +458,14 @@ def _summary_output(session_id: str, stop_active: bool) -> bytes:
         from shim_cli.session import spool, summary
 
         records = spool.entries(session_id)
-        if len(records) <= spool.summarized(session_id):
+        capped = spool.capped(session_id)
+        shown, said = spool.summarized(session_id)
+        # An undercount is news even when no record landed since the last
+        # summary: the record it is about is the one that did not.
+        if len(records) <= shown and (said or not capped):
             return b""
-        text = summary.render(records, spool.capped(session_id))
-        spool.mark_summarized(session_id, len(records))
+        text = summary.render(records, capped)
+        spool.mark_summarized(session_id, len(records), capped)
         if not text:
             return b""
         return json_bytes.dumps({"systemMessage": text})

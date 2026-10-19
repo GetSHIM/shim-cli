@@ -103,7 +103,7 @@ the detector is broken.
 | `HISTORY_NOT_FOUND` | There is no Claude Code history folder to read | `audit` | `2` | `null` |
 | `HISTORY_UNREADABLE` | The Claude Code history could not be read | `audit` | `2` | `null` |
 | `RECORDS_UNREADABLE` | The session records could not be read | `report` | `2` | `Run shim doctor claude (or codex, copilot); its session_record line names the cause.` |
-| `LEDGER_UNREADABLE` | The ledger could not be read | `ledger show`, `ledger purge` | `2` | `Run shim doctor claude (or codex, copilot).` |
+| `LEDGER_UNREADABLE` | The ledger could not be read | `ledger show`, `ledger purge` | `2` | `Run shim doctor claude (or codex, copilot); its ledger line names the folder and the chmod 700 that fixes it.` |
 | `FILE_NOT_FOUND` | The path does not exist | `keys` | `2` | `null` |
 | `NOT_A_FILE` | The path is not a regular file | `keys` | `2` | `null` |
 | `FILE_UNREADABLE` | The file exists but could not be read, for example for lack of permission | `keys` | `2` | `null` |
@@ -142,6 +142,7 @@ and `fix`; `code` and `fix` are `null` on a `PASS`. A `FAIL` makes doctor exit
 | `PLUGIN_NOT_DISCOVERABLE` | shim cannot see whether the client also has the plugin installed | `WARN` | Remove the plugin if `shim install` is also in use |
 | `DUPLICATE_HOOKS` | shim is registered twice, so every event is inspected twice: the plugin beside a settings hook, or the settings file holding shim more than once, such as two installations' hooks (the detail lists each interpreter and its entry count) | `FAIL` | `Run shim install <client>.` for a settings file holding shim twice; beside the plugin, the uninstall or `shim revert claude` the detail names |
 | `SESSION_RECORDS_UNWRITABLE` | Session records cannot be written; masking still works | `WARN` | Set `TMPDIR` to a folder you own, or make the `shim-session` folder in it yours with mode 700 |
+| `LEDGER_FOLDER_UNSAFE` | The ledger is on but its folder cannot be created or opened as private and yours, or this month's file is not private or is a symlink, so the hook retains nothing; masking still works. Checked only while the ledger is on | `WARN` | `Run chmod 700 <folder> and chmod 600 on the ledger files in it, or remove a ledger file that is a symlink.` with the folder the detail names; for an unusable `XDG_STATE_HOME`, set it to an absolute folder you own |
 | `HOOK_EVENTS_MISSING` | Fewer events are installed than shim can cover | `WARN` | `Run shim install <client>.` |
 | `HOOK_ACTIVATION_UNVERIFIED` | Whether the client runs the hook is client UI state shim cannot read | `WARN` | Open `/hooks` in the client and check that shim is listed (and, in Codex, enabled) |
 
@@ -462,8 +463,13 @@ shim ledger — 4 events over 2 day(s), kept for 30 days
   2026-09-08   3 events   1 IBAN, 1 SECRET
 ```
 
-`--json` returns every entry. Entries hold entity names, counts, tool names and
-timestamps — never the values that were found.
+`--json` returns every entry and `capped`. Entries hold entity names, counts,
+tool names and timestamps — never the values that were found.
+
+A month's file stops at 5 MB. When a retained month has no room for another
+record, or an event could not be written because another process held the file
+past the 100 ms wait, `ledger show` and the `shim report` fallback print a
+`WARN` that some events were not kept, and `capped` is `true`.
 
 ### `shim ledger purge`
 

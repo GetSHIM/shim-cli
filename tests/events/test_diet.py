@@ -52,9 +52,41 @@ def test_every_transform_is_idempotent(text: str) -> None:
     assert twice == once
 
 
-@pytest.mark.parametrize("text", SAMPLES)
-def test_every_transform_is_deterministic_within_a_process(text: str) -> None:
-    assert diet.shrink(text) == diet.shrink(text)
+COMPACT_ITEMS = ",".join(
+    f'{{"id":{index},"name":"item-{index}","tags":["alpha","beta"]}}'
+    for index in range(8)
+)
+
+
+@pytest.mark.parametrize(
+    ("text", "enabled", "expected"),
+    [
+        (
+            PRETTY_JSON,
+            diet.DEFAULT_TRANSFORMS,
+            (f'{{"items":[{COMPACT_ITEMS}],"total":8}}', ("json",)),
+        ),
+        (SAMPLES[2], diet.DEFAULT_TRANSFORMS, (SAMPLES[2], ())),
+        (
+            SAMPLES[2],
+            diet.TRANSFORMS,
+            ("line one\nline two\nline three", ("whitespace",)),
+        ),
+        (SAMPLES[9], diet.DEFAULT_TRANSFORMS, ("[1,2,3]", ("json",))),
+        (SAMPLES[4], diet.DEFAULT_TRANSFORMS, (SAMPLES[4], ())),
+    ],
+    ids=(
+        "pretty-json",
+        "untouched-by-default",
+        "whitespace",
+        "padded-array",
+        "compact",
+    ),
+)
+def test_shrinking_known_text_gives_exactly_this(
+    text: str, enabled: tuple, expected: tuple
+) -> None:
+    assert diet.shrink(text, enabled) == expected
 
 
 def test_transforms_are_deterministic_across_processes() -> None:
