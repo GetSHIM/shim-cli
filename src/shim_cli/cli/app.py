@@ -122,7 +122,11 @@ def redact(
 @app.command()
 def keys(
     paths: Annotated[
-        list[Path], typer.Argument(help="A .env or INI file; repeatable.")
+        list[Path],
+        typer.Argument(
+            readable=False,  # keys reports an unreadable file itself, as JSON under --json
+            help="A .env or INI file; repeatable.",
+        ),
     ],
     json_output: bool = typer.Option(False, "--json", help="Write a JSON result."),
 ) -> None:

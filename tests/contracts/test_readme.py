@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 import subprocess
 import sys
@@ -30,10 +29,11 @@ def test_the_readme_does_not_claim_more_tests_than_exist() -> None:
         capture_output=True,
         check=False,
         timeout=300,
-        env={**os.environ, "PYTEST_DISABLE_PLUGIN_AUTOLOAD": ""},
     )
-    if result.returncode != 0:  # pragma: no cover - a broken collection
-        pytest.skip("the suite could not be collected")
+    assert result.returncode == 0, (
+        "the suite could not be collected:\n"
+        + (result.stdout + result.stderr).decode()[-2000:]
+    )
     collected = re.search(r"(\d+) tests? collected", result.stdout.decode())
     assert collected, result.stdout.decode()[-400:]
 

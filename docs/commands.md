@@ -106,6 +106,7 @@ the detector is broken.
 | `LEDGER_UNREADABLE` | The ledger could not be read | `ledger show`, `ledger purge` | `2` | `Run shim doctor claude (or codex, copilot).` |
 | `FILE_NOT_FOUND` | The path does not exist | `keys` | `2` | `null` |
 | `NOT_A_FILE` | The path is not a regular file | `keys` | `2` | `null` |
+| `FILE_UNREADABLE` | The file exists but could not be read, for example for lack of permission | `keys` | `2` | `null` |
 | `FILE_TOO_LARGE` | The file is larger than 1 MB | `keys` | `2` | `null` |
 | `NOT_UTF8` | The file is not UTF-8 text | `keys` | `2` | `null` |
 | `STDIN_UNPROCESSABLE` | Stdin could not be read or scanned in full, or the settings file is refused or invalid | `scan`, `redact`, `demo` | `1` | `Pipe UTF-8 text; if the settings file is refused, shim config prints why.` |
@@ -647,10 +648,13 @@ skipped. A line over 8 MB or not JSON, and a text the detector cannot analyse,
 are counted as skipped and said so. It looks for the types your settings enable
 and your custom patterns; a per-tool `[entities]` rule does not apply.
 
-Exits `0` when nothing reached the model, `1` when something did, `2` when the
-history is missing or unreadable. `--json` uses the same codes; for a missing
-or unreadable history it writes an object with `"status": "error"` and the
-reason in `error`.
+Exits `0` only when every line was read, every text inspected and nothing
+reached the model; `1` when something did, or when nothing was found but lines
+were skipped or texts left uninspected, since those may hold what the scan
+missed; `2` when the history is missing or unreadable. `--json` uses the same
+codes, with `"status"` `"findings"`, `"incomplete"` (nothing found, something
+skipped) or `"safe"`; for a missing or unreadable history it writes an object
+with `"status": "error"` and the reason in `error`.
 
 `--json` carries `sessions`, `projects`, `first`, `last`, `reached` (per
 entity: `total`, `sessions`, `doors`), `by_project` (`counts`, `last`),
@@ -662,7 +666,8 @@ entity: `total`, `sessions`, `doors`), `by_project` (`counts`, `last`),
 the report, lists the sessions with at least one value under "reached the
 model", and asks you to type `delete N`; anything else deletes nothing. It
 first removes the listed sessions' lines from `history.jsonl`; if that file
-cannot be rewritten, or changes meanwhile, nothing is deleted. Then, for each
+cannot be rewritten, is a link or not a regular file, or changes meanwhile,
+nothing is deleted. Then, for each
 session, it deletes the folder of the same name beside the transcript
 (sub-agent transcripts and whatever else Claude Code keeps there) and last the
 transcript, so a session whose folder cannot be fully deleted keeps its

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import errno
 import json
 import os
 import shutil
@@ -563,8 +564,10 @@ def _history_session(line: bytes) -> str:
 
 
 def _forget(history: Path, sessions: set[str]) -> int | None:
-    if not sessions or history.is_symlink() or not history.is_file():
+    if not sessions or not os.path.lexists(history):
         return 0
+    if history.is_symlink() or not history.is_file():
+        raise OSError(errno.EINVAL, "it is a symlink or not a regular file")
     before = _status(history)
     lines = history.read_bytes().splitlines(keepends=True)
     kept = [line for line in lines if _history_session(line) not in sessions]
@@ -694,8 +697,10 @@ def audit(
         )
     scan, summary = _run_scan(since=since, project=project, as_json=as_json)
     found = bool(summary["reached"])
+    incomplete = not found and bool(scan.skipped or scan.uninspected)
     if as_json:
-        emit_json("audit", "findings" if found else "safe", **summary)
+        status = "findings" if found else "incomplete" if incomplete else "safe"
+        emit_json("audit", status, **summary)
     elif not scan.sessions:
         typer.echo("shim: there are no Claude Code sessions to audit.")
     elif purge:
@@ -704,5 +709,5 @@ def audit(
         lines = _report_lines(summary)
         lines[-1] += " Nothing was changed, written or sent."
         typer.echo("\n".join(lines))
-    if found:
+    if found or incomplete:
         raise typer.Exit(1)
