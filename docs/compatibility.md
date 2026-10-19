@@ -550,8 +550,9 @@ Earlier hook-path measurements were:
 The previous Presidio-based implementation measured p50 2,410 ms and p95
 4,262 ms on the same development line. Host load dominates these figures, so
 they are historical comparisons rather than a release guarantee. Detector
-analysis has a 20-second deadline, the outer hook has a 25-second deadline, and
-client settings use 30 seconds.
+analysis has a 20-second deadline. The hook stops inspecting 20 seconds after
+the client started it and has answered by 25 seconds, and client settings use
+30 seconds.
 
 From 1.2.2 `benchmark-hook.json` also times an `adversarial` prompt, built from
 the shapes that made the email, JWT, connection-string and base64 recognizers

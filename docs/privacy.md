@@ -401,8 +401,25 @@ it is normalized, as Korean text does, is cut where it stopped fitting and the
 rest scanned as the next piece, so even text in which every character expands
 eighteen-fold (U+FDFA) is read in pieces of 11,111 characters: expanding
 Unicode cannot switch detection off for a field. If any piece fails, or the
-hook's own 25-second deadline runs out, the whole event is withheld or refused
+hook's own 20-second deadline runs out, the whole event is withheld or refused
 as described above.
+
+**The answer is out before the client stops waiting.** A client kills a hook
+that runs past the timeout shim registered for it, and Claude Code then goes
+on with the event as if no hook had run, so a refusal that arrives late is no
+refusal. The hook's clock therefore starts when the client started its
+process, as the kernel recorded it on macOS and Linux, not when Python got to
+run: a busy CPU, a slow disk or a crowd of hooks starting at once holds up the
+interpreter on the same clock the client is counting. Inspection stops 20
+seconds in. A hook that only gets to run after that still reads the event
+before it refuses, so the refusal fits it: a call is denied, an MCP result
+withheld, a stop allowed. If the refusal is still not written 25 seconds in,
+because the machine is too starved to finish even that, a fixed refusal for
+the event takes its place, written once and whole, with no record kept, and
+the hook exits. The shortest timeout shim registers is 30 seconds, for every
+client, whether `shim install` or the plugin's hook files wrote it, which
+leaves 5 seconds for the plugin launcher, the write and the exit. A hook
+frozen for longer than that, as on a machine put to sleep, can still miss it.
 
 The detector reads most text up to the 1 MB input bound well inside that
 deadline. Measured on an M1 under load, 1 MB took about 2.5 s for a numeric

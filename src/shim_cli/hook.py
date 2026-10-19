@@ -5,6 +5,7 @@ import os
 import signal
 import sys
 import tempfile
+import threading
 import time
 import warnings
 from collections.abc import Iterator
@@ -18,7 +19,13 @@ _PROMPT_EVENTS = frozenset({_PROMPT_EVENT, "userPromptTransformed"})
 _STOP_EVENT = "Stop"
 _SESSION_END_EVENT = "SessionEnd"
 _STARTED = time.perf_counter()
-HOOK_DEADLINE_SECONDS = 25
+# Counted from when the client started the hook process. Inspection stops at
+# the deadline and the event is refused or withheld; if even that refusal is
+# not out when the answer is due, a fixed one is. The shortest timeout shim
+# registers with a client is 30 s: the 5 s left are for the launcher, the
+# write and the exit (docs/privacy.md).
+HOOK_DEADLINE_SECONDS = 20
+HOOK_ANSWER_SECONDS = 25
 ATTACHMENT_SECONDS = 15
 WINDOWS_NOTICE = "shim: shim-cli does not support Windows yet; nothing was inspected.\n"
 _ERROR_OUTPUT = (
@@ -214,6 +221,18 @@ def _refusal_output(raw: bytes, client: str, reason: str = "") -> bytes:
     return _not_inspected(raw, client, event, session, reason)
 
 
+def _fixed_refusal(raw: bytes, client: str) -> bytes:
+    """`_refusal_output` for when it failed or is out of time: fixed bytes,
+    picked from as much of the event as a quick read finds, with neither the
+    detector nor the disk."""
+    found = _prefix_event(raw)
+    if client == "claude" and found["client"] == "vscode":
+        client = "vscode"
+    if not found["event"] or found["event"] in _PROMPT_EVENTS:
+        return _error_output(client)
+    return _fallback_output(raw, client, found["event"])
+
+
 def _flush_standard_streams() -> None:
     for stream in (sys.stdout, sys.stderr):
         if stream is not None:
@@ -248,17 +267,51 @@ def _silence_dependencies() -> Iterator[None]:
                 os.close(copy)
 
 
+def _process_age() -> float:
+    """Seconds since this process started, as the kernel tells it, or 0 where
+    it does not. A client's timeout runs from then, not from when Python, held
+    up by a busy CPU or a slow disk, reached `main`."""
+    try:
+        if sys.platform == "darwin":
+            import ctypes
+            import struct
+
+            # sysctl {CTL_KERN, KERN_PROC, KERN_PROC_PID, pid} fills a struct
+            # kinfo_proc, which opens with the start time, a struct timeval.
+            info = ctypes.create_string_buffer(1024)
+            size = ctypes.c_size_t(len(info))
+            name = (ctypes.c_int * 4)(1, 14, 1, os.getpid())
+            failed = ctypes.CDLL(None).sysctl(
+                name, 4, info, ctypes.byref(size), None, 0
+            )
+            if failed or size.value < 16:
+                return 0.0
+            seconds, microseconds = struct.unpack_from("@qi", info)
+            return max(0.0, time.time() - seconds - microseconds / 1e6)
+        with open("/proc/self/stat", "rb") as stat:
+            # Field 22, counted after the parenthesised name: ticks since boot.
+            ticks = int(stat.read().rsplit(b")", 1)[1].split()[19])
+        booted = time.clock_gettime(time.CLOCK_BOOTTIME)
+        return max(0.0, booted - ticks / os.sysconf("SC_CLK_TCK"))
+    except Exception:
+        return 0.0
+
+
 @contextlib.contextmanager
-def _deadline() -> Iterator[float]:
-    """Arm the hook's alarm, and hand back when it is due."""
+def _deadline(started: float | None = None) -> Iterator[float]:
+    """Arm the hook's alarm for HOOK_DEADLINE_SECONDS after `started`, a
+    `perf_counter` reading (now if not given), and hand back when it is due.
+    Already past it, arm nothing: the caller checks."""
 
     def expire(_signal_number: int, _frame: object) -> None:
         raise TimeoutError("shim hook deadline exceeded")
 
-    ends = time.perf_counter() + HOOK_DEADLINE_SECONDS
+    if started is None:
+        started = time.perf_counter()
+    ends = started + HOOK_DEADLINE_SECONDS
     previous = signal.signal(signal.SIGALRM, expire)
-    signal.setitimer(signal.ITIMER_REAL, HOOK_DEADLINE_SECONDS)
     try:
+        signal.setitimer(signal.ITIMER_REAL, max(0.0, ends - time.perf_counter()))
         yield ends
     finally:
         signal.setitimer(signal.ITIMER_REAL, 0)
@@ -1046,15 +1099,52 @@ def main() -> None:
     client = "codex" if not arguments else arguments[0]
     if len(arguments) > 1:
         client = ""
+    started = time.perf_counter() - _process_age()
     raw = b""
+    # Whoever takes this gives the one answer: main, or the timer below once
+    # the answer is due. It is never released.
+    answered = threading.Lock()
+
+    def overdue(descriptor: int) -> None:
+        if answered.acquire(blocking=False):
+            try:
+                answer = memoryview(_fixed_refusal(raw, client))
+                while answer:
+                    answer = answer[os.write(descriptor, answer) :]
+            finally:
+                os._exit(0)
+
+    left = started + HOOK_ANSWER_SECONDS - time.perf_counter()
+    if left > 0:
+        with contextlib.suppress(OSError):
+            # On a copy of standard output: inspection points descriptor 1 at
+            # the null device.
+            # ponytail: the timer needs the GIL, so a C call that holds it
+            # delays the fixed answer by its length; the detector's calls on
+            # its 200,000-character pieces are short. A watchdog process if not.
+            timer = threading.Timer(left, overdue, (os.dup(1),))
+            timer.daemon = True
+            timer.start()
     try:
-        with _deadline() as ends:
+        with _deadline(started) as ends:
             raw = sys.stdin.buffer.read(MAX_INPUT_BYTES + 1)
+            if time.perf_counter() >= ends:
+                # Started past the deadline: read anyway, so the refusal fits
+                # the event (a prompt's block would let an MCP result through).
+                # The timer bounds that read; clients close stdin at once.
+                # ponytail: started past the answer too, only the client's
+                # kill bounds it; a start that late misses the timeout anyway.
+                raise TimeoutError("shim hook deadline exceeded")
             output = _output(raw, client, ends)
-        sys.stdout.buffer.write(output)
     except Exception as error:
-        with contextlib.suppress(Exception):
-            sys.stdout.buffer.write(_refusal_output(raw, client, _reason(error)))
+        try:
+            output = _refusal_output(raw, client, _reason(error))
+        except Exception:
+            output = _fixed_refusal(raw, client)
+    # Blocks for good if the timer has it: it is writing, and then exits.
+    answered.acquire()
+    with contextlib.suppress(Exception):
+        sys.stdout.buffer.write(output)
 
 
 if __name__ == "__main__":

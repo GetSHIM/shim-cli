@@ -1548,6 +1548,9 @@ def test_the_hook_says_nothing_about_the_contents_of_a_broken_settings_file(
     )
 
     monkeypatch.setattr("sys.argv", ["shim-hook", "claude"])
+    # main counts its deadline from when its process started, and this one is
+    # the test run: past 20 s it would refuse without reading the settings.
+    monkeypatch.setattr("shim_cli.hook._process_age", lambda: 0.0)
     with contextlib.suppress(SystemExit):
         main()
 

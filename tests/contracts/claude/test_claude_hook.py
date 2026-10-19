@@ -694,6 +694,8 @@ def test_the_scan_stops_at_the_hooks_own_deadline_not_a_fresh_one(
     evaluate.__wrapped__ = guard.evaluate
     monkeypatch.setattr(guard, "evaluate", evaluate)
     monkeypatch.setattr(hook, "HOOK_DEADLINE_SECONDS", 0.2)
+    # main counts from when its process started, and this one is the test run.
+    monkeypatch.setattr(hook, "_process_age", lambda: 0.0)
     monkeypatch.setattr(signal, "setitimer", lambda *_args: (0.0, 0.0))
     monkeypatch.setattr(sys, "argv", ["shim", "claude"])
     monkeypatch.setattr(

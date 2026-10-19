@@ -148,10 +148,15 @@ never reach a replacement. If any leaf was not read, because of depth, size,
 the deadline or a failed analysis, the inspection hands on no rewritten value
 at all, and the event is denied, withheld or reported as not inspected. Before
 every detector call the tool path compares the clock with the deadline `main`
-set before it read stdin, rather than relying on the alarm the detector
-re-arms. Diet runs only on rewrite-capable inbound results of network and MCP
-tools outside `observe`: never on a local tool's result or a command's output,
-whose exact bytes a later edit may need. Lossless JSON compaction is the default;
+set, rather than relying on the alarm the detector re-arms. `main` counts that
+deadline (20 s) from the kernel's start time for the process, and reads stdin
+even when it has already passed, so the refusal is shaped for the event it
+answers. A timer thread writes a fixed refusal, picked from the event as read,
+on a duplicate of standard output if no answer is out 25 s in; a lock that is
+never released lets exactly one of them answer. Diet runs only on
+rewrite-capable inbound results of network and MCP tools outside `observe`:
+never on a local tool's result or a command's output, whose exact bytes a
+later edit may need. Lossless JSON compaction is the default;
 trailing-whitespace removal is available only through explicit configuration
 because it can change Markdown hard breaks, and so is HTML-to-text, which drops
 markup; its parser, stdlib `html.parser`, is imported only when `html` is

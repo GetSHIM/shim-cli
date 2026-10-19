@@ -60,7 +60,7 @@ def _digits(row: int, count: int) -> str:
     ],
 )
 def test_a_megabyte_of_worst_case_text_is_inspected_whole_in_time(unit) -> None:
-    """The hook takes up to 1 MB and stops at 25 s. A 650 KB numeric CSV, a
+    """The hook takes up to 1 MB and stops at 20 s. A 650 KB numeric CSV, a
     960 KB phone list, the same list with extensions, 990 KB of U+FDFA, which
     NFKD writes as 18 characters, and runs of combining marks, which NFC
     orders by insertion sort, all used to reach the deadline and pass through
