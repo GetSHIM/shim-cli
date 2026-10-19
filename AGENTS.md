@@ -38,6 +38,10 @@ Apply the `ponytail:ponytail` and `code-writing-guidelines` skills to every impl
   `settings unreadable`, `analysis failed`), never payload text. If even the
   client adapter cannot load, the static answers in `hook.py` still deny the
   call, withhold an MCP result, report any other result and block the prompt.
+  The deadline is counted from the process's start as the kernel records it:
+  inspection stops at 20 s, and if no answer is out at 25 s a timer writes a
+  fixed refusal for the event, exactly once, inside the 30 s every client
+  registration uses.
 - Tool inputs are classified per client by where they go (`policy.TOOLS`).
   The input of a local built-in tool (`Read`, `Grep`, `Glob`, VS Code
   `read_file`, ...: the `local-tool` direction) is never rewritten or refused,
@@ -56,6 +60,23 @@ Apply the `ponytail:ponytail` and `code-writing-guidelines` skills to every impl
   folder (`claude --plugin-dir`, `chat.pluginLocations`, `CLAUDE_PLUGIN_ROOT`)
   is your working checkout of `plugins/shim-cli`, agent edits inside it are
   refused: point the plugin at a separate clone.
+- Placeholder write-back (D3). Every redaction shim hands the model (a masked
+  tool event, the prompt block's redacted copy, Copilot's rewritten prompt)
+  first records the placeholder *names* it issued in the session's `.names`
+  store beside the spool: type and number runs only, never values or
+  fingerprints, capped apart from the log, cleared at `SessionEnd`. If they
+  cannot be recorded, nothing masked is handed on. In every mode, a
+  `Write`/`Edit`/`MultiEdit`/`NotebookEdit`, VS Code edit or `apply_patch`
+  (added lines), or any MCP or unknown tool input, whose new text holds a
+  placeholder issued in this session is denied with a reason; an unreadable
+  store denies it too. Placeholder-shaped text shim never issued in this
+  session is left alone. Shell commands are not read for it.
+- Placeholder numbering (D4). Within one prompt or tool event a value always
+  gets the same number and two values never share one, across every field,
+  every piece of a long field and the `html` diet's single scan of the
+  converted page; numbers start above any placeholder-shaped text the event
+  already holds. The numbering lives in memory for that event only: no value
+  fingerprint is written to disk. A masked span keeps its line breaks.
 - The plugin launcher withholds a prompt and denies a tool call when no hook
   can run, falls through interpreters that cannot start, and runs Python
   isolated (`-I` for the archive, `-E` for the package script).
@@ -102,7 +123,11 @@ Apply the `ponytail:ponytail` and `code-writing-guidelines` skills to every impl
   approved proxy and it is opt-in per command: nothing may route a client
   through it automatically, and no shell profile may be edited to do so.
 - Detection may be relaxed only in the direction that drops noise, never in the
-  direction that drops a credential. `parity-v1.json` is generated evidence and
+  direction that drops a credential. Mask through (D6): where the end of a
+  secret value is ambiguous (`PASSWORD=s3cr3tPass|next`), the mask may run
+  through trailing `;`, `&` or `|` text, so a password is never partly exposed;
+  in a list of fields, the list's separator ends the value. `parity-v1.json` is
+  generated evidence and
   must not be regenerated to make a test pass; a deliberate difference from it
   goes in `DELIBERATE_DIVERGENCES` with its reason and its new expected result
   pinned as tightly as the old one.

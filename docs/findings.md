@@ -43,13 +43,15 @@ carries the detail.
 **Doctor findings.** `shim doctor <client> --json` raises one finding per check that is not `PASS`,
 with `rule_id` `cli.doctor.` and the check's code in lower case, such as
 `cli.doctor.hook_not_installed`. A `FAIL` is `high` and a `WARN` is `low`,
-except the two warnings a healthy install prints, `hook_activation_unverified`
-and `plugin_not_discoverable`, which are `informational`. What each code means
+except the warnings a healthy install can print, `hook_activation_unverified`,
+`plugin_not_discoverable` and `settings_file_absent` (no settings file, so the
+shipped defaults apply), which are `informational`. What each code means
 and how to clear it is the [error code table](commands.md#error-codes). A check
-that leaves traffic uninspected (the hook not installed, events missing, hooks
-off in Codex, settings invalid or refused, the runner or resolution failing,
-duplicate hooks, detection turned off) has `risk_class` `privacy`; the rest
-`reliability`.
+that leaves traffic uninspected or unmasked (the hook not installed, events
+missing, hooks off in Codex, settings invalid or refused, the runner or
+resolution failing, duplicate hooks, detection turned off, custom patterns
+switched off, a `[mode] default` that overrides masking) has `risk_class`
+`privacy`; the rest `reliability`.
 
 ## `cli.session.unmasked_values`
 

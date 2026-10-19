@@ -195,7 +195,10 @@ scanned 3 sessions, 5 KB, in 0.0 s. Nothing was changed, written or sent.
 ```
 
 It prints no value, keeps nothing and sends nothing; without `--purge` it opens
-no file for writing. It reads Claude Code's history only, and only when you run
+no file for writing. `already masked by shim` comes from shim's own records,
+the open session's log and the ledger if you turned it on, not from
+placeholder-shaped text in the transcript. It reads Claude Code's history only,
+and only when you run
 it. `--since 2026-09-01` and `--project ~/work/kasa-mutabakat` narrow it, and
 `--json` gives the same counts per session.
 
@@ -210,7 +213,7 @@ own, after `cleanupPeriodDays` in its settings (30 by default).
 
 | Client | Your typed prompt | Tool input and results |
 | --- | --- | --- |
-| [Claude Code](https://github.com/anthropics/claude-code) | Reports what it found and lets it through; blocks under `enforce` | Results are masked. `WebFetch` and `WebSearch` arguments are masked, and the call still goes through your permission rules; an MCP or unknown tool's arguments are never rewritten, and a call carrying a finding is refused by default; a local tool's input (`Read`, `Grep`) is reported only; commands and local writes are report-or-deny only; the output of a failed call is reported, not masked |
+| [Claude Code](https://github.com/anthropics/claude-code) | Reports what it found and lets it through; blocks under `enforce` | Results are masked. `WebFetch` and `WebSearch` arguments are masked, and the call still goes through your permission rules; an MCP or unknown tool's arguments are never rewritten, and a call carrying a finding is refused by default; a local tool's input (`Read`, `Grep`) is reported only; commands and local writes are report-or-deny only, and a write that would put back a placeholder shim gave the model is refused; the output of a failed call is reported, not masked |
 | [Codex CLI](https://github.com/openai/codex) | Reports what it found and lets it through; blocks under `enforce` | Not inspected: shim never sees a tool call or its result (no verified native tool-event adapter) |
 | [GitHub Copilot CLI](https://github.com/github/copilot-cli) | Replaces the model-facing prompt with the redacted text | Not inspected: shim never sees a tool call or its result (no verified native tool-event adapter) |
 | [VS Code](https://code.visualstudio.com/docs/agent-customization/agent-plugins) | Reports what it found and lets it through; stops the prompt before it is sent under `enforce` | A call is reported, and denied under `enforce`, before it runs; a local tool such as `read_file` is only reported. A **result** can only be reported: by then the model has it, and nothing takes it back. Never masked |
@@ -218,6 +221,15 @@ own, after `cleanupPeriodDays` in its settings (30 by default).
 Tool coverage is verified against a running client, not derived from
 documentation. `shim doctor <client>` prints exactly which events are installed
 and what shim can and cannot change at each one.
+
+**A placeholder is never written back over the value it stands for.** After
+a masked `Read`, the model holds `<SECRET_1>` where the file holds the key. A
+`Write`, `Edit`, `MultiEdit` or `NotebookEdit`, a VS Code edit, or an MCP call
+whose new text holds a placeholder shim issued in this session is refused, in
+every mode, with the placeholder named. To know which it issued, shim keeps
+their names beside the session record (`SECRET 1 1`, never a value), deleted
+with it. Placeholder-shaped text shim never issued, in a doc or a test
+fixture, is written as it is.
 
 **Why a hook and not an MCP server:** an MCP server sees only the calls made to
 its own tools, so the agent's built-in Read and Bash never pass through it. A
@@ -239,23 +251,25 @@ What shim-cli detects, and masks wherever the client allows it:
   `Bearer` headers.
 - **Credentials by context:** the value of a named key such as `DB_PASSWORD`,
   `AWS_SECRET_ACCESS_KEY` or, in Turkish, `şifre` and `parola` with `=` or `:`,
-  `password`, `token`, `secret` or `API_KEY` followed on the same line by a
-  value with a digit or a symbol in it (`password hunter2abc`), a `--password`
-  argument, the user and password in
-  a connection string or URL, Docker and npm registry logins, and a base64
-  block that decodes to one of these.
+  also with the secret word glued on (`PGPASSWORD`, `SECRETKEY`), in a typed
+  declaration (`db_password: str = "..."`), an XML element (`<password>`), or a
+  name and value pair (Kubernetes `name:`/`value:`, AWS SSM, Terraform
+  `default =`); `password`, `token`, `secret` or `API_KEY` followed on the same
+  line by a value with a digit or a symbol in it (`password hunter2abc`), a
+  `--password` argument, the user and password in any
+  `scheme://user:password@host` URI, Docker and npm registry logins, and a
+  base64 block that decodes to one of these. In a tool's JSON, object keys and
+  numbers are inspected too, and a value is read with its key beside it.
 
 What it does not detect: person names, postal addresses, a password with no key
 name or known prefix (`the login is Synthetic-pass-0000`), and an email address
 at an internal domain such as `ops@acme.internal`. [Your own
 patterns](https://github.com/GetSHIM/shim-cli/blob/main/README.md#your-own-patterns) cover what your project has that these do not.
-Until 1.2.3 it also misses PGP and DSA private key blocks, Stripe restricted
-keys (`rk_live_`), Slack app tokens (`xapp-`), GitLab runner and deploy
-tokens, the user and password in a connection string with a driver suffix
-(`postgresql+asyncpg://`) or another scheme (`amqp`, `smtp`, `ssh`), a key
-with the secret word glued on (`PGPASSWORD`), and a value used as a JSON key
-or sent as a JSON number; the [1.2.2 release
-notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/1.2.2.md#known-gaps-fixed-in-123)
+It also misses PGP and DSA private key blocks, Stripe restricted keys
+(`rk_live_`), Slack app tokens (`xapp-`), GitLab runner and deploy tokens, and
+a digit-only password under a key whose last word is not a password word
+(`PGPASSWORD_PROD=12345678`); the [1.2.3 release
+notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/1.2.3.md#known-gaps)
 list every known gap.
 
 Checksums are verified where they exist, so a mistyped IBAN or national ID is
@@ -273,8 +287,9 @@ so the agent can still tell production from staging. Once
 longer tell "listen on every interface" from "loopback only" — detection that
 fires where there is nothing to find is how people learn to ignore it. It also
 leaves bare timestamps, ids and decimals alone: a run of digits is a phone
-number only when it is Turkish-shaped or follows a cue such as `tel`, `phone`
-or a `phone_number` key, and `order no` or `sipariş no` is not a cue. Dated
+number only when it is Turkish-shaped or follows a cue such as `tel`, `phone`,
+a `phone_number` or `phoneNumber` key or a vCard `TEL;TYPE=CELL:` line, and
+`order no`, `orderNo` or `sipariş no` is not a cue. Dated
 model ids (`claude-sonnet-4-5-20250929`) and version strings (`version
 1.2.3.4`, `numpy==1.26.4.1`) reach the model unchanged, so an `Edit` on that
 line still applies; an address after a flag (`curl -v 203.0.113.9`) or a
@@ -467,7 +482,9 @@ shim install <client>
 That rewrites the hook line and, on Copilot, replaces the old hook file.
 `shim doctor <client>` reports a hook left in the 0.2.0 shape as `FAIL` with the
 same command. Your settings and ledger move to `shim/` on the next `shim`
-command that touches them, and each move is reported once.
+command that touches them, and each move is reported once. A move that fails,
+such as into a `~/.config` you cannot write, is a `WARN`, and `shim install`
+goes on.
 
 A Claude Code plugin installed as `shim-guard@shim-guard` stopped updating at
 0.3.2. Move it:
@@ -617,12 +634,14 @@ diet = ["json", "html"]         # also turn whole HTML pages into text
 `<!doctype html` or `<html`, after an XML declaration for XHTML) of at least
 2,048 characters, and only when the text is at most half the size. The model is
 told so in the first line, `[shim: converted from HTML to text; markup removed.
-Save the page to a file and Read it to see the markup.]`, and a masked value
-such as `<EMAIL_1>` stays as it is. The text is scanned again before the model
-reads it, because conversion can assemble a value the markup hid: an address
-written as `ops&#64;example&#46;com` is masked and counted like any other. An
-IBAN split across two `<span>`s is not yet caught whole: the first scan masks
-part of it, and its first groups reach the model (fixed in 1.2.3). A page cut
+Save the page to a file and Read it to see the markup.]`. The page is converted
+first and scanned as the model will read it, so conversion cannot assemble a
+value the scan never saw: an address written as `ops&#64;example&#46;com` is
+masked and counted like any other, and an IBAN split across two `<span>`s is
+masked whole. A value that runs across tags (`password=<b>...</b>`) is masked
+in the markup before conversion. A page that cannot be converted, or whose
+text cannot be scanned in full, is handed on as masked markup, never
+converted. A page cut
 short is converted without its last unfinished tag (up to 4,096
 characters of it); a page that leaves more unparsed, or leaves a `<script>`,
 `<svg>`, `<iframe>`, `<noscript>` or `<template>` open, is left unchanged,
@@ -637,7 +656,10 @@ Code refuses to read it). A page an MCP server returns is converted when `html`
 is on. An HTML file you `cat` or a page you `curl` through Bash is not, and
 neither is `Read` of the same file: both show the markup. (1.2.1 converted
 command output; 1.2.2 stopped, because a command can print a file the model
-then edits.)
+then edits.) A real image you `Read` reaches the model as sent, its bytes not
+read as text. A PDF's bytes are read for an encoded credential; a PDF holding
+one is withheld under `enforce`, saying what it held, and the file is never
+altered.
 
 While reading results shim also flags text that is trying to give the model
 orders, in English or Turkish — "ignore all previous instructions", "önceki tüm
@@ -778,9 +800,14 @@ shim config --no-reveal IBAN
 
 Only `IBAN`, `CREDIT_CARD` and `PHONE` may reveal a tail, one to four digits;
 anything else is refused. Separators are skipped, so a value printed as
-`TR33 0006 1005 1978 6457 8413 26` still reveals `1326`. It is off by default
-and changes nothing else: the same spans are found and the same counts are
-reported.
+`TR33 0006 1005 1978 6457 8413 26` still reveals `1326`, and a percent-encoded
+value reveals its decoded digits. It is off by default and changes nothing
+else: the same spans are found and the same counts are reported, and the tail
+never reaches a session record or the ledger.
+
+Within one prompt or one tool result a value keeps one number, written with
+other spacing, hyphens or case too, and two values never share one; numbers
+start again with the next event.
 
 ## Privacy limitations
 
@@ -793,7 +820,9 @@ reported.
   `cat .env && cat missing-file` exits non-zero, and the model reads `.env` as
   it is.
 - A disabled, untrusted, crashed, or timed-out hook may fail open according to
-  client behavior. A hook that runs but cannot inspect an event fails closed,
+  client behavior. shim's hook answers within 25 seconds of the client starting
+  it, inside the 30-second timeout it registers, even on a starved machine. A
+  hook that runs but cannot inspect an event fails closed,
   in every mode: the prompt is withheld, the tool call refused, and a Claude
   Code tool result withheld; where the client allows neither, as for a failed
   call's output or any VS Code result, you and the model are told it was not

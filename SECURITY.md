@@ -26,7 +26,9 @@ temporary suggestion, session spool, or opt-in ledger boundaries, an
 undocumented network destination or transmission, installer ownership
 failures, or an unsafe fail-open path is in scope. From 1.2.2 an event the hook
 cannot inspect fails closed, so one that reaches the model uninspected without
-the user and the model being told is in scope. So is an agent turning shim off
+the user and the model being told is in scope. From 1.2.3, so is a write that
+puts a placeholder shim issued in the session back over a real value. So is an
+agent turning shim off
 by a route that
 [docs/privacy.md](docs/privacy.md#an-agent-turning-shim-off) says is refused;
 the routes it lists as not caught are known limits.
