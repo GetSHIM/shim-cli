@@ -859,7 +859,11 @@ def _failure(error: object) -> bytes:
 
 
 def _isolated(tmp_path: Path) -> dict:
-    return {"SHIM_CONFIG": str(tmp_path / "absent" / "config.toml")}
+    # A SHIM_CONFIG that names a missing file is refused, so the file exists.
+    settings = tmp_path / "isolated" / "config.toml"
+    settings.parent.mkdir(mode=0o700, exist_ok=True)
+    settings.touch(mode=0o600)
+    return {"SHIM_CONFIG": str(settings)}
 
 
 def test_a_failed_command_that_printed_a_secret_is_reported_to_both(

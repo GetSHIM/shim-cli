@@ -25,7 +25,13 @@ def _redaction_files(root):
 
 def _run(raw: bytes, tmp_path: Path) -> subprocess.CompletedProcess[bytes]:
     environment = os.environ.copy()
-    environment["SHIM_CONFIG"] = str(tmp_path / "config.toml")
+    settings = tmp_path / "config.toml"
+    if not settings.exists():
+        # A SHIM_CONFIG that names a missing file is refused, so the file exists;
+        # beside tmp_path, whose leftovers some tests check.
+        settings = tmp_path.parent / f"{tmp_path.name}-config.toml"
+        settings.touch(mode=0o600)
+    environment["SHIM_CONFIG"] = str(settings)
     environment["TMPDIR"] = str(tmp_path)
     return subprocess.run(
         COMMAND,

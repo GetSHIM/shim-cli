@@ -189,8 +189,14 @@ DOCTOR = {
     "HOOK_RUNNER_FAILED": Rule(
         "Hook runner failed its fixtures",
         (
-            "The hook did not pass its own safe and sensitive fixtures.",
-            "Kanca kendi güvenli ve hassas test girdilerini geçemedi.",
+            "The hook command shim install wrote did not pass its own safe and "
+            "sensitive fixtures. A hook in the client's settings has no launcher, "
+            "so the client decides what a failure does and may let prompts and "
+            "tool calls through uninspected.",
+            "shim install'ın yazdığı kanca komutu kendi güvenli ve hassas test "
+            "girdilerini geçemedi. İstemcinin ayarlarındaki kancanın başlatıcısı "
+            "yok; hatada ne olacağına istemci karar verir ve istemleri ile araç "
+            "çağrılarını denetlenmeden geçirebilir.",
         ),
         (
             "Reinstall shim: uv tool install --reinstall shim, or pipx reinstall shim.",
@@ -202,13 +208,63 @@ DOCTOR = {
     "HOOK_RESOLUTION_FAILED": Rule(
         "No runnable hook",
         (
-            "No shim hook is runnable for {name}, so prompts pass uninspected.",
-            "{name} için çalıştırılabilir bir shim kancası yok; istemler "
-            "denetlenmeden geçiyor.",
+            "No shim hook is runnable for {name} from this installation. A hook "
+            "in the client's settings that cannot run may let prompts through "
+            "uninspected; the plugin's launcher withholds them instead.",
+            "{name} için bu kurulumdan çalıştırılabilir bir shim kancası yok. "
+            "İstemci ayarlarındaki çalışamayan bir kanca istemleri denetlenmeden "
+            "geçirebilir; eklentinin başlatıcısı ise onları alıkoyar.",
         ),
         (f"Run {_INSTALL}.", f"{_INSTALL_TR}."),
         risk_class="privacy",
         command=_INSTALL,
+    ),
+    "SETTINGS_FILE_ABSENT": Rule(
+        "No settings file",
+        (
+            "shim has no settings file, so the shipped defaults apply.",
+            "shim'in ayar dosyası yok; varsayılanlar geçerli.",
+        ),
+        (
+            "Nothing is wrong if the defaults suit you; the first change you save "
+            "with shim config creates the file.",
+            "Varsayılanlar işinize yarıyorsa sorun yok; shim config ile kaydettiğiniz "
+            "ilk değişiklik dosyayı oluşturur.",
+        ),
+        severity="informational",
+    ),
+    "CUSTOM_PATTERNS_INACTIVE": Rule(
+        "Custom patterns switched off",
+        (
+            "Custom patterns are in shim's settings but the CUSTOM type is off, so "
+            "none of them runs.",
+            "Özel desenler shim ayarlarında duruyor ama CUSTOM türü kapalı; hiçbiri "
+            "çalışmıyor.",
+        ),
+        (
+            "Turn them on with shim config --enable CUSTOM --yes.",
+            "shim config --enable CUSTOM --yes ile açın.",
+        ),
+        risk_class="privacy",
+        command="shim config --enable CUSTOM --yes",
+    ),
+    "MODE_DEFAULT_WEAKENS": Rule(
+        "Mode default overrides masking",
+        (
+            "The [mode] default in shim's settings overrides the shipped enforce "
+            "for tool results and for tool inputs that leave this machine, so they "
+            "are not masked.",
+            "shim ayarlarındaki [mode] default, araç sonuçları ve bu makineden "
+            "çıkan araç girdileri için varsayılan enforce'u geçersiz kılıyor; "
+            "bunlar maskelenmiyor.",
+        ),
+        (
+            'Add inbound = "enforce" and outbound = "enforce" under [mode], or '
+            "remove default.",
+            '[mode] altına inbound = "enforce" ve outbound = "enforce" ekleyin ya '
+            "da default satırını kaldırın.",
+        ),
+        risk_class="privacy",
     ),
     "ARCHIVE_VERSION_SKEW": Rule(
         "Plugin archive and package differ",

@@ -260,6 +260,8 @@ def test_config_selects_entities_for_privacy_commands(
     target = _guard_config(monkeypatch, tmp_path)
 
     initial = runner.invoke(app, ["config"], color=False)
+    # A SHIM_CONFIG that names a missing file is refused, so the file is made.
+    assert runner.invoke(app, ["config", "--reset", "--yes"]).exit_code == 0
     path_scan = runner.invoke(
         app,
         ["scan", "--json"],
@@ -288,6 +290,7 @@ def test_config_selects_entities_for_privacy_commands(
     assert initial.exit_code == saved.exit_code == current.exit_code == 0
     assert adjusted.exit_code == final.exit_code == 0
     assert "Current detection: 12/13 enabled" in initial.output
+    assert "no settings file at" in " ".join(initial.output.split())
     assert "ON" in saved.output and "OFF" in saved.output
     assert stat.S_IMODE(target.stat().st_mode) == 0o600
     assert json.loads(scan.output)["counts"] == {"EMAIL": 1}
@@ -443,7 +446,12 @@ def test_copilot_install_status_doctor_and_revert(monkeypatch, tmp_path: Path) -
     assert missing.exit_code == 1
     assert json.loads(missing.output)["state"] == "not_installed"
     assert json.loads(current.output)["state"] == "installed"
-    assert json.loads(doctor.output)["status"] == "ok"
+    # Nothing is wrong, but no settings file was ever saved: doctor says so.
+    report = json.loads(doctor.output)
+    assert report["status"] == "warning"
+    assert [c["code"] for c in report["checks"] if c["status"] != "PASS"] == [
+        "SETTINGS_FILE_ABSENT"
+    ]
     # The file is shim's own, so revert deletes it rather than leaving an
     # empty `{"version": 1, "hooks": {}}` shell behind.
     assert not target.exists()
@@ -2157,18 +2165,22 @@ _ERROR_CASES: dict[str, tuple] = {
         {"client": "claude", "target": "{settings}"},
         "FAIL Claude Code hook configuration cannot be changed safely. {settings} "
         "is not valid JSON: Expecting value at line 1, column 10.\n"
-        "WARN Review Claude Code hooks manually; shim did not change malformed, "
+        "WARN Fix {settings} by hand so it parses, then run the command again. "
+        "Review Claude Code hooks manually; shim did not change malformed, "
         "ambiguous, or unsafe settings.\n",
     ),
     "CLIENT_SETTINGS_UNSAFE": (
         ["revert", "claude", "--yes"],
         _claude_settings(None, link=True),
         2,
-        "Claude Code hook configuration cannot be removed safely.",
+        "Claude Code hook configuration cannot be removed safely: target must not "
+        "be a symlink.",
         "Make {settings} a regular file owned by you, then run the command again.",
         {"client": "claude", "target": "{settings}"},
-        "FAIL Claude Code hook configuration cannot be removed safely.\n"
-        "WARN Review Claude Code hooks manually; shim removes only its own hook "
+        "FAIL Claude Code hook configuration cannot be removed safely: target must "
+        "not be a symlink.\n"
+        "WARN Make {settings} a regular file owned by you, then run the command "
+        "again. Review Claude Code hooks manually; shim removes only its own hook "
         "groups.\n",
     ),
     "CLIENT_SETTINGS_CHANGED": (
@@ -2796,6 +2808,17 @@ def _doctor_check(code: str, monkeypatch, tmp_path: Path):
             "[[custom]]\nname = \"LOOP\"\npattern = '(a+)+$'\n"
         )
         return diagnostics._custom_patterns()
+    if code == "SETTINGS_FILE_ABSENT":
+        monkeypatch.delenv("SHIM_CONFIG")
+        return diagnostics._entity_settings()
+    if code == "CUSTOM_PATTERNS_INACTIVE":
+        shim_settings.write_text(
+            'enabled_entities = ["SECRET"]\n\n[[custom]]\nname = "CODE"\nliteral = "ATLAS-ALPHA"\n'
+        )
+        return diagnostics._custom_patterns()
+    if code == "MODE_DEFAULT_WEAKENS":
+        shim_settings.write_text('[mode]\ndefault = "warn"\n')
+        return diagnostics._mode_defaults()
     if code == "HOOK_RUNNER_FAILED":
         monkeypatch.setattr(diagnostics, "_run_hook", refuse)
         return diagnostics._runner_check("claude")
@@ -2840,6 +2863,9 @@ _DOCTOR_CODES = (
     "SETTINGS_REFUSED",
     "DETECTION_DISABLED",
     "CUSTOM_PATTERN_UNSAFE",
+    "SETTINGS_FILE_ABSENT",
+    "CUSTOM_PATTERNS_INACTIVE",
+    "MODE_DEFAULT_WEAKENS",
     "HOOK_RUNNER_FAILED",
     "HOOK_RESOLUTION_FAILED",
     "ARCHIVE_VERSION_SKEW",
@@ -2888,10 +2914,17 @@ def test_doctor_json_carries_detail_code_and_fix(monkeypatch, tmp_path: Path) ->
 @pytest.mark.parametrize(
     "client,expected",
     [
-        ("claude", ["cli.doctor.hook_activation_unverified"]),
+        (
+            "claude",
+            [
+                "cli.doctor.settings_file_absent",
+                "cli.doctor.hook_activation_unverified",
+            ],
+        ),
         (
             "codex",
             [
+                "cli.doctor.settings_file_absent",
                 "cli.doctor.plugin_not_discoverable",
                 "cli.doctor.hook_activation_unverified",
             ],

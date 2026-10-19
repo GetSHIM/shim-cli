@@ -130,6 +130,9 @@ def test_a_write_to_shim_s_own_settings_is_refused(
 ) -> None:
     home = _home(tmp_path)
     env = {key: value.format(home=home) for key, value in env.items()}
+    if "SHIM_CONFIG" in env:
+        # A SHIM_CONFIG that names a missing file is refused, so the file exists.
+        _write_shim_settings(Path(env["SHIM_CONFIG"]))
     target = home / location
     tool_input = {
         "Write": {"file_path": str(target), "content": WEAKER},
@@ -233,6 +236,7 @@ def test_a_settings_path_spelled_in_another_unicode_form_is_refused(
     composed = tmp_path / unicodedata.normalize("NFC", "caf\u00e9") / "shim.toml"
     decomposed = unicodedata.normalize("NFD", str(composed))
     assert decomposed != str(composed)
+    _write_shim_settings(composed)
 
     output, records = _hook(
         tmp_path,

@@ -162,6 +162,15 @@ def inspect_file(path: Path, max_bytes: int = 1_000_000) -> FileState:
             raise InstallationError("inspection limit must not be negative")
         parent_fd = _open_parent(target)
     except FileNotFoundError:
+        # A link left dangling by an unmounted or moved folder is not an empty
+        # folder: shipped defaults must not quietly replace what it held.
+        if any(p.is_symlink() and not p.exists() for p in target.parents):
+            return FileState(
+                StateKind.UNSAFE,
+                path=target,
+                max_bytes=max_bytes,
+                reason="a folder on the settings path is a broken link",
+            )
         return FileState(
             StateKind.ABSENT,
             path=target,

@@ -191,6 +191,21 @@ class Policy:
             return self.modes["default"]
         return DEFAULT_MODES.get(direction, WARN)
 
+    def weakened_by_default(self) -> tuple[str, ...]:
+        """Directions whose shipped enforce a `default` below enforce replaces.
+
+        `mode_for` ranks `default` above the shipped per-direction modes: a user
+        who writes `default = "warn"` chose it, but rarely knew it also turns
+        off masking of tool results and of tool inputs that leave the machine.
+        """
+        if self.modes.get("default", ENFORCE) == ENFORCE:
+            return ()
+        return tuple(
+            direction
+            for direction, shipped in DEFAULT_MODES.items()
+            if shipped == ENFORCE and direction not in self.modes
+        )
+
     def chose_mode(self, direction: str, tool: str = "", event: str = "") -> bool:
         """True when a settings file named this mode, rather than a default.
 
