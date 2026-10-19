@@ -928,8 +928,9 @@ def test_a_short_query_password_in_a_connection_string_is_masked(
     ("text", "expected"),
     (
         (
+            # Read as written too, the escape no longer cuts the password.
             "postgres://user:synth%20etic@db:5432/app",
-            "postgres://<DB_URI_1>%20etic@db:5432/app",
+            "postgres://<DB_URI_1>@db:5432/app",
         ),
         (
             "postgres://user:synth'etic@db:5432/app",

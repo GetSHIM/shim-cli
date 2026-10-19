@@ -25,12 +25,17 @@ GATEWAY_NAMES = {"EMAIL_ADDRESS": "EMAIL", "PHONE_NUMBER": "PHONE", "IBAN_CODE":
 
 NO_TYPE = "shim-cli has no type for this (FILE_PATH, PERSON, LOCATION)."
 PRECISION_FIRST = (
-    "An uncued bare number the gateway calls a phone; in coding traffic shim-cli "
-    "counts it as a bare number unless it is Turkish-shaped or cued."
+    "A bare number after no phone cue word in either detector; the gateway calls "
+    "every such run a phone, and in coding traffic shim-cli counts it as a bare "
+    "number unless it is Turkish-shaped or cued."
 )
 CUE_VOCABULARY = "A phone cue word the gateway knows and shim-cli does not."
+ORDER_WORD = (
+    "A generic number word after an order or invoice word names that number, "
+    "not a phone, in shim-cli; the gateway calls it a phone."
+)
 NOT_PORTED = "A gateway rule shim-cli has not ported; the entry names it."
-REASONS = (NO_TYPE, PRECISION_FIRST, CUE_VOCABULARY, NOT_PORTED)
+REASONS = (NO_TYPE, PRECISION_FIRST, CUE_VOCABULARY, ORDER_WORD, NOT_PORTED)
 
 GATEWAY_DIVERGENCES = {
     # The gateway masks the whole URI; shim-cli masks its user-info only and
@@ -44,16 +49,25 @@ GATEWAY_DIVERGENCES = {
     "phone-after-an-unrelated-word": (PRECISION_FIRST, []),
     "phone-without-cue-us": (PRECISION_FIRST, []),
     "phone-without-cue-de-mobile": (PRECISION_FIRST, []),
+    # "my number is": "number" alone is no cue word in either detector.
     "phone-number-phrase": (PRECISION_FIRST, []),
+    # "contact".
     "phone-word-beats-code-word": (CUE_VOCABULARY, []),
     "phone-whatsapp-link-us": (PRECISION_FIRST, []),
-    # Tier 3 dotted phones.
+    # The gateway's decimal rule skips a run that starts with 0 and a digit, so
+    # `0532.1234567` is a dotted Turkish mobile there and a decimal number in
+    # shim-cli. "Ara:" is no cue word in either.
     "phone-tr-dotted-area-code": (NOT_PORTED, []),
     "phone-tr-dotted-after-word": (NOT_PORTED, []),
-    "number-after-no-cue-is-masked": (PRECISION_FIRST, []),
+    # "Sipariş no:".
+    "number-after-no-cue-is-masked": (ORDER_WORD, []),
     "person-name": (NO_TYPE, []),
     "street-address": (NO_TYPE, []),
 }
+
+# Divergences where shim-cli finds less than the gateway: known misses, counted
+# apart from the cases that agree.
+KNOWN_MISSES = 13
 
 _DOCUMENT = json.loads(CORPUS.read_text(encoding="utf-8"))
 
@@ -77,6 +91,17 @@ def test_the_corpus_is_the_gateway_s_own() -> None:
 def test_every_divergence_is_a_case_and_every_reason_is_used() -> None:
     assert set(GATEWAY_DIVERGENCES) <= {case["id"] for case in _DOCUMENT["cases"]}
     assert {reason for reason, _ in GATEWAY_DIVERGENCES.values()} == set(REASONS)
+
+
+def test_known_misses_are_counted_apart() -> None:
+    by_id = {case["id"]: case for case in _DOCUMENT["cases"]}
+    misses = [
+        identifier
+        for identifier, (_reason, pinned) in GATEWAY_DIVERGENCES.items()
+        if len(pinned) < len(by_id[identifier]["expect"])
+    ]
+
+    assert len(misses) == KNOWN_MISSES
 
 
 @pytest.mark.parametrize("case", _DOCUMENT["cases"], ids=lambda case: case["id"])

@@ -2638,6 +2638,122 @@
         "SECRET"
       ],
       "expected_output": "<entry key=\"jdbc.password\" value=\"<SECRET_1>\"/>"
+    },
+    {
+      "id": "secret-pem-dsa",
+      "text": "key:\n-----BEGIN DSA PRIVATE KEY-----\nMIIBuwIBAAKBgQD0123456789abcdef0123456789abcdef\n-----END DSA PRIVATE KEY-----",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "key:\n<SECRET_1>\n\n"
+    },
+    {
+      "id": "secret-pgp-private-key-block",
+      "text": "-----BEGIN PGP PRIVATE KEY BLOCK-----\n\nMIIBuwIBAAKBgQD0123456789abcdef0123456789abcdef\n-----END PGP PRIVATE KEY BLOCK-----\nsigned",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "<SECRET_1>\n\n\n\nsigned"
+    },
+    {
+      "id": "secret-stripe-restricted-key",
+      "text": "STRIPE=rk_live_0123456789abcdef0123",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "STRIPE=<SECRET_1>"
+    },
+    {
+      "id": "secret-stripe-key-after-escaped-newline",
+      "text": "{\"env\": \"A=1\\nsk_live_51AbCdEfGhIjKlMnOpQr\"}",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "{\"env\": \"A=1\\n<SECRET_1>\"}"
+    },
+    {
+      "id": "secret-slack-app-token",
+      "text": "SLACK_APP \u0078app-1-A0123456789-0123456789-0123456789abcdef",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "SLACK_APP <SECRET_1>"
+    },
+    {
+      "id": "secret-gitlab-runner-token",
+      "text": "runner \u0067lrt-0123456789abcdefABCD registered",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "runner <SECRET_1> registered"
+    },
+    {
+      "id": "secret-proxy-authorization-basic",
+      "text": "Proxy-Authorization: Basic c3ludGhldGljOjAxMjM0NTY3ODlhYmNkZWY=",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "Proxy-Authorization: Basic <SECRET_1>"
+    },
+    {
+      "id": "us-ssn-bare-after-cue",
+      "text": "SSN 536221234",
+      "categories": [
+        "US_SSN"
+      ],
+      "expected_output": "SSN <US_SSN_1>"
+    },
+    {
+      "id": "us-ssn-bare-json-key",
+      "text": "{\"ssn\": \"536904399\", \"ssn2\": \"536-90-4399\"}",
+      "categories": [
+        "US_SSN",
+        "US_SSN"
+      ],
+      "expected_output": "{\"ssn\": \"<US_SSN_1>\", \"ssn2\": \"<US_SSN_1>\"}"
+    },
+    {
+      "id": "us-ssn-bare-without-cue-negative",
+      "text": "order 536221234 shipped",
+      "categories": [],
+      "expected_output": "order 536221234 shipped"
+    },
+    {
+      "id": "credit-card-nineteen-digits",
+      "text": "{\"pan\": \"4111111111111111110\"}",
+      "categories": [
+        "CREDIT_CARD"
+      ],
+      "expected_output": "{\"pan\": \"<CREDIT_CARD_1>\"}"
+    },
+    {
+      "id": "credit-card-eighteen-digits",
+      "text": "{\"pan\": \"411111111111111118\"}",
+      "categories": [
+        "CREDIT_CARD"
+      ],
+      "expected_output": "{\"pan\": \"<CREDIT_CARD_1>\"}"
+    },
+    {
+      "id": "credit-card-nineteen-digit-id-negative",
+      "text": "id 4111111111111111111",
+      "categories": [],
+      "expected_output": "id 4111111111111111111"
+    },
+    {
+      "id": "email-percent-escape-breaks-address",
+      "text": "alice%C3%28@example.com",
+      "categories": [
+        "EMAIL"
+      ],
+      "expected_output": "<EMAIL_1>",
+      "expected_spans": [
+        [
+          0,
+          23,
+          "EMAIL"
+        ]
+      ]
     }
   ],
   "generated_cases": [

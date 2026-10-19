@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, NamedTuple
 
 from .entities import PLACEHOLDER
 from .iban_patterns import regex_per_country
+from .normalize import normalize
 from .suffixes import is_registrable
 
 if TYPE_CHECKING:
@@ -196,6 +197,12 @@ _CARD_PATTERNS = _compile(
             r"|(3\d{3}))[- ]?(\d{3,4})[- ]?(\d{3,4})[- ]?(\d{3,5})\b",
             0.3,
         ),
+        # 18 and 19 digits: Visa, Maestro, UnionPay and Discover, JCB, Mir.
+        (
+            r"\b(?:4\d{3}|5[06-8]\d{2}|6\d{3}|35(?:2[89]|[3-8]\d)|220[0-4])"
+            r"(?:[- ]?\d{4}){3}[- ]?\d{2,3}\b",
+            0.3,
+        ),
         # Troy and the Mastercard 2-series, as the gateway reads them.
         (r"\b9792[- ]?\d{4}[- ]?\d{4}[- ]?\d{4}\b", 0.3),
         (
@@ -320,6 +327,17 @@ def _invalidate_mac(text: str) -> bool:
 
 _SSN_PATTERNS = _compile(((r"\b([0-9]{3})[- .]([0-9]{2})[- .]([0-9]{4})\b", 0.5),))
 _SSN_DENY = ("123456789", "987654320", "078051120")
+# Nine digits with no separator are an SSN only right after a word that says so,
+# or right after such an SSN in a list: `"ssn" : "536904399"`,
+# `Social Security Number 536904399`, `SSNs: 536221234, 536904399`.
+_BARE_SSN_PATTERNS = _compile(((r"(?<![\d-])[0-9]{9}(?![\d-])", 0.5),))
+_SSN_CUE = re.compile(
+    _CUE_START + r"(?:ssn|social[\W_]*security)(?:[\W_]*(?:number|no|num))?s?"
+    r"[\W_]{0,8}\Z",
+    re.IGNORECASE,
+)
+_SSN_CUE_WINDOW = 32
+_SSN_LIST_GAP = re.compile(r"[\W_]{1,4}")
 
 
 def _invalidate_ssn(text: str) -> bool:
@@ -334,6 +352,17 @@ def _invalidate_ssn(text: str) -> bool:
     if digits[:3] in ("000", "666"):
         return True
     return digits in _SSN_DENY
+
+
+def _scan_ssn(text: str) -> list[Match]:
+    cued: list[Match] = []
+    for found in _scan(text, "US_SSN", _BARE_SSN_PATTERNS, invalidate=_invalidate_ssn):
+        listed = cued and _SSN_LIST_GAP.fullmatch(text, cued[-1].end, found.start)
+        if listed or _SSN_CUE.search(
+            text, max(0, found.start - _SSN_CUE_WINDOW), found.start
+        ):
+            cued.append(found)
+    return _scan(text, "US_SSN", _SSN_PATTERNS, invalidate=_invalidate_ssn) + cued
 
 
 _TCKN_PATTERNS = _compile(
@@ -1140,13 +1169,20 @@ _NOT_A_CREDENTIAL = re.compile(r"[….*•:]+|(?:\$\{\w+\}|\{\w*\}|\$\w+|%\w+%|:
 _QUERY_PARAMETER = re.compile(r"[?&;](?P<key>[^=&;#]*)(?:=(?P<value>[^&;#]+))?")
 _AUTHORITY_END = re.compile(r"[/?#]")
 # Vendor tokens. The JWT alternative they had is read in `_vendor_tokens`.
+# A token glued to a word is part of an identifier, but one right after an
+# escape written as text (JSON or a log line: `\nxoxb-...`) is a token. `rk_`
+# ends words (benchmark_test_..., network_test_...), so a Stripe restricted key
+# glued to a letter is left; a secret key `sk_` is read anywhere, as in 1.2.2.
+_AFTER_ESCAPE = r"(?<=\\[nrtfbv])|"
 _VENDOR_TOKEN = re.compile(
     r"(?:AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{20,}|"
     r"sk_(?:live|test)_[A-Za-z0-9]{16,}|"
+    rf"(?:{_AFTER_ESCAPE}(?<![A-Za-z]))rk_(?:live|test)_[A-Za-z0-9]{{16,}}|"
     r"sk-(?:proj-)?[A-Za-z0-9_-]{16,}|"
     r"SG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}|"
-    r"(?<![\w-])(?:xox[abposr]-[0-9A-Za-z-]{10,}|AIza[0-9A-Za-z_-]{35}|"
-    r"github_pat_[0-9A-Za-z_]{22,}|glpat-[0-9A-Za-z_-]{20,}|"
+    rf"(?:{_AFTER_ESCAPE}(?<![\w-]))"
+    r"(?:(?:xox[abposr]|xapp)-[0-9A-Za-z-]{10,}|AIza[0-9A-Za-z_-]{35}|"
+    r"github_pat_[0-9A-Za-z_]{22,}|gl(?:pat|rt|dt|ptt|ft|soat)-[0-9A-Za-z_-]{20,}|"
     r"npm_[0-9A-Za-z]{36}|hf_[0-9A-Za-z]{30,})(?![\w-]))"
 )
 _JWT = re.compile(r"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+")
@@ -1231,9 +1267,10 @@ _SECRET_PATTERNS: tuple[
 ] = (
     (
         re.compile(
-            r"-----BEGIN "
-            r"(?P<key_type>(?:(?:RSA|EC|OPENSSH|ENCRYPTED) )?PRIVATE KEY)"
-            r"-----[\s\S]*?(?:-----END (?P=key_type)-----|\Z)"
+            # Any PEM or PGP private key, and the SSH2 form's `---- BEGIN `.
+            r"(?P<open>-----|---- )BEGIN "
+            r"(?P<key_type>(?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?)(?P<close>-----| ----)"
+            r"[\s\S]*?(?:(?P=open)END (?P=key_type)(?P=close)|\Z)"
         ),
         None,
         0.99,
@@ -1260,7 +1297,7 @@ _SECRET_PATTERNS: tuple[
     ),
     (
         re.compile(
-            r"(?<![\w-])[\"']?authorization[\"']?\s*:\s*[\"']?(?:basic|bearer)\s+"
+            r"(?<![\w-])[\"']?(?:proxy-)?authorization[\"']?\s*:\s*[\"']?(?:basic|bearer)\s+"
             r"(?P<value>[A-Za-z0-9._~+/=-]{6,})",
             re.IGNORECASE,
         ),
@@ -1298,6 +1335,16 @@ def _a_type_of(key: str, value: str, after: str) -> bool:
         return True
     ended = bool(found["end"]) or after == ","
     return ended and bool(_words(found["name"]) & _words(key))
+
+
+def _as_decoded(value: str, as_written: bool) -> str:
+    """A value of the source text as written is judged as it decodes, once:
+    its `%24%7BDB_PASS%7D` is the reference `${DB_PASS}`, as the decoded text's
+    is. Only a value that can be a reference is decoded, so its decoding stays
+    far inside the input limit."""
+    if not as_written or len(value) > _MAX_SHAPED_VALUE:
+        return value
+    return value if value.isascii() and "%" not in value else normalize(value).text
 
 
 def _not_a_secret(
@@ -1502,13 +1549,13 @@ def _vendor_tokens(text: str) -> Iterator[tuple[int, int]]:
             jwt = _next_jwt(text, first.end())
 
 
-def _scan_db_uri(text: str) -> list[Match]:
+def _scan_db_uri(text: str, as_written: bool = False) -> list[Match]:
     results: list[Match] = []
     for match in _DB_URI.finditer(text):
         start, end = match.span(1)
         at = text.rfind("@", start, end)
         if at > start:
-            if not _NOT_A_CREDENTIAL.fullmatch(text, start, at):
+            if not _NOT_A_CREDENTIAL.fullmatch(_as_decoded(text[start:at], as_written)):
                 results.append(Match("DB_URI", start, at, 0.99))
             continue
         authority = _AUTHORITY_END.split(text[start:end], maxsplit=1)[0]
@@ -1735,10 +1782,7 @@ _RECOGNIZERS: tuple[tuple[str, Callable[[str], list[Match]]], ...] = (
             text, "MAC_ADDRESS", _MAC_PATTERNS, invalidate=_invalidate_mac
         ),
     ),
-    (
-        "US_SSN",
-        lambda text: _scan(text, "US_SSN", _SSN_PATTERNS, invalidate=_invalidate_ssn),
-    ),
+    ("US_SSN", _scan_ssn),
     (
         "TR_NATIONAL_ID",
         lambda text: _scan(
@@ -1747,7 +1791,6 @@ _RECOGNIZERS: tuple[tuple[str, Callable[[str], list[Match]]], ...] = (
     ),
     ("TR_VKN", _scan_vkn),
     ("TR_LICENSE_PLATE", _scan_plate),
-    ("DB_URI", _scan_db_uri),
     ("SECRET", _scan_encoded_secret),
     ("SECRET", _scan_basic_auth),
 )
@@ -1764,7 +1807,11 @@ def scan_custom(text: str, patterns: tuple) -> list[Match]:
 
 
 def analyze_text(
-    text: str, entities: tuple[str, ...], custom: tuple = (), literal: str | None = None
+    text: str,
+    entities: tuple[str, ...],
+    custom: tuple = (),
+    literal: str | None = None,
+    as_written: bool = False,
 ) -> list[Match]:
     requested = frozenset(entities)
     results: list[Match] = []
@@ -1773,6 +1820,8 @@ def analyze_text(
     for entity, scan in _RECOGNIZERS:
         if entity in requested:
             results.extend(scan(text))
+    if "DB_URI" in requested:
+        results.extend(_scan_db_uri(text, as_written))
     if "SECRET" in requested:
         results.extend(_scan_secret(text, literal))
     if custom and "CUSTOM" in requested:

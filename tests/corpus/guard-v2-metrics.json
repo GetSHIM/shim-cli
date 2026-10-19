@@ -3,7 +3,7 @@
   "corpus": {
     "file": "guard-v2.json",
     "version": 2,
-    "case_count": 335
+    "case_count": 349
   },
   "evaluation_unit": "exact redacted output",
   "claim_scope": "Synthetic fixture-bound evidence only; not a real-world statistical claim.",
@@ -13,21 +13,21 @@
     "exact_output": 1.0
   },
   "exact_output": {
-    "cases": 335,
-    "matching": 335,
+    "cases": 349,
+    "matching": 349,
     "ratio": 1.0
   },
   "exact_source_spans": {
-    "cases": 33,
-    "matching": 33,
+    "cases": 34,
+    "matching": 34,
     "ratio": 1.0
   },
   "categories": {
     "EMAIL": {
-      "true_positive": 21,
+      "true_positive": 22,
       "false_positive": 0,
       "false_negative": 0,
-      "negative_cases": 314,
+      "negative_cases": 327,
       "precision": 1.0,
       "recall": 1.0
     },
@@ -35,15 +35,15 @@
       "true_positive": 33,
       "false_positive": 0,
       "false_negative": 0,
-      "negative_cases": 302,
+      "negative_cases": 316,
       "precision": 1.0,
       "recall": 1.0
     },
     "CREDIT_CARD": {
-      "true_positive": 4,
+      "true_positive": 6,
       "false_positive": 0,
       "false_negative": 0,
-      "negative_cases": 331,
+      "negative_cases": 343,
       "precision": 1.0,
       "recall": 1.0
     },
@@ -51,7 +51,7 @@
       "true_positive": 5,
       "false_positive": 0,
       "false_negative": 0,
-      "negative_cases": 330,
+      "negative_cases": 344,
       "precision": 1.0,
       "recall": 1.0
     },
@@ -59,7 +59,7 @@
       "true_positive": 15,
       "false_positive": 0,
       "false_negative": 0,
-      "negative_cases": 320,
+      "negative_cases": 334,
       "precision": 1.0,
       "recall": 1.0
     },
@@ -67,15 +67,15 @@
       "true_positive": 2,
       "false_positive": 0,
       "false_negative": 0,
-      "negative_cases": 333,
+      "negative_cases": 347,
       "precision": 1.0,
       "recall": 1.0
     },
     "US_SSN": {
-      "true_positive": 3,
+      "true_positive": 5,
       "false_positive": 0,
       "false_negative": 0,
-      "negative_cases": 332,
+      "negative_cases": 344,
       "precision": 1.0,
       "recall": 1.0
     },
@@ -83,7 +83,7 @@
       "true_positive": 4,
       "false_positive": 0,
       "false_negative": 0,
-      "negative_cases": 331,
+      "negative_cases": 345,
       "precision": 1.0,
       "recall": 1.0
     },
@@ -91,7 +91,7 @@
       "true_positive": 13,
       "false_positive": 0,
       "false_negative": 0,
-      "negative_cases": 322,
+      "negative_cases": 336,
       "precision": 1.0,
       "recall": 1.0
     },
@@ -99,15 +99,15 @@
       "true_positive": 9,
       "false_positive": 0,
       "false_negative": 0,
-      "negative_cases": 326,
+      "negative_cases": 340,
       "precision": 1.0,
       "recall": 1.0
     },
     "SECRET": {
-      "true_positive": 92,
+      "true_positive": 99,
       "false_positive": 0,
       "false_negative": 0,
-      "negative_cases": 243,
+      "negative_cases": 250,
       "precision": 1.0,
       "recall": 1.0
     },
@@ -115,13 +115,13 @@
       "true_positive": 18,
       "false_positive": 0,
       "false_negative": 0,
-      "negative_cases": 317,
+      "negative_cases": 331,
       "precision": 1.0,
       "recall": 1.0
     }
   },
   "micro": {
-    "true_positive": 161,
+    "true_positive": 231,
     "false_positive": 0,
     "false_negative": 0,
     "precision": 1.0,

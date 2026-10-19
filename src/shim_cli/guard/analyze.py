@@ -186,6 +186,8 @@ _OWN_PLACEHOLDER = re.compile(
     rf"<(?:{'|'.join(ENTITY_TYPES)})_[0-9]{{1,6}}"
     rf"(?::[0-9]{{1,{MAX_REVEAL_DIGITS}}})?>"
 )
+# What a percent escape can break: see `analyze_counting`.
+_READ_AS_WRITTEN = frozenset({"EMAIL_ADDRESS", "DB_URI"})
 
 
 def _not_placeholders(findings: list[Finding], text: str) -> list[Finding]:
@@ -248,12 +250,33 @@ def analyze_counting(
             raw = analyze_text(
                 normalized.text, source_entities, custom, normalized.literal
             )
+            # A value that decoding breaks is one as the model reads it:
+            # `alice%C3%28@example.com` decodes to `alice%C3(@example.com`. A
+            # secret's value ends only where its source writes a mark, so the
+            # decoded reading has it whole; an address and a database URI's
+            # user-info are read in the source too.
+            written = (
+                analyze_text(
+                    text,
+                    tuple(e for e in source_entities if e in _READ_AS_WRITTEN),
+                    as_written=True,
+                )
+                if normalized.text != text
+                else []
+            )
         bare = [item for item in raw if item.entity_type == BARE_NUMBER]
         claimed = [item for item in raw if item.entity_type != BARE_NUMBER]
         normalized_findings = _resolve_overlaps(
             _not_placeholders(
                 _validated(claimed, len(normalized.text)), normalized.text
             )
+        )
+        written_findings = _not_placeholders(
+            _validated(
+                [item for item in written if item.entity_type != BARE_NUMBER],
+                len(text),
+            ),
+            text,
         )
     except _AnalysisTimeout as error:
         raise ValueError("Guard analysis exceeded its runtime limit.") from error
@@ -267,4 +290,6 @@ def analyze_counting(
         if normalized.text is text
         else _source_findings(normalized_findings, normalized.source_spans)
     )
+    if written_findings:
+        findings = _resolve_overlaps(findings + written_findings)
     return tuple(findings), _unclaimed(bare, normalized_findings)

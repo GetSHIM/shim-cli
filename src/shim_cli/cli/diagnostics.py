@@ -372,7 +372,7 @@ def _custom_patterns() -> Check | None:
     names that file and its fix.
     """
     from shim_cli.config import load_policy
-    from shim_cli.guard.entities import CUSTOM, entry_source, unsafe_pattern
+    from shim_cli.guard.entities import CUSTOM, unsafe_pattern
 
     try:
         loaded = load_policy()
@@ -384,7 +384,11 @@ def _custom_patterns() -> Check | None:
     reasons = [
         reason
         for pattern in patterns
-        if (reason := unsafe_pattern(pattern.name, entry_source(pattern.entry)))
+        if (
+            reason := unsafe_pattern(
+                pattern.name, pattern.regex.pattern, pattern.regex.flags
+            )
+        )
     ]
     if reasons:
         return Check(

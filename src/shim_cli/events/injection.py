@@ -36,11 +36,27 @@ _TR_IGNORE = (
 # The nearest rule noun decides; letting the gap swallow one only makes the scan
 # retry every later noun, which is what made "eski kural " repeated slow.
 _TR_BEFORE_RULE = rf"(?:(?!{_TR_RULE})[^.\n]){{0,40}}?"
-# "fix: eski komutlari unut bayragi" is a commit subject, not an order.
+# A commit subject such as "fix: eski komutlari unut bayragini kaldir" names a
+# flag, option or feature; it is not an order. On a line that starts as one, the
+# phrase is let go only when that name follows it and ends the subject: the
+# name ("bayragi") and one word ("eklendi"), or the name as an object
+# ("bayragini") with its verb and at most a "ve" and two words ("kaldir ve
+# testleri guncelle"), then the end of the line. Every other commit-subject
+# line is read as any line is. The check starts at a word boundary, so it never
+# starts inside the phrase's last word.
 _COMMIT = (
     r"(?:fix|feat|chore|docs|refactor|test|perf|build|ci|style|revert)"
     r"(?:\([^)\n]*\))?!?:"
 )
+_WORD = r"[^\S\n]{1,4}[^\W\d_]{1,40}"
+_TR_NAME = r"[^\S\n]{1,4}(?:bayrag|seceneg|ozellig)i"
+_TR_NAMED = (
+    rf"(?(commit)\b(?!{_TR_NAME}(?:{_WORD})?[^\S\n]*$"
+    rf"|{_TR_NAME}ni{_WORD}(?:[^\S\n]{{1,4}}ve(?:{_WORD}){{1,2}})?[^\S\n]*$))"
+)
+# A line that starts as a commit subject sets `commit`, and one that does not
+# cannot: lookarounds do not backtrack.
+_TR_LINE = rf"(?m)^(?:(?=[^\S\n]*{_COMMIT})(?P<commit>)|(?![^\S\n]*{_COMMIT}))[^\n]*?"
 # A role is assigned by a predicate ("yoneticisin", "botsun"), not by "sen
 # artik" alone; a verb in the aorist ("yapabilirsin", ending "rsin") is not one.
 _TR_ROLE = (
@@ -79,9 +95,9 @@ _PATTERNS = (
     (
         INSTRUCTION_OVERRIDE,
         re.compile(
-            rf"(?m)^(?![^\S\n]*{_COMMIT})[^\n]*?(?:"
-            rf"{_TR_QUALIFIER}{_TR_BEFORE_RULE}{_TR_RULE}[^.\n]{{0,30}}?{_TR_IGNORE}"
+            rf"{_TR_LINE}(?:{_TR_QUALIFIER}{_TR_BEFORE_RULE}{_TR_RULE}[^.\n]{{0,30}}?{_TR_IGNORE}"
             rf"|{_TR_IGNORE}[^.\n]{{0,30}}?{_TR_QUALIFIER}[^.\n]{{0,40}}?{_TR_RULE})"
+            + _TR_NAMED
         ),
     ),
     (

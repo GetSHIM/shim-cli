@@ -849,7 +849,7 @@ Every figure here was measured on the released build, not estimated.
 | Tests | **4,000+**, one command: `python scripts/check.py` — lock, lint, format, types, suite, wheel, sdist |
 | Hook cost | **70 ms** median end to end, interpreter start included; **42 ms** for a session summary. CI and the release fail when a median passes 420 ms, or 2,000 ms for a prompt built from the shapes that once made the detector quadratic |
 | With 32 custom patterns | **+0.6 ms** median against the same prompt with none |
-| Detector corpus | **855 cases** in five corpora (`guard-v2` 335, `parity-v1` 475, `guard-tools-v1` 24, `custom-v1` 10, `reveal-v1` 11), graded on exact redacted output rather than category presence, and the gateway's own 140-case corpus, against which every difference is pinned with its reason |
+| Detector corpus | **869 cases** in five corpora (`guard-v2` 349, `parity-v1` 475, `guard-tools-v1` 24, `custom-v1` 10, `reveal-v1` 11), graded on exact redacted output rather than category presence, and the gateway's own 140-case corpus, against which every difference is pinned with its reason |
 | Release evidence | SBOM, provenance and Sigstore bundles on the release page from 0.3.2, with the `gh attestation verify` command in [the compatibility record](https://github.com/GetSHIM/shim-cli/blob/main/docs/compatibility.md#100-release-evidence) |
 
 <p align="center">
