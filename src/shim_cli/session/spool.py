@@ -16,6 +16,11 @@ from . import _files
 
 MAX_SPOOL_BYTES = 1_000_000
 MAX_ENTRY_BYTES = 2_048
+# The placeholder names shim issued in a session, kept apart from its log so
+# its cap never drops them: a line per run, `EMAIL 1 3` for <EMAIL_1> to
+# <EMAIL_3>. A run already kept is not written again, so a session fills this
+# only by issuing numbers far apart, event after event.
+MAX_NAMES_BYTES = 65_536
 _FILE_MODE = 0o600
 
 
@@ -151,10 +156,47 @@ def mark_summarized(session_id: str, count: int) -> None:
             raise SpoolError("session mark could not be written") from error
 
 
+def issued(session_id: str) -> list:
+    """(type, first, last) of each run of placeholder numbers shim issued in
+    this session. Raises when they cannot all be read."""
+    with _root() as root:
+        content = _read(root, _name(session_id, ".names"), MAX_NAMES_BYTES)
+    try:
+        return [
+            (kind, int(first), int(last))
+            for kind, first, last in (
+                line.split(" ") for line in content.decode("ascii").splitlines()
+            )
+        ]
+    except ValueError as error:  # a line not written whole
+        raise SpoolError("placeholder names could not be read") from error
+
+
+def issue(session_id: str, runs: tuple) -> None:
+    """Keep (type, first, last) runs of placeholder numbers: names only."""
+    kept = issued(session_id)
+    line = "".join(
+        f"{kind} {first} {last}\n"
+        for kind, first, last in runs
+        if not any(
+            kind == of and low <= first and last <= high for of, low, high in kept
+        )
+    ).encode("ascii")
+    if not line:
+        return
+    with _root() as root:
+        try:
+            if _files.append(root, _name(session_id, ".names"), line, MAX_NAMES_BYTES):
+                return
+        except OSError as error:
+            raise SpoolError("placeholder names could not be written") from error
+    raise SpoolError("placeholder names reached their cap")
+
+
 def clear(session_id: str) -> None:
     with _root() as root:
         try:
-            for suffix in (".jsonl", ".mark"):
+            for suffix in (".jsonl", ".mark", ".names"):
                 with contextlib.suppress(FileNotFoundError):
                     os.unlink(_name(session_id, suffix), dir_fd=root)
         except OSError as error:
@@ -177,6 +219,7 @@ def newest() -> str:
 
 
 __all__ = [
+    "MAX_NAMES_BYTES",
     "MAX_SPOOL_BYTES",
     "SpoolError",
     "append",
@@ -185,6 +228,8 @@ __all__ = [
     "clear",
     "entries",
     "entries_for_stem",
+    "issue",
+    "issued",
     "mark_summarized",
     "newest",
     "root_path",

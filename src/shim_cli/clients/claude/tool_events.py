@@ -91,10 +91,10 @@ _WITHHELD_READ = {
         "totalLines": 0,
     },
 }
-_MASKED_CONTEXT = (
-    "Placeholders such as <EMAIL_1> stand for real values in the source; "
-    "the source does not contain placeholders."
-)
+_MASKED_CONTEXT = "Placeholders such as <EMAIL_1> stand for real values in the source"
+# Said only when true: shim's docs, a test fixture or a file the model wrote
+# can hold placeholder-shaped text, which shim's own numbers then start above.
+_NO_LITERALS = "; the source does not contain placeholders."
 _FAILED_MESSAGE = (
     "shim: found {found} in a failed {tool}. Claude Code does not let this "
     "output be masked; the model has these values."
@@ -217,6 +217,7 @@ def pre_tool_use(
     _found: str,
     tool: str,
     _name: str = "",
+    _literal: bool = False,
 ) -> bytes:
     if action == ALLOW:
         return b""
@@ -247,6 +248,7 @@ def post_tool_use(
     found: str,
     tool: str,
     name: str = "",
+    literal: bool = False,
 ) -> bytes:
     if action == ALLOW:
         return b""
@@ -256,8 +258,9 @@ def post_tool_use(
         output = _specific("PostToolUse", updatedToolOutput=payload)
         if message:
             # Placeholders are explained only where something was masked.
+            end = "." if literal else _NO_LITERALS
             output["hookSpecificOutput"]["additionalContext"] = (
-                f"{message} {_MASKED_CONTEXT}" if found else message
+                f"{message} {_MASKED_CONTEXT}{end}" if found else message
             )
         return _dump(output)
     if action == UNINSPECTED:
@@ -314,6 +317,7 @@ def post_tool_use_failure(
     found: str,
     tool: str,
     _name: str = "",
+    _literal: bool = False,
 ) -> bytes:
     if action == ALLOW:
         return b""

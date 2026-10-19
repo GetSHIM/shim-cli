@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Iterator
 
 from .analyze import _resolve_overlaps, analyze_counting
-from .entities import DEFAULT_ENTITIES
+from .entities import DEFAULT_ENTITIES, ENTITY_TYPES, MAX_REVEAL_DIGITS
 from .models import Finding, GuardDecision
 from .normalize import MAX_SOURCE_CHARACTERS, InputTooLarge, normalize
 
@@ -23,6 +24,47 @@ _LAYOUT_FREE = frozenset(
         "TR_LICENSE_PLATE",
     )
 )
+
+
+# A placeholder of shim's shape, as text: its type and number, any tail after.
+_NAMED = re.compile(
+    rf"<({'|'.join(ENTITY_TYPES)})_([0-9]{{1,7}})(?::[0-9]{{1,{MAX_REVEAL_DIGITS}}})?>"
+)
+# The key in a numbering under which, per type, the highest number its event
+# already holds as text is kept. No entity type is "".
+FLOORS = ""
+# A 1 MB event holds fewer than 200,000 values, so floors below this keep every
+# number shim issues within the seven digits `_NAMED` reads.
+_MAX_FLOOR = 1_000_000
+
+
+def placeholder_names(text: str) -> Iterator[tuple[str, int]]:
+    """Type and number of each placeholder of shim's shape in `text`."""
+    for match in _NAMED.finditer(text):
+        yield match.group(1), int(match.group(2))
+
+
+def numbering_for(texts: Iterable[str]) -> dict:
+    """A numbering for one event that issues no placeholder its `texts`
+    already hold: each type's numbers start above the highest one written.
+    """
+    floors: dict = {}
+    for text in texts:
+        for kind, number in placeholder_names(text):
+            if number < _MAX_FLOOR:
+                floors[kind] = max(floors.get(kind, 0), number)
+    return {FLOORS: floors}
+
+
+def issued(numbering: dict) -> tuple:
+    """(type, first, last) for each type's numbers in `numbering`: the names
+    it gave, never the values it gave them to."""
+    floors = numbering.get(FLOORS, {})
+    return tuple(
+        (kind, floors.get(kind, 0) + 1, floors.get(kind, 0) + len(given))
+        for kind, given in sorted(numbering.items())
+        if kind != FLOORS and given
+    )
 
 
 def line_breaks(span: str) -> str:
@@ -138,7 +180,8 @@ def evaluate(
     A value keeps one number and two values never share one. `numbering`
     holds the numbers given so far, by type and then value: pass one dict to
     every call for one event, and the numbers run across all its fields. It
-    is never written anywhere.
+    is never written anywhere. Without one, numbers start above any
+    placeholder `text` already holds.
     """
     entities = tuple(enabled_entities)
     partial = False
@@ -154,14 +197,18 @@ def evaluate(
     if not findings:
         return GuardDecision((), text, partial, bare_numbers)
 
-    numbers = {} if numbering is None else numbering
+    numbers = numbering_for((text,)) if numbering is None else numbering
+    floors = numbers.get(FLOORS, {})
     pieces: list[str] = []
     cursor = 0
     for finding in findings:
         span = text[finding.start : finding.end]
         value = _value(span)
         given = numbers.setdefault(finding.entity_type, {})
-        number = given.setdefault(_key(finding.entity_type, value), len(given) + 1)
+        number = given.setdefault(
+            _key(finding.entity_type, value),
+            floors.get(finding.entity_type, 0) + len(given) + 1,
+        )
         marker = f"{finding.entity_type}_{number}"
         digits = (reveal or {}).get(finding.entity_type, 0)
         tail = ""

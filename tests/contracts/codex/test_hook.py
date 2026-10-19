@@ -249,7 +249,7 @@ def parse_input(raw):
     noisy("parse")
     return "safe"
 
-def evaluate(prompt, enabled_entities, custom=(), reveal=None):
+def evaluate(prompt, enabled_entities, custom=(), reveal=None, numbering=None):
     noisy("evaluate")
     return types.SimpleNamespace(blocked=False, partial=False)
 
@@ -495,7 +495,7 @@ def test_hook_persists_only_the_redacted_prompt_in_os_temp(tmp_path: Path) -> No
     result = _run(_payload(prompt), cwd=work, env=env)
     path = _suggestion_path(result, "shim blocked this prompt: EMAIL (1).")
     written = {item for item in tmp_path.rglob("*") if item.is_file()} - before
-    spools = {item for item in written if item.suffix in (".jsonl", ".mark")}
+    spools = {item for item in written if item.suffix in (".jsonl", ".mark", ".names")}
 
     assert prompt.encode() not in result.stdout
     assert written == {path} | spools

@@ -10,6 +10,7 @@ from typer.testing import CliRunner
 
 from shim_cli.cli import audit
 from shim_cli.cli.app import app
+from shim_cli.session import spool
 
 runner = CliRunner()
 KASA = "aaaa1111-0000-4000-8000-000000000001"
@@ -200,6 +201,16 @@ def history(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     )
     early = 1_788_264_000
     os.utime(other, (early, early))
+    # What shim masked comes from its records of the session, never from
+    # placeholder-shaped text in the transcript.
+    spool.append(
+        KASA,
+        {
+            "session_id": spool.session_key(KASA),
+            "action": "mask",
+            "entities": {"EMAIL": 1, "SECRET": 1},
+        },
+    )
     return projects
 
 
@@ -214,7 +225,7 @@ by project
   /work/kasa                 EMAIL 4, SECRET 4 · last 2026-09-28
   /work/other                EMAIL 1 · last 2026-09-01
 
-already masked by shim       2 values in 1 session
+already masked by shim       2 values in 1 session (without the ledger, live sessions only)
 model output                 2 EMAIL (written by the model; it may repeat values it was given)
 
 skipped 4 lines that could not be read.
@@ -309,7 +320,7 @@ def test_the_json_report_carries_every_count(history: Path) -> None:
         "model_output": {"EMAIL": 2},
         "masked": 2,
     }
-    assert payload["masked"] == {"values": 2, "sessions": 1}
+    assert payload["masked"] == {"values": 2, "sessions": 1, "ledger": False}
     assert payload["model_output"] == {"EMAIL": 2}
     assert payload["scanned"] == {
         "sessions": 2,

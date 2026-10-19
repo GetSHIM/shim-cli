@@ -81,6 +81,7 @@ def pre_tool_use(
     _found: str,
     tool: str,
     _name: str = "",
+    _literal: bool = False,
 ) -> bytes:
     if action == ALLOW:
         return b""
@@ -110,6 +111,7 @@ def post_tool_use(
     found: str,
     tool: str,
     _name: str = "",
+    _literal: bool = False,
 ) -> bytes:
     if action == ALLOW:
         return b""

@@ -785,6 +785,22 @@ def _protected(document: dict):
     return protected
 
 
+def _issued(session_id: str) -> list:
+    """The placeholder names shim issued in this session (D3)."""
+    from shim_cli.session import spool
+
+    return spool.issued(session_id) if session_id else []
+
+
+def _issue(session_id: str, runs: tuple) -> None:
+    """Keep the names of placeholders shim hands the model. Without a session
+    there is nothing to keep them under, and nothing to check a write against."""
+    if session_id and runs:
+        from shim_cli.session import spool
+
+        spool.issue(session_id, runs)
+
+
 def _policy_ledger() -> bool:
     try:
         from shim_cli.config import load_policy
@@ -851,6 +867,8 @@ def _tool_output(
         policy.diet,
         entities_for,
         _protected(raw),
+        lambda: _issued(session_id),
+        lambda runs: _issue(session_id, runs),
     )
     remember(session_id, outcome.record, _elapsed_ms(), policy.ledger)
     if (
@@ -986,11 +1004,14 @@ def _output(raw: bytes, client: str = "codex", ends: float | None = None) -> byt
                 prompt = parse_input(document)
                 from shim_cli.config import load_policy
                 from shim_cli.guard import evaluate
+                from shim_cli.guard.evaluate import issued, numbering_for
                 from shim_cli.session import remember
 
                 policy = load_policy()
+                # Held here only: the names the redacted prompt shows, for D3.
+                numbering = numbering_for((prompt,))
                 decision = evaluate(
-                    prompt, policy.entities, policy.custom, policy.reveal
+                    prompt, policy.entities, policy.custom, policy.reveal, numbering
                 )
                 if decision.partial:
                     return error_output()
@@ -1053,6 +1074,8 @@ def _output(raw: bytes, client: str = "codex", ends: float | None = None) -> byt
                     keep("allow")
                     return b""
                 if client == "copilot":
+                    if decision.blocked:  # the model reads it rewritten
+                        _issue(session_id, issued(numbering))
                     keep("mask")
                     return warn_output(decision)
                 if mode != "enforce" or not (decision.blocked or held):
@@ -1064,11 +1087,10 @@ def _output(raw: bytes, client: str = "codex", ends: float | None = None) -> byt
                     )
 
                     return attached_report(decision, held, unread)
-                suggestion_path = (
-                    _write_redacted_prompt(decision.redacted_text)
-                    if decision.blocked
-                    else None
-                )
+                suggestion_path = None
+                if decision.blocked:  # the redacted copy may be sent on
+                    _issue(session_id, issued(numbering))
+                    suggestion_path = _write_redacted_prompt(decision.redacted_text)
                 try:
                     if held:
                         from shim_cli.clients.claude.hook import (

@@ -143,15 +143,17 @@ def test_a_custom_pattern_does_not_match_inside_a_placeholder() -> None:
 
     decision = evaluate(f"owner <EMAIL_7> for OPS_12 and {JANE}", custom=custom)
 
-    assert decision.redacted_text == "owner <EMAIL_7> for <CUSTOM_1> and <EMAIL_1>"
+    # Numbered above the <EMAIL_7> the text already holds (F081).
+    assert decision.redacted_text == "owner <EMAIL_7> for <CUSTOM_1> and <EMAIL_8>"
     assert decision.custom_counts == (("TICKET", 1),)
 
 
 @pytest.mark.parametrize(
     ("text", "expected"),
     [
-        (f"<SECRET_7>{AWS_EXAMPLE}", "<SECRET_7><SECRET_1>"),
-        ('token = "<SECRET_7>0123456789abcdef"', 'token = "<SECRET_1>"'),
+        # Numbered above the <SECRET_7> the text holds (F081).
+        (f"<SECRET_7>{AWS_EXAMPLE}", "<SECRET_7><SECRET_8>"),
+        ('token = "<SECRET_7>0123456789abcdef"', 'token = "<SECRET_8>"'),
     ],
 )
 def test_a_credential_written_against_a_placeholder_is_still_masked(

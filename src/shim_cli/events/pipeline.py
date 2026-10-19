@@ -4,6 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from shim_cli import json_bytes
+from shim_cli.guard.evaluate import placeholder_names
 from shim_cli.policy import (
     ALLOW,
     DENY,
@@ -28,7 +29,7 @@ from shim_cli.session.record import (
     scrubbed_target,
 )
 
-from .payload import PayloadTooLarge, inspect, past_deadline
+from .payload import PayloadTooLarge, inspect, past_deadline, walk
 
 
 @dataclass(frozen=True)
@@ -56,10 +57,11 @@ class Adapter:
     event: str
     root: str
     decode: Callable[[bytes | dict[str, object]], Event]
-    # (action, payload, message, found, tool label[, tool name]): the name
-    # matters where a result is withheld, as UNINSPECTED or DENY: what can
-    # replace it depends on which tool it came from, and a label may no
-    # longer say.
+    # (action, payload, message, found, tool label[, tool name[, literal]]):
+    # the name matters where a result is withheld, as UNINSPECTED or DENY:
+    # what can replace it depends on which tool it came from, and a label may
+    # no longer say. `literal` is true when the event already held
+    # placeholder-shaped text.
     encode: Callable[..., bytes]
     # No default: a new adapter must say which of the three it is, because
     # claiming more than the client grants is how a user ends up trusting a
@@ -219,6 +221,80 @@ def _written(tool: str, body: dict) -> list:
     return paths
 
 
+# D3: after a masked read the model holds `<SECRET_1>` where the file holds
+# the key, and writing back what it saw would put the placeholder over the
+# value. A write whose new text holds a placeholder shim issued in this
+# session is refused in every mode. Shell commands are not read for it.
+_WRITE_BACK = "placeholder"
+_WRITE_BACK_REFUSAL = (
+    "shim: this {tool} call would write {names}, a placeholder shim gave you in "
+    "place of a real value, instead of that value. Change the real value another "
+    "way, or ask the user."
+)
+_WRITE_BACK_REFUSALS = (
+    "shim: this {tool} call would write {names}, placeholders shim gave you in "
+    "place of real values, instead of those values. Change the real values "
+    "another way, or ask the user."
+)
+_WRITE_BACK_UNCHECKED = (
+    "shim: could not check this {tool} call for placeholders shim gave you "
+    "(session record unreadable), so it was not allowed."
+)
+# What a write tool's input carries but does not write: the text an edit
+# replaces, and VS Code's note on why. Everything else may reach the file.
+_NOT_WRITTEN = frozenset(("old_string", "oldString", "explanation"))
+
+
+def _new_text(tool: str, body: dict, unrouted: bool) -> list:
+    """The text a call may write: an apply_patch patch's added lines, every
+    other field of a write tool but `_NOT_WRITTEN`, and all of an MCP or
+    unknown tool's input, which shim cannot tell a write from."""
+    if tool == "apply_patch" and not unrouted:
+        return [
+            line
+            for value in body.values()
+            if isinstance(value, str)
+            for line in value.splitlines()
+            if line.startswith("+")
+        ]
+    return [
+        text
+        for path, text in walk(body, partial=True).leaves
+        if unrouted or not _NOT_WRITTEN.intersection(map(str, path))
+    ]
+
+
+def _write_back(tool: str, label: str, body, unrouted: bool, issued) -> str:
+    """Why a write is refused for a placeholder shim issued, or "".
+
+    `issued()` gives this session's (type, first, last) runs and is read only
+    when the new text holds placeholder-shaped text; if it cannot be read,
+    the write is refused.
+    """
+    if not isinstance(body, dict):
+        return ""
+    written = dict.fromkeys(
+        name
+        for text in _new_text(tool, body, unrouted)
+        for name in placeholder_names(text)
+    )
+    if not written:
+        return ""
+    try:
+        runs = issued()
+    except Exception:
+        return _WRITE_BACK_UNCHECKED.format(tool=label)
+    names = [
+        f"<{kind}_{number}>"
+        for kind, number in written
+        if any(kind == of and first <= number <= last for of, first, last in runs)
+    ]
+    if not names:
+        return ""
+    refusal = _WRITE_BACK_REFUSAL if len(names) == 1 else _WRITE_BACK_REFUSALS
+    return refusal.format(tool=label, names=", ".join(names))
+
+
 def _task_text(value):
     """A tasks.json command or argument's text: a string, or lines joined."""
     if isinstance(value, list) and all(isinstance(part, str) for part in value):
@@ -322,7 +398,15 @@ def process(
     diet: tuple = (),
     entities_for=None,
     protected=None,
+    issued=None,
+    issue=None,
 ) -> Outcome:
+    """One tool event's answer and record.
+
+    `issued()` gives the (type, first, last) runs of placeholder numbers shim
+    issued in this session, and `issue(runs)` adds to them when this event is
+    masked; it raises if it cannot, and nothing masked is handed on.
+    """
     event = entry.decode(raw)
     tool = event.tool
 
@@ -386,6 +470,14 @@ def process(
             entry.encode(DENY, body, refusal, "", tool_label),
             record(DENY, note=_SELF_PROTECTION),
         )
+
+    if issued is not None and (direction == LOCAL_WRITE or unrouted):
+        refusal = _write_back(tool, tool_label, body, unrouted, issued)
+        if refusal:
+            return Outcome(
+                entry.encode(DENY, body, refusal, "", tool_label),
+                record(DENY, note=_WRITE_BACK),
+            )
 
     inbound = direction == INBOUND
     # Only what came over a network or from an MCP server is reshaped: a local
@@ -485,7 +577,11 @@ def process(
     if action == MASK and result.transforms:
         message = f"{_RESHAPED.format(', '.join(result.transforms))} {message}"
     emitted = rewritten if action == MASK and changed else body
-    output = entry.encode(action, emitted, message, _summary(counts), tool_label, tool)
+    if action == MASK and issue is not None and result.issued:
+        issue(result.issued)
+    output = entry.encode(
+        action, emitted, message, _summary(counts), tool_label, tool, result.literal
+    )
     out_bytes = _size(emitted) if action == MASK else in_bytes
     return Outcome(
         output,

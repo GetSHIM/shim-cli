@@ -12,7 +12,7 @@ from itertools import islice
 from typing import Any, Literal
 
 from shim_cli.guard.entities import PLACEHOLDER
-from shim_cli.guard.evaluate import line_breaks
+from shim_cli.guard.evaluate import FLOORS, issued, line_breaks, numbering_for
 from shim_cli.guard.models import Finding
 
 # Matches the hook's own MAX_INPUT_BYTES: anything that got past that refusal
@@ -228,6 +228,17 @@ def _page(text: str, found, shrink, evaluate, numbering: dict) -> tuple | None:
         page = "".join(parts) + marked[cursor:]
         if any(mark in page for mark in marks):
             return None  # a mark without its pair
+    # A placeholder the page shows that the numbers did not start above, such
+    # as one a tag splits in the markup, would be shim's own: keep the markup.
+    text_shown = list(page)
+    for _index, start, end in landed:
+        text_shown[start:end] = " " * (end - start)
+    floors = numbering[FLOORS]
+    if any(
+        top > floors.get(kind, 0)
+        for kind, top in numbering_for(("".join(text_shown),))[FLOORS].items()
+    ):
+        return None
     try:
         read = evaluate(page, numbering=numbering)
     except (ValueError, TimeoutError) as error:
@@ -469,6 +480,10 @@ class Inspection:
     # Something was found where no placeholder can stand in for it: a file's
     # bytes, or two keys that would become one. `value` is then None.
     unmaskable: bool = False
+    # (type, first, last) of the placeholder numbers given, and whether what
+    # the model reads of the event already holds placeholder-shaped text.
+    issued: tuple = ()
+    literal: bool = False
 
 
 def inspect(
@@ -505,7 +520,14 @@ def inspect(
     unmaskable = False
     # One numbering for the whole event, so a value keeps its placeholder in
     # every field. Held here only, as are the decisions: both map values.
-    numbering: dict = {}
+    # Numbers start above any placeholder the model will read as text here:
+    # in a field as written, or on a page as converted, where an entity such
+    # as &lt;EMAIL_1&gt; decodes to one. `_page` keeps a page that shows one
+    # some other way as markup.
+    shown = [text for _path, text in found.leaves]
+    if "html" in transforms:
+        shown += [unescape(text) for text in shown]
+    numbering = numbering_for(shown)
     # A text read once is read for every field that repeats it.
     decisions: dict = {}
 
@@ -593,6 +615,8 @@ def inspect(
         tuple(sorted(found.reasons)),
         bare_numbers,
         unmaskable,
+        issued(numbering),
+        any(PLACEHOLDER.search(text) for text in shown),
     )
 
 

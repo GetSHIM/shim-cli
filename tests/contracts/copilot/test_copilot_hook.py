@@ -19,7 +19,7 @@ def _redaction_files(root):
     return [
         item
         for item in root.rglob("*")
-        if item.is_file() and item.suffix not in (".jsonl", ".mark")
+        if item.is_file() and item.suffix not in (".jsonl", ".mark", ".names")
     ]
 
 
