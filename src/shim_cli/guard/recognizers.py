@@ -880,19 +880,39 @@ def _scan_phone(text: str) -> list[Match]:
 _LEGACY_KEY = (
     r"password|passwd|pwd|api[_-]?key|secret|token|db[_-]?pass|postgres_password"
 )
+_TURKISH_PASSWORD = r"[şs]ifre(?:si|m|n|niz)?|parola(?:s[ıi]|m|n|n[ıi]z)?"
+_PASSWORD_WORDS = r"password|passwd|pwd|secret|" + _TURKISH_PASSWORD
 _SECRET_KEY = (
     _LEGACY_KEY
-    + r"|access[_-]?key|private[_-]?key|signing[_-]?key|encryption[_-]?key"
-    + r"|credentials?|auth[_-]?token|pass"
-    + r"|[şs]ifre(?:si|m|n|niz)?|parola(?:s[ıi]|m|n|n[ıi]z)?"
+    + r"|(?:access|private|signing|encryption|secret)[_-]?key"
+    + r"|credentials?|auth[_-]?token|pass|"
+    + _TURKISH_PASSWORD
 )
+# A secret word is one segment of a key: between non-letters or at a camel join.
+_WORD_START = r"(?:(?<![^\W_])|(?-i:(?<=[a-z0-9])(?=[A-Z])))"
+# Or glued onto a prefix in its case: `PGPASSWORD`, `ACCESSTOKEN`, `DBPassword`,
+# `registrytoken`. Never `pass`, which ends `BYPASS`, `COMPASS` and `LOWPASS`;
+# `DBPASS` is a key of its own.
+_GLUED = r"(?-i:(?<=[A-Z0-9])(?=[A-Z])|(?<=[a-z0-9])(?=[a-z]))"
+_GLUED_WORD = (
+    r"token|(?:api|access|private|signing|encryption|secret)[_-]?key|" + _PASSWORD_WORDS
+)
+# A word ends where no letter follows, `PASSWORD2` and `PASSWORD_PROD` too, or
+# at a camel join.
 _SECRET_WORD = (
-    r"(?:(?<![^\W_])|(?-i:(?<=[a-z0-9])(?=[A-Z])))"
-    r"(?:" + _SECRET_KEY + r")"
-    r"(?:(?![^\W_])|(?-i:(?<=[a-z])(?=[A-Z])))"
+    r"(?:" + _WORD_START + r"(?:" + _SECRET_KEY + r")"
+    r"|" + _GLUED + r"(?:" + _GLUED_WORD + r"))"
+    r"(?:(?![^\W\d_])|(?-i:(?<=[a-z])(?=[A-Z])))"
 )
 _SECRET_NAME = re.compile(_SECRET_WORD, re.IGNORECASE)
-# A key name ending in a legacy key, as `_LEGACY_ASSIGNMENT` reads one.
+# A key whose last word names a password: every value under it is one, digits
+# included, where `TOKEN_TTL=86400` stays configuration.
+_PASSWORD_KEY = re.compile(
+    r"(?:(?:" + _WORD_START + r"|" + _GLUED + r")(?:" + _PASSWORD_WORDS + r")"
+    r"|" + _WORD_START + r"pass)\d*\Z",
+    re.IGNORECASE,
+)
+# A key name ending in a legacy key.
 _LEGACY_NAME = re.compile(r"(?<![\w-])(?:" + _LEGACY_KEY + r")\Z", re.IGNORECASE)
 # A quote around a key or a value may be escaped, as in JSON held in a JSON
 # string. A value an escaped quote opened is read one escape level down, so
@@ -900,35 +920,43 @@ _LEGACY_NAME = re.compile(r"(?<![\w-])(?:" + _LEGACY_KEY + r")\Z", re.IGNORECASE
 # quote opened runs to its unescaped closing quote, which a word never follows.
 # When there is no such quote six characters in, it runs, as before, to the
 # first quote that is: `password="abcdef\" other="x"` ends at the backslash.
-_SECRET_ASSIGNMENT = re.compile(
-    _SECRET_WORD + r"(?P<tail>[\w.-]{0,64})(?:\\?[\"'])?\s*[=:]\s*"
-    r"(?:(?P<quote>(?P<escaped>\\)?(?P<mark>[\"']))(?P<quoted>(?(escaped)"
+_QUOTED_VALUE = (
+    r"(?P<quote>(?P<escaped>\\)?(?P<mark>[\"']))(?P<quoted>(?(escaped)"
     r"(?:\\?(?!(?P=mark))[^\r\n\\]|\\\\(?:\\[^\r\n]|[^\r\n\\])){6,}?"
     r"|(?:(?:(?!(?P=mark))[^\r\n\\]|\\[^\r\n]){6,}(?=(?P=mark)(?!\w))"
     r"|[^\r\n]{6,}?)))(?P=quote)"
-    r"|(?P<bare>[^\s,}\]\"']{6}))",
+)
+# A typed declaration's value is its initializer, a literal after the type:
+# `db_password: str = "..."`, `const DB_PASSWORD: &str = "..."`,
+# `password?: string = "..."`, `db_password: int = 12345678`.
+_SECRET_ASSIGNMENT = re.compile(
+    _SECRET_WORD + r"(?P<tail>[\w.-]{0,64})(?:\\?[\"'])?\s*"
+    r"(?:\??:[ \t]*(?P<type>(?:[\w.\[\]<>,|?&'() \t]|(?<=\w)=(?=\w)){1,40}?)"
+    r"[ \t]*=(?=[ \t]*(?:\\?[\"']|\d))|[=:])\s*"
+    r"(?:" + _QUOTED_VALUE + r"|(?P<bare>[^\s,}\]\"']{6}))",
     re.IGNORECASE,
 )
+# A type is written in words, and spaced from its `=`; anything else after the
+# key may be the password's start.
+_TYPE_WORD = re.compile(r"[A-Za-z]+(?:_[A-Za-z]+)*")
 _BARE_END = re.compile(r"[\s,}\]\"']")
 # The gateway's key and value with a space alone between them: the key starts a
 # word and a bare value carries a digit or a symbol, so "token budget" is prose.
 # Unlike the gateway, the space never crosses a line: "# rotate the token" over
-# a line of code is not an assignment. A value attribute after the key holds
-# the value: `password value=<SECRET_1>`. A key that is an attribute's value,
-# as in `name="password"` or `name=password`, is followed by the element's
-# next attribute, which is no value: `id=pwfield1` stays.
+# a line of code is not an assignment, and a command's next `--option` is no
+# value. A value attribute after the key holds the value:
+# `password value=<SECRET_1>`. A key that is an attribute's value, as in
+# `name="password"` or `name=password`, or an element's name, as in
+# `<password encrypted="false">`, is followed by the element's next attribute,
+# which is no value: `id=pwfield1` stays.
 _SPACED_ASSIGNMENT = re.compile(
     r"(?<![^\W_])(?:" + _LEGACY_KEY + r")(?P<closed>[\"'])?[ \t]+"
     r"(?:(?P<quote>[\"'])(?P<quoted>[^\r\n]{6,}?)(?P=quote)"
-    r"|(?=[^\s,}\]\"']*[0-9!#$%&*+./;<=>?@^_|~-])(?P<bare>[^\s,}\]\"']{6,}))",
+    r"|(?!--)(?=[^\s,}\]\"']*[0-9!#$%&*+./;<=>?@^_|~-])(?P<bare>[^\s,}\]\"']{6,}))",
     re.IGNORECASE,
 )
 # The element's next attribute, with its value: `aGVsbG8=` is a padded value.
 _ATTRIBUTE_NAME = re.compile(r"[A-Za-z_][\w.:-]*=(?=[\w\"'#/\\])")
-_LEGACY_ASSIGNMENT = re.compile(
-    r"(?<![\w-])(?:" + _LEGACY_KEY + r")(?:\\?[\"'])?\s*[=:]\s*\Z",
-    re.IGNORECASE,
-)
 # `<add key="DbPassword" value="..."/>`, `<input type="password" value="...">`,
 # `<meta name="api-key" content="...">`: the secret's name and its value are
 # two attributes of one element, in either order, and others may sit between.
@@ -957,6 +985,45 @@ _ATTRIBUTE_PAIRS = (
         re.IGNORECASE,
     ),
 )
+# `<password>...</password>`, `<entry key="db.password">...</entry>`: an element
+# a secret word names, by its tag or by its name or key attribute, holds the
+# secret, which may sit on lines of its own.
+_ELEMENT_CONTENT = (
+    r"(?:\s[^<>]{0,256}?)?(?<!/)>\s*(?P<value>[^\s<](?:[^<]*[^\s<])?)\s*</(?P=tag)>"
+)
+_ELEMENT_VALUES = (
+    re.compile(
+        r"<(?P<tag>(?P<key>[\w.:-]{0,64}?"
+        + _SECRET_WORD
+        + r"[\w.:-]{0,64}))"
+        + _ELEMENT_CONTENT,
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"<(?P<tag>[\w.:-]{1,64})\s[^<>]{0,256}?(?<![\w:.-])(?:key|name)\s*=\s*"
+        r"(?P<open>[\"']?)(?P<key>[\w.:-]{0,64}?" + _SECRET_WORD + r"[\w.:-]{0,64})"
+        r"(?P=open)" + _ELEMENT_CONTENT,
+        re.IGNORECASE,
+    ),
+)
+# A name field naming a secret, then, before the next name field or the end of
+# its object or element, the value field holding it: a Kubernetes or ECS `env`
+# entry, AWS SSM's `Name` and `Value` as JSON or as the CLI's options, a
+# Terraform variable's `default`. Not `th:value`, which binds an expression,
+# nor an element's `name=` attribute, which `_ATTRIBUTE_PAIRS` reads.
+_NAME_FIELD = (
+    r"(?:(?<![\w-])\\?[\"']?(?:name|key)\\?[\"']?(?:\s*:|\s+=)"
+    r"|(?<!\S)--(?:name|key)[ \t=])"
+)
+_PAIRED_VALUE = re.compile(
+    r"(?:" + _NAME_FIELD + r"|(?<![\w-])variable)\s*(?P<open>\\?[\"']?)"
+    r"(?P<key>[\w./:-]{0,64}?" + _SECRET_WORD + r"[\w./:-]{0,64})(?![\w./:-])(?P=open)"
+    r"(?:(?!" + _NAME_FIELD + r")[^}<>]){0,256}?"
+    r"(?:(?<![\w:.-])\\?[\"']?(?:value|default)\\?[\"']?\s*[:=]"
+    r"|(?<!\S)(?P<option>--value)[ \t=])[ \t]*"
+    r"(?:" + _QUOTED_VALUE + r"|(?P<bare>(?!\\?[\"'])[^\r\n]*|))",
+    re.IGNORECASE,
+)
 # A key that a `;`, `&`, `?` or `|` puts in a list of fields: a connection
 # string's option, a URL's parameter, a log line's field. Only there does the
 # separator end a value. In a .env, YAML or properties value it can be a
@@ -971,9 +1038,9 @@ _NEXT_FIELD = {
 }
 # What a bare value may end with that belongs to the text around it, and what
 # opens each closing mark.
-_VALUE_MARKS = ";&|)>`"
-_OPENERS = {")": "(", ">": "<", "`": "`"}
-_CLOSING_MARK = re.compile(r"[)>`]")
+_VALUE_MARKS = ";&|)>`}]"
+_OPENERS = {")": "(", ">": "<", "`": "`", "}": "{", "]": "["}
+_CLOSING_MARK = re.compile(r"[)>`}\]]")
 _UNQUOTED_END = re.compile(r"[\s>]")
 _LINE_BREAK = re.compile(r"[\r\n]")
 _REFERENCE = re.compile(
@@ -997,6 +1064,12 @@ _CODE_VALUE = re.compile(
 _OPEN_CODE_VALUE = re.compile(_CODE_PATH + r"[(\[<][A-Za-z_.=(\[<]*")
 _TYPE_VALUE = re.compile(r"(?P<name>(?:[A-Z][a-z]+){2,}|String)(?P<end>[?;)>]*)")
 _NAME_WORD = re.compile(r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])")
+# An identifier as people write one: in one case, or in camel case with every
+# capital opening a word.
+_NAME = re.compile(
+    r"[A-Z0-9_]+|[a-z0-9_]+|_*(?:[a-z][a-z0-9]*|[A-Z][a-z0-9]+)(?:[A-Z][a-z0-9]+)+"
+)
+_NAME_RUN = re.compile(r"\w+")
 _MAX_SHAPED_VALUE = 1_024
 _PATH_VALUE = re.compile(
     r"(?:~|\.{1,2})/\S*|/[a-z0-9._/-]+|/\S*\.[A-Za-z][A-Za-z0-9]{0,4}"
@@ -1018,6 +1091,8 @@ _URI_PASSWORD = re.compile(
 )
 # An image pinned by digest (`docker://alpine:3.8@sha256:...`): no host is that.
 _IMAGE_DIGEST = re.compile(r"(?i)sha(?:256|512):[0-9a-f]{64}")
+# A template's placeholder for a value: `<your-api-token>`, `<YOUR_API_TOKEN>`.
+_TEMPLATE_VALUE = re.compile(r"<(?:[a-z]+(?:[-_][a-z]+)*|[A-Z]+(?:[-_][A-Z]+)*)>")
 _NOT_A_CREDENTIAL = re.compile(r"[….*•:]+|(?:\$\{\w+\}|\{\w*\}|\$\w+|%\w+%|:)+")
 # A key with no value is matched too, so the scan moves past it once: the `?`s
 # inside it start the same failed key, and retrying each was quadratic.
@@ -1135,15 +1210,6 @@ _SECRET_PATTERNS: tuple[
     ),
     (
         re.compile(
-            r'"identitytoken"\s*:\s*"(?P<value>(?!\$\{|<)[^"\s]{8,})"',
-            re.IGNORECASE,
-        ),
-        "value",
-        0.97,
-        _quoted_end,
-    ),
-    (
-        re.compile(
             r"(?<![\w-])AccountKey=(?P<value>[A-Za-z0-9+/]{64,}={0,2})",
             re.IGNORECASE,
         ),
@@ -1200,22 +1266,35 @@ def _not_a_secret(
     if shaped and (
         _REFERENCE.fullmatch(value)
         or PLACEHOLDER.fullmatch(value.rstrip("`*.;:!?)"))
+        or _TEMPLATE_VALUE.fullmatch(value)
         or _TYPE_NAME.fullmatch(value)
     ):
         return True
     if new_key is None:
         return False
+    password = _PASSWORD_KEY.search(new_key) is not None
     code = not quoted and (
         _CODE_VALUE.fullmatch(value)
         or (after in ('"', "'", ",", "]") and _OPEN_CODE_VALUE.fullmatch(value))
         or (typed and _a_type_of(new_key, value, after))
     )
+    if password:
+        # A password may be any characters. A random one reads as digits, a
+        # path or `a.b` often enough, and as code written in names almost
+        # never: `config.db_password`, `settings["DB_PASSWORD"]`.
+        code = code and all(map(_NAME.fullmatch, _NAME_RUN.findall(value)))
     return bool(
         _QUALIFIER.search(new_key)
         or _URL_VALUE.match(value)
         or (
             shaped
-            and (code or _BARE_DIGITS.fullmatch(value) or _PATH_VALUE.fullmatch(value))
+            and (
+                code
+                or (
+                    not password
+                    and (_BARE_DIGITS.fullmatch(value) or _PATH_VALUE.fullmatch(value))
+                )
+            )
         )
     )
 
@@ -1268,7 +1347,8 @@ def _scan_secret(text: str, literal: str | None = None) -> list[Match]:
     for match in _SPACED_ASSIGNMENT.finditer(text):
         quoted = match.group("quoted") is not None
         start, end = match.span("quoted" if quoted else "bare")
-        attribute = match["closed"] or text[match.start() - 1 : match.start()] == "="
+        before = text[match.start() - 1 : match.start()]
+        attribute = match["closed"] or before in ("=", "<")
         if quoted:
             end = _quoted_end(literal, start, end)
         elif found := _VALUE_ATTRIBUTE_AT.match(text, start):
@@ -1290,6 +1370,32 @@ def _scan_secret(text: str, literal: str | None = None) -> list[Match]:
             new_key = None if _LEGACY_NAME.search(key) else key
             if len(value) >= 6 and not _not_a_secret(value, new_key, True, False, ""):
                 results.append(Match("SECRET", start, end, 0.97))
+    # A name read from a field is no gateway key: its value is read as any
+    # key's is, so `value = var.db_password` is code.
+    named = [
+        (found["key"], True, *found.span("value"))
+        for pattern in _ELEMENT_VALUES
+        for found in pattern.finditer(text)
+    ]
+    for match in _PAIRED_VALUE.finditer(text):
+        quoted = match["quoted"] is not None
+        start, end = match.span("quoted" if quoted else "bare")
+        if quoted:
+            end = _quoted_end(literal, start, end)
+        else:
+            # An option's value is a shell word. A plain value runs to its
+            # line's end, quotes and spaces too, but for the brackets it
+            # closes: a password is never cut short where its end is unclear.
+            found = (_UNQUOTED_END if match["option"] else _LINE_BREAK).search(
+                literal, start
+            )
+            end = start + len(text[start : found.start() if found else end].rstrip())
+            end = start + len(text[start : _value_end(literal, start, end)].rstrip())
+        named.append((match["key"], quoted, start, end))
+    for key, quoted, start, end in named:
+        value = text[start:end]
+        if len(value) >= 6 and not _not_a_secret(value, key, quoted, False, ""):
+            results.append(Match("SECRET", start, end, 0.97))
     position = 0
     run = (0, 0)
     while match := _SECRET_ASSIGNMENT.search(text, position):
@@ -1305,9 +1411,17 @@ def _scan_secret(text: str, literal: str | None = None) -> list[Match]:
             cut = _value_end(literal, start, end)
         position = start
         separator = text[match.end("tail") : match.start("quote") if quoted else start]
-        legacy = _LEGACY_ASSIGNMENT.search(
-            text, match.start(), match.start("quote") if quoted else start
-        )
+        annotation = match["type"]
+        if annotation is not None and not (
+            text[match.end("type")] in " \t"
+            and (words := _NAME_RUN.findall(annotation))
+            and all(map(_TYPE_WORD.fullmatch, words))
+        ):
+            # Not a type: it may be the password's start, so the mask runs
+            # from it through the initializer.
+            start, quoted = match.start("type"), True
+            end = cut = max(cut, match.end())
+        legacy = _LEGACY_NAME.search(text, match.start(), match.end("tail"))
         if legacy is None and "\n" in separator:
             continue
         new_key = None if legacy else text[match.start() : match.end("tail")]

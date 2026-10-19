@@ -994,10 +994,12 @@
       "expected_output": "SESSION_TOKEN_TTL=604800"
     },
     {
-      "id": "secret-negative-pass-flag-digits",
+      "id": "secret-pass-flag-digits",
       "text": "PASS=123456",
-      "categories": [],
-      "expected_output": "PASS=123456"
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "PASS=<SECRET_1>"
     },
     {
       "id": "secret-negative-bypass",
@@ -1024,10 +1026,12 @@
       "expected_output": "maxTokens: 100000"
     },
     {
-      "id": "secret-negative-db-password-digits",
+      "id": "secret-db-password-digits",
       "text": "DB_PASSWORD=12345678",
-      "categories": [],
-      "expected_output": "DB_PASSWORD=12345678"
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "DB_PASSWORD=<SECRET_1>"
     },
     {
       "id": "secret-negative-db-password-boolean",
@@ -1131,6 +1135,104 @@
       "text": "AccountKey=short",
       "categories": [],
       "expected_output": "AccountKey=short"
+    },
+    {
+      "id": "secret-glued-pgpassword",
+      "text": "PGPASSWORD=example-password-0000",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "PGPASSWORD=<SECRET_1>"
+    },
+    {
+      "id": "secret-glued-dbpassword-yaml",
+      "text": "    DBPASSWORD: example-password-0000",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "    DBPASSWORD: <SECRET_1>"
+    },
+    {
+      "id": "secret-glued-secretkey",
+      "text": "SECRETKEY=example-password-0000",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "SECRETKEY=<SECRET_1>"
+    },
+    {
+      "id": "secret-typed-python",
+      "text": "    db_password: str = \"example-password-0000\"",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "    db_password: str = \"<SECRET_1>\""
+    },
+    {
+      "id": "secret-typed-typescript",
+      "text": "const password: string = \"example-password-0000\";",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "const password: string = \"<SECRET_1>\";"
+    },
+    {
+      "id": "secret-typed-kotlin",
+      "text": "val dbPassword: String = \"example-password-0000\"",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "val dbPassword: String = \"<SECRET_1>\""
+    },
+    {
+      "id": "secret-maven-settings-server",
+      "text": "<server><id>nexus</id><username>deploy</username><password>example-password-0000</password></server>",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "<server><id>nexus</id><username>deploy</username><password><SECRET_1></password></server>"
+    },
+    {
+      "id": "secret-k8s-env-list",
+      "text": "env:\n  - name: DB_PASSWORD\n    value: \"example-password-0000\"\n  - name: LOG_LEVEL\n    value: verbose-mode",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "env:\n  - name: DB_PASSWORD\n    value: \"<SECRET_1>\"\n  - name: LOG_LEVEL\n    value: verbose-mode"
+    },
+    {
+      "id": "secret-ssm-parameter",
+      "text": "{\"Parameter\": {\"Name\": \"/prod/db/password\", \"Type\": \"SecureString\", \"Value\": \"example-password-0000\", \"Version\": 3}}",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "{\"Parameter\": {\"Name\": \"/prod/db/password\", \"Type\": \"SecureString\", \"Value\": \"<SECRET_1>\", \"Version\": 3}}"
+    },
+    {
+      "id": "secret-terraform-default",
+      "text": "variable \"db_password\" {\n  type      = string\n  sensitive = true\n  default   = \"example-password-0000\"\n}",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "variable \"db_password\" {\n  type      = string\n  sensitive = true\n  default   = \"<SECRET_1>\"\n}"
+    },
+    {
+      "id": "secret-negative-tokenizer-upper",
+      "text": "TOKENIZER=bert-base-uncased",
+      "categories": [],
+      "expected_output": "TOKENIZER=bert-base-uncased"
+    },
+    {
+      "id": "secret-negative-glued-max-tokens",
+      "text": "MAXTOKENS=4096",
+      "categories": [],
+      "expected_output": "MAXTOKENS=4096"
+    },
+    {
+      "id": "secret-negative-k8s-secret-ref",
+      "text": "env:\n  - name: DB_PASSWORD\n    valueFrom:\n      secretKeyRef:\n        name: db-credentials\n        key: password\n  - name: LOG_LEVEL\n    value: verbose-mode",
+      "categories": [],
+      "expected_output": "env:\n  - name: DB_PASSWORD\n    valueFrom:\n      secretKeyRef:\n        name: db-credentials\n        key: password\n  - name: LOG_LEVEL\n    value: verbose-mode"
     },
     {
       "id": "db-uri-postgres-userinfo",

@@ -793,21 +793,29 @@ def test_a_value_that_only_resembles_code_is_still_a_secret(text: str) -> None:
     assert evaluate(text).counts == (("SECRET", 1),)
 
 
-def test_a_random_password_under_a_named_key_is_masked() -> None:
+@pytest.mark.parametrize("key", ["DB_PASSWORD", "SMTP_PASS", "PGPASSWORD"])
+@pytest.mark.parametrize("seed", [5, 6, 14, 16, 24, 33])
+def test_a_random_password_under_a_named_key_is_masked(key: str, seed: int) -> None:
+    """Every one but a value that is `$` and an identifier: that is a variable
+    reference under every key (`$DB_PASS`), as the generated passwords of
+    `test_u11_secret_value_span.py` have it. The seeds draw passwords that read
+    as `a.b` (5, 14, 16, 24), as a path (33) and as `$NAME` (6, 16)."""
     symbols = "!#$&()*+-./:;<=>?@[^_`{|~"
     alphabet = string.ascii_letters + string.digits + symbols
-    generator = random.Random(33)
+    generator = random.Random(seed)
     passwords = [
         "".join(generator.choice(alphabet) for _ in range(16)) for _ in range(2_000)
     ]
 
     missed = [
-        password
-        for password in passwords
-        if not evaluate(f"DB_PASSWORD={password}").counts
+        password for password in passwords if not evaluate(f"{key}={password}").counts
     ]
 
-    assert len(missed) <= 2, missed
+    assert missed == [
+        password
+        for password in passwords
+        if password.startswith("$") and password[1:].isidentifier()
+    ]
 
 
 def test_a_value_too_long_to_be_code_or_a_path_is_still_a_secret() -> None:
