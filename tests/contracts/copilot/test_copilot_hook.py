@@ -96,10 +96,11 @@ def test_copilot_runner_replaces_invalid_input(tmp_path: Path) -> None:
 
 
 def test_copilot_stdin_deadline_uses_the_native_rewrite() -> None:
+    # Counted from `main`, as in the Codex test of the same deadline.
     code = (
         "import sys; from shim_cli import hook as runner; "
-        "sys.argv.append('copilot'); runner.HOOK_DEADLINE_SECONDS = 0.05; "
-        "runner.main()"
+        "sys.argv.append('copilot'); runner._process_age = lambda: 0.0; "
+        "runner.HOOK_DEADLINE_SECONDS = 0.05; runner.main()"
     )
     with subprocess.Popen(
         (sys.executable, "-I", "-B", "-c", code),

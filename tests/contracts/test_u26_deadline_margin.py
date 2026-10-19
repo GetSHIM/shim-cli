@@ -104,8 +104,11 @@ def test_the_answer_is_due_well_inside_every_client_timeout() -> None:
 def test_the_age_counts_from_when_the_process_started(tmp_path: Path) -> None:
     """The kernel's start time, read the way this platform keeps it: a
     process that slept before asking is at least that old, and no older than
-    the parent saw it live."""
+    the parent saw it live, but for the grain of the kernel's clock. Linux
+    keeps the start in clock ticks, rounded down, so the age can read up to a
+    tick older, never younger; macOS keeps microseconds."""
     slept = 1.5
+    grain = 1e-6 if sys.platform == "darwin" else 1 / os.sysconf("SC_CLK_TCK")
     code = (
         "import time\n"
         f"time.sleep({slept})\n"
@@ -116,7 +119,7 @@ def test_the_age_counts_from_when_the_process_started(tmp_path: Path) -> None:
     result, elapsed = _hook(code, b"", tmp_path)
 
     assert (result.returncode, result.stderr) == (0, b"")
-    assert slept <= float(result.stdout) <= elapsed
+    assert slept <= float(result.stdout) <= elapsed + grain
 
 
 def test_a_hook_held_up_before_python_runs_still_refuses_in_time(

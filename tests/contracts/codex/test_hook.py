@@ -434,8 +434,12 @@ runner.main()
 
 
 def test_hook_deadline_includes_waiting_for_stdin_eof() -> None:
+    # The deadline counts from the process's start, and a slow machine can
+    # spend 0.05 s starting Python: a hook started past its deadline reads
+    # stdin until the answer is due (test_u26_deadline_margin). Counted from
+    # `main`, this one starts in time.
     code = (
-        "from shim_cli import hook as runner; "
+        "from shim_cli import hook as runner; runner._process_age = lambda: 0.0; "
         "runner.HOOK_DEADLINE_SECONDS = 0.05; runner.main()"
     )
     with subprocess.Popen(

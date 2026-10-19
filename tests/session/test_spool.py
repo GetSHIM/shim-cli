@@ -329,11 +329,39 @@ def _lock_held(seconds: float):
     return thread
 
 
-def test_a_record_waits_out_a_lock_held_for_a_moment() -> None:
-    holder = _lock_held(0.03)
+def _let_go_while_waited_for(monkeypatch, path: Path) -> list[bool]:
+    """Another hook's write in flight on `path`, done when this one, having
+    found it locked, pauses before trying again: the order a released lock is
+    met in, kept whatever a busy machine does to a thread's sleep."""
+    import fcntl
+    import time
+    import types
+
+    from shim_cli.session import _files
+
+    descriptor = os.open(path, os.O_RDWR | os.O_NOFOLLOW)
+    fcntl.flock(descriptor, fcntl.LOCK_EX)
+    released: list[bool] = []
+
+    def pause(seconds: float) -> None:
+        if not released:
+            os.close(descriptor)
+            released.append(True)
+        time.sleep(seconds)
+
+    monkeypatch.setattr(
+        _files, "time", types.SimpleNamespace(monotonic=time.monotonic, sleep=pause)
+    )
+    return released
+
+
+def test_a_record_waits_out_a_lock_held_for_a_moment(monkeypatch) -> None:
+    spool.append(SESSION, _entry())
+    log = next(spool.root_path().glob("*.jsonl"))
+    released = _let_go_while_waited_for(monkeypatch, log)
 
     assert spool.append(SESSION, _entry("report")) is True
-    holder.join()
+    assert released == [True]
     assert [record["action"] for record in spool.entries(SESSION)] == [
         "mask",
         "report",
@@ -341,21 +369,14 @@ def test_a_record_waits_out_a_lock_held_for_a_moment() -> None:
     assert spool.capped(SESSION) is False
 
 
-def test_the_summarized_mark_waits_out_a_lock_held_for_a_moment() -> None:
-    import fcntl
-    import threading
-    import time
-
+def test_the_summarized_mark_waits_out_a_lock_held_for_a_moment(monkeypatch) -> None:
     spool.mark_summarized(SESSION, 1)
     mark = next(spool.root_path().glob("*.mark"))
-    descriptor = os.open(mark, os.O_RDWR | os.O_NOFOLLOW)
-    fcntl.flock(descriptor, fcntl.LOCK_EX)
-    holder = threading.Thread(target=lambda: (time.sleep(0.03), os.close(descriptor)))
-    holder.start()
+    released = _let_go_while_waited_for(monkeypatch, mark)
 
     spool.mark_summarized(SESSION, 4)
-    holder.join()
 
+    assert released == [True]
     assert spool.summarized(SESSION) == (4, False)
 
 

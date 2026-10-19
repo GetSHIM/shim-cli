@@ -79,7 +79,7 @@ def _normalization_continues(previous: str, current: str) -> bool:
 
 def _normalize_unicode(
     text: str, spans: list[_SourceSpan]
-) -> tuple[str, tuple[_SourceSpan, ...]]:
+) -> tuple[str, tuple[_SourceSpan, ...], str]:
     if len(text) != len(spans):
         raise ValueError("Guard normalization failed safely.")
     # One entry per source character, not per character it decomposes into:
@@ -109,13 +109,19 @@ def _normalize_unicode(
     cuts.append(len(decomposed))
 
     output: list[str] = []
+    literal: list[str] = []
     normalized_spans: list[_SourceSpan] = []
     for start, end in zip(cuts, cuts[1:]):  # noqa: B905
         normalized = unicodedata.normalize("NFC", "".join(decomposed[start:end]))
         source_span = (spans[start][0], spans[end - 1][1])
         output.append(normalized)
+        # A one-character span is a source character written as itself. No
+        # character's normalization holds it beside others, so a run is
+        # literal whole or not at all.
+        written = source_span[1] - source_span[0] == 1 and normalized == text[start]
+        literal.append(normalized if written else "\0" * len(normalized))
         normalized_spans.extend([source_span] * len(normalized))
-    return "".join(output), tuple(normalized_spans)
+    return "".join(output), tuple(normalized_spans), "".join(literal)
 
 
 def normalize(text: str) -> NormalizedText:
@@ -140,12 +146,4 @@ def normalize(text: str) -> NormalizedText:
         if not _INVISIBLE.fullmatch(character):
             visible_text.append(character)
             visible_spans.append(span)
-    normalized, normalized_spans = _normalize_unicode(
-        "".join(visible_text), visible_spans
-    )
-    literal = "".join(
-        character if end - start == 1 and text[start] == character else "\0"
-        # No `strict=`; see _normalize_unicode. Both come from one loop.
-        for character, (start, end) in zip(normalized, normalized_spans)  # noqa: B905
-    )
-    return NormalizedText(normalized, normalized_spans, literal)
+    return NormalizedText(*_normalize_unicode("".join(visible_text), visible_spans))

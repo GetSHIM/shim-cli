@@ -212,17 +212,19 @@ def _validate_card(text: str) -> bool:
     return checksum % 10 == 0
 
 
+# Each pattern's first character is a hex digit or a colon: the lookahead lets
+# the engine pass any other position in one test; see `_SECRET_WORD`.
 _IP_PATTERNS = _compile(
     (
         (
-            r"(?<![\w:])::(?:ffff(?::0{1,4})?:)?"
+            r"(?=:)(?<![\w:])::(?:ffff(?::0{1,4})?:)?"
             r"(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}"
             r"(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)"
             r"(?:/(?:12[0-8]|1[01]\d|[1-9]?\d))?\b",
             0.6,
         ),
         (
-            r"(?<![\w:])(?:(?:[0-9A-Fa-f]{1,4}:){1,5}:(?:[0-9A-Fa-f]{1,4}:){0,4}"
+            r"(?=[0-9A-Fa-f])(?<![\w:])(?:(?:[0-9A-Fa-f]{1,4}:){1,5}:(?:[0-9A-Fa-f]{1,4}:){0,4}"
             r"|(?:[0-9A-Fa-f]{1,4}:){6})"
             r"(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}"
             r"(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)"
@@ -230,7 +232,7 @@ _IP_PATTERNS = _compile(
             0.6,
         ),
         (
-            r"\b(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\."
+            r"(?=[0-9])\b(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\."
             r"(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\."
             r"(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\."
             r"(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)"
@@ -238,7 +240,7 @@ _IP_PATTERNS = _compile(
             0.6,
         ),
         (
-            r"(?<![\w:])(?:(?:[0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}"
+            r"(?=[0-9A-Fa-f:])(?<![\w:])(?:(?:[0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}"
             r"|(?:[0-9A-Fa-f]{1,4}:){1,7}:"
             r"|:(?::[0-9A-Fa-f]{1,4}){1,7}"
             r"|(?:[0-9A-Fa-f]{1,4}:){1,6}:[0-9A-Fa-f]{1,4}"
@@ -898,9 +900,11 @@ _GLUED_WORD = (
     r"token|(?:api|access|private|signing|encryption|secret)[_-]?key|" + _PASSWORD_WORDS
 )
 # A word ends where no letter follows, `PASSWORD2` and `PASSWORD_PROD` too, or
-# at a camel join.
+# at a camel join. The lookahead holds every word's first letter: the engine
+# skips a position no word starts at in one test, where trying each assertion
+# in turn made a scan of 200,000 characters take 19 ms instead of 2.
 _SECRET_WORD = (
-    r"(?:" + _WORD_START + r"(?:" + _SECRET_KEY + r")"
+    r"(?=[acdepstş])(?:" + _WORD_START + r"(?:" + _SECRET_KEY + r")"
     r"|" + _GLUED + r"(?:" + _GLUED_WORD + r"))"
     r"(?:(?![^\W\d_])|(?-i:(?<=[a-z])(?=[A-Z])))"
 )
@@ -950,7 +954,7 @@ _BARE_END = re.compile(r"[\s,}\]\"']")
 # `<password encrypted="false">`, is followed by the element's next attribute,
 # which is no value: `id=pwfield1` stays.
 _SPACED_ASSIGNMENT = re.compile(
-    r"(?<![^\W_])(?:" + _LEGACY_KEY + r")(?P<closed>[\"'])?[ \t]+"
+    r"(?=[adpst])(?<![^\W_])(?:" + _LEGACY_KEY + r")(?P<closed>[\"'])?[ \t]+"
     r"(?:(?P<quote>[\"'])(?P<quoted>[^\r\n]{6,}?)(?P=quote)"
     r"|(?!--)(?=[^\s,}\]\"']*[0-9!#$%&*+./;<=>?@^_|~-])(?P<bare>[^\s,}\]\"']{6,}))",
     re.IGNORECASE,
@@ -1016,7 +1020,8 @@ _NAME_FIELD = (
     r"|(?<!\S)--(?:name|key)[ \t=])"
 )
 _PAIRED_VALUE = re.compile(
-    r"(?:" + _NAME_FIELD + r"|(?<![\w-])variable)\s*(?P<open>\\?[\"']?)"
+    # Each first character a match can start with; see `_SECRET_WORD`.
+    r"(?=[\\\"'nkv-])(?:" + _NAME_FIELD + r"|(?<![\w-])variable)\s*(?P<open>\\?[\"']?)"
     r"(?P<key>[\w./:-]{0,64}?" + _SECRET_WORD + r"[\w./:-]{0,64})(?![\w./:-])(?P=open)"
     r"(?:(?!" + _NAME_FIELD + r")[^}<>]){0,256}?"
     r"(?:(?<![\w:.-])\\?[\"']?(?:value|default)\\?[\"']?\s*[:=]"

@@ -4,6 +4,7 @@ import subprocess
 import sys
 import threading
 import time
+import types
 
 import pytest
 
@@ -158,25 +159,47 @@ finally:
         os.close(root)
 
 
-def test_a_reader_waits_for_an_append_in_flight(tmp_path):
+def _let_go_while_waited_for(
+    monkeypatch, root: int, name: str, mode: int
+) -> list[bool]:
+    """Hold a lock on `name` and let go of it when the waiter, having found it
+    held, pauses before trying again: the order a released lock is met in, kept
+    whatever a busy machine does to a thread's sleep."""
+    descriptor = os.open(name, os.O_RDWR | os.O_CREAT, 0o600, dir_fd=root)
+    fcntl.flock(descriptor, mode)
+    released: list[bool] = []
+
+    def pause(seconds: float) -> None:
+        if not released:
+            os.close(descriptor)
+            released.append(True)
+        time.sleep(seconds)
+
+    monkeypatch.setattr(
+        _files, "time", types.SimpleNamespace(monotonic=time.monotonic, sleep=pause)
+    )
+    return released
+
+
+def test_a_reader_waits_for_an_append_in_flight(tmp_path, monkeypatch):
     root = _files.open_root(tmp_path / "journal")
     try:
         assert _files.append(root, "entries", b"first\n", 100)
-        holder = _held(root, "entries", fcntl.LOCK_EX, 0.03)
+        released = _let_go_while_waited_for(monkeypatch, root, "entries", fcntl.LOCK_EX)
 
         assert _files.read(root, "entries", 100) == b"first\n"
-        holder.join()
+        assert released == [True]
     finally:
         os.close(root)
 
 
-def test_a_writer_waits_for_a_reader(tmp_path):
+def test_a_writer_waits_for_a_reader(tmp_path, monkeypatch):
     root = _files.open_root(tmp_path / "journal")
     try:
-        holder = _held(root, "entries", fcntl.LOCK_SH, 0.03)
+        released = _let_go_while_waited_for(monkeypatch, root, "entries", fcntl.LOCK_SH)
 
         assert _files.append(root, "entries", b"first\n", 100) is True
-        holder.join()
+        assert released == [True]
         assert _files.read(root, "entries", 100) == b"first\n"
     finally:
         os.close(root)
