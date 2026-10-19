@@ -1227,6 +1227,284 @@
       "expected_output": "https://<SECRET_1>@example.com/path"
     },
     {
+      "id": "db-uri-driver-asyncpg-env",
+      "text": "DATABASE_URL=postgresql+asyncpg://app:s3cr3tPass@db.internal:5432/app",
+      "categories": [
+        "DB_URI"
+      ],
+      "expected_output": "DATABASE_URL=postgresql+asyncpg://<DB_URI_1>@db.internal:5432/app"
+    },
+    {
+      "id": "db-uri-driver-psycopg2",
+      "text": "postgresql+psycopg2://app:s3cr3tPass@db.internal/app",
+      "categories": [
+        "DB_URI"
+      ],
+      "expected_output": "postgresql+psycopg2://<DB_URI_1>@db.internal/app"
+    },
+    {
+      "id": "db-uri-driver-pymysql",
+      "text": "mysql+pymysql://app:s3cr3tPass@db.internal/app",
+      "categories": [
+        "DB_URI"
+      ],
+      "expected_output": "mysql+pymysql://<DB_URI_1>@db.internal/app"
+    },
+    {
+      "id": "db-uri-driver-query-password",
+      "text": "postgresql+psycopg2://db.internal/app?sslmode=require&password=s3cr3tPass",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "postgresql+psycopg2://db.internal/app?sslmode=require&password=<SECRET_1>"
+    },
+    {
+      "id": "db-uri-driver-reference-quiet",
+      "text": "postgresql+asyncpg://${DB_USER}:${DB_PASS}@db.internal/app",
+      "categories": [],
+      "expected_output": "postgresql+asyncpg://${DB_USER}:${DB_PASS}@db.internal/app"
+    },
+    {
+      "id": "db-uri-mariadb",
+      "text": "mariadb://app:s3cr3tPass@db.internal/app",
+      "categories": [
+        "DB_URI"
+      ],
+      "expected_output": "mariadb://<DB_URI_1>@db.internal/app"
+    },
+    {
+      "id": "uri-userinfo-amqp",
+      "text": "amqp://app:s3cr3tPass@rabbit.internal:5672//",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "amqp://<SECRET_1>@rabbit.internal:5672//"
+    },
+    {
+      "id": "uri-userinfo-amqps",
+      "text": "amqps://app:s3cr3tPass@rabbit.internal:5671//",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "amqps://<SECRET_1>@rabbit.internal:5671//"
+    },
+    {
+      "id": "db-uri-clickhouse",
+      "text": "clickhouse://app:s3cr3tPass@ch.internal:9000/app",
+      "categories": [
+        "DB_URI"
+      ],
+      "expected_output": "clickhouse://<DB_URI_1>@ch.internal:9000/app"
+    },
+    {
+      "id": "db-uri-sqlserver",
+      "text": "sqlserver://app:s3cr3tPass@db.internal:1433/app",
+      "categories": [
+        "DB_URI"
+      ],
+      "expected_output": "sqlserver://<DB_URI_1>@db.internal:1433/app"
+    },
+    {
+      "id": "uri-userinfo-smtp",
+      "text": "smtp://app:s3cr3tPass@mail.internal:587",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "smtp://<SECRET_1>@mail.internal:587"
+    },
+    {
+      "id": "uri-userinfo-ssh",
+      "text": "ssh://app:s3cr3tPass@build.internal/srv",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "ssh://<SECRET_1>@build.internal/srv"
+    },
+    {
+      "id": "uri-userinfo-ldap",
+      "text": "ldap://app:s3cr3tPass@ldap.internal/dc=internal",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "ldap://<SECRET_1>@ldap.internal/dc=internal"
+    },
+    {
+      "id": "uri-userinfo-smtp-public-host-not-email",
+      "text": "smtp://mailer:s3cr3tPass@mail.example.com:587",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "smtp://<SECRET_1>@mail.example.com:587"
+    },
+    {
+      "id": "uri-userinfo-reference-password-quiet",
+      "text": "amqp://guest:${AMQP_PASS}@rabbit.internal:5672//",
+      "categories": [],
+      "expected_output": "amqp://guest:${AMQP_PASS}@rabbit.internal:5672//"
+    },
+    {
+      "id": "uri-userinfo-masked-password-quiet",
+      "text": "smtp://mailer:***@mail.internal:587",
+      "categories": [],
+      "expected_output": "smtp://mailer:***@mail.internal:587"
+    },
+    {
+      "id": "uri-userinfo-windows-reference-quiet",
+      "text": "ldap://admin:%LDAP_PASS%@ldap.internal",
+      "categories": [],
+      "expected_output": "ldap://admin:%LDAP_PASS%@ldap.internal",
+      "expected_spans": []
+    },
+    {
+      "id": "uri-userinfo-user-only-quiet",
+      "text": "ssh://git@git.internal/repo.git",
+      "categories": [],
+      "expected_output": "ssh://git@git.internal/repo.git"
+    },
+    {
+      "id": "uri-userinfo-then-email",
+      "text": "smtp://mail.internal:587 from alice@example.com",
+      "categories": [
+        "EMAIL"
+      ],
+      "expected_output": "smtp://mail.internal:587 from <EMAIL_1>"
+    },
+    {
+      "id": "uri-userinfo-diff-removed-amqp",
+      "text": "-amqp://guest:s3cr3tPass@rabbit.internal:5672//",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "-amqp://<SECRET_1>@rabbit.internal:5672//"
+    },
+    {
+      "id": "uri-userinfo-diff-added-amqp",
+      "text": "+amqp://guest:s3cr3tPass@rabbit.internal:5672//",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "+amqp://<SECRET_1>@rabbit.internal:5672//"
+    },
+    {
+      "id": "uri-userinfo-diff-added-smtp-public-host",
+      "text": "+smtp://mailer:s3cr3tPass@mail.example.com:587",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "+smtp://<SECRET_1>@mail.example.com:587"
+    },
+    {
+      "id": "uri-userinfo-encoded-slash",
+      "text": "amqp://app:s3cr%2F3tPass@rabbit.internal:5672//",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "amqp://<SECRET_1>@rabbit.internal:5672//",
+      "expected_spans": [
+        [
+          7,
+          24,
+          "SECRET"
+        ]
+      ]
+    },
+    {
+      "id": "uri-userinfo-encoded-question-mark",
+      "text": "amqp://app:s3cr%3F3tPass@rabbit.internal//",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "amqp://<SECRET_1>@rabbit.internal//",
+      "expected_spans": [
+        [
+          7,
+          24,
+          "SECRET"
+        ]
+      ]
+    },
+    {
+      "id": "uri-userinfo-encoded-hash",
+      "text": "smtp://app:s3cr%233tPass@mail.internal:587",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "smtp://<SECRET_1>@mail.internal:587",
+      "expected_spans": [
+        [
+          7,
+          24,
+          "SECRET"
+        ]
+      ]
+    },
+    {
+      "id": "uri-userinfo-encoded-space",
+      "text": "smtp://app:s3cr%203tPass@mail.internal:587",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "smtp://<SECRET_1>@mail.internal:587",
+      "expected_spans": [
+        [
+          7,
+          24,
+          "SECRET"
+        ]
+      ]
+    },
+    {
+      "id": "url-userinfo-encoded-slash-not-email",
+      "text": "https://app:s3cr%2F3tPass@example.com/path",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "https://<SECRET_1>@example.com/path",
+      "expected_spans": [
+        [
+          8,
+          25,
+          "SECRET"
+        ]
+      ]
+    },
+    {
+      "id": "db-uri-mariadb-encoded-slash",
+      "text": "mariadb://app:s3cr%2F3tPass@db.internal/app",
+      "categories": [
+        "DB_URI"
+      ],
+      "expected_output": "mariadb://<DB_URI_1>@db.internal/app",
+      "expected_spans": [
+        [
+          10,
+          27,
+          "DB_URI"
+        ]
+      ]
+    },
+    {
+      "id": "db-uri-driver-literal-user-reference",
+      "text": "postgresql+asyncpg://app:${DB_PASS}@db.internal/app",
+      "categories": [
+        "DB_URI"
+      ],
+      "expected_output": "postgresql+asyncpg://<DB_URI_1>@db.internal/app"
+    },
+    {
+      "id": "uri-userinfo-encoded-reference-quiet",
+      "text": "amqp://app:%24%7BAMQP_PASS%7D@rabbit.internal//",
+      "categories": [],
+      "expected_output": "amqp://app:%24%7BAMQP_PASS%7D@rabbit.internal//",
+      "expected_spans": []
+    },
+    {
+      "id": "uri-userinfo-image-digest-quiet",
+      "text": "uses: docker://alpine:3.8@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "categories": [],
+      "expected_output": "uses: docker://alpine:3.8@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    },
+    {
       "id": "url-then-email",
       "text": "see https://example.com/docs alice@example.com",
       "categories": [

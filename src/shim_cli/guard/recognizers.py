@@ -1003,10 +1003,21 @@ _PATH_VALUE = re.compile(
 )
 _URL_VALUE = re.compile(r"https?://", re.IGNORECASE)
 _URL_USERINFO = re.compile(r"(?i)\b(?:https?|ftp|wss?)://(?P<userinfo>[^\s/?#'\"<>]+)@")
+# A `+driver` suffix is SQLAlchemy's (`postgresql+asyncpg`) or MongoDB's `+srv`.
 _DB_URI = re.compile(
-    r"(?i)\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis(?:s)?|mssql)://"
-    r"([^\s'\"<>]*)"
+    r"(?i)\b(?:postgres(?:ql)?|mysql|mariadb|mongodb|redis(?:s)?|mssql|sqlserver"
+    r"|clickhouse)(?:\+\w+)?://([^\s'\"<>]*)"
 )
+# A password in the userinfo of a URI of any other scheme (amqp, smtp, ssh...).
+# The scheme is read from where a run of scheme characters starts, so the scan
+# reads each run once: from every `.` inside one, as `\b` would, is quadratic.
+# A diff's `+` or `-` is read as part of the scheme.
+_URI_PASSWORD = re.compile(
+    r"(?i)(?<![a-z0-9+.-])[a-z0-9+.-]+://"
+    r"(?P<userinfo>[^\s/?#'\"<>:]*:(?P<password>[^\s/?#'\"<>]+))@"
+)
+# An image pinned by digest (`docker://alpine:3.8@sha256:...`): no host is that.
+_IMAGE_DIGEST = re.compile(r"(?i)sha(?:256|512):[0-9a-f]{64}")
 _NOT_A_CREDENTIAL = re.compile(r"[….*•:]+|(?:\$\{\w+\}|\{\w*\}|\$\w+|%\w+%|:)+")
 # A key with no value is matched too, so the scan moves past it once: the `?`s
 # inside it start the same failed key, and retrying each was quadratic.
@@ -1209,6 +1220,17 @@ def _not_a_secret(
     )
 
 
+def _userinfos(
+    pattern: re.Pattern[str], text: str, literal: str
+) -> Iterator[re.Match[str]]:
+    """The userinfo ends only at a mark its source writes, so a password's
+    `%2F` does not end it; the `://` before it may be encoded too, as in a
+    URL inside a query. So both are read: `text` and `literal`."""
+    for view in (text,) if literal == text else (text, literal):
+        if "://" in view:
+            yield from pattern.finditer(view)
+
+
 def _scan_secret(text: str, literal: str | None = None) -> list[Match]:
     """`literal` is `text` with NUL for each character its source does not write
     as itself: a value is cut only at a mark the source writes."""
@@ -1222,17 +1244,27 @@ def _scan_secret(text: str, literal: str | None = None) -> list[Match]:
             if start < end:
                 results.append(Match("SECRET", start, end, score))
     results.extend(Match("SECRET", *span, 0.99) for span in _vendor_tokens(text))
-    for match in _URL_USERINFO.finditer(text):
-        if not _NOT_A_CREDENTIAL.fullmatch(match.group("userinfo")):
+    for match in _userinfos(_URL_USERINFO, text, literal):
+        if not _NOT_A_CREDENTIAL.fullmatch(text, *match.span("userinfo")):
             results.append(Match("SECRET", *match.span("userinfo"), 0.99))
+    # A database URI's userinfo is DB_URI's, which can be turned off on its own.
+    databases: set[int] = set()
     for match in _DB_URI.finditer(text):
         start, end = match.span(1)
+        databases.add(start)
         query = text.find("?", start, end)
         if query < 0:
             continue
         for parameter in _QUERY_PARAMETER.finditer(text, query, end):
             if parameter["value"] and _SECRET_NAME.search(parameter["key"]):
                 results.append(Match("SECRET", *parameter.span("value"), 0.97))
+    for match in _userinfos(_URI_PASSWORD, text, literal):
+        if not (
+            match.start("userinfo") in databases
+            or _NOT_A_CREDENTIAL.fullmatch(text, *match.span("password"))
+            or _IMAGE_DIGEST.match(text, match.end())
+        ):
+            results.append(Match("SECRET", *match.span("userinfo"), 0.99))
     for match in _SPACED_ASSIGNMENT.finditer(text):
         quoted = match.group("quoted") is not None
         start, end = match.span("quoted" if quoted else "bare")
@@ -1472,13 +1504,18 @@ def _scan_addresses(text: str) -> list[Match]:
     return results
 
 
-def _scan_email(text: str) -> list[Match]:
+def _scan_email(text: str, literal: str | None = None) -> list[Match]:
     if "@" not in text:
         return _scan_written_at(text)
     found = _scan_addresses(text)
     if "://" not in text:
         return found + _scan_written_at(text)
-    authority = {match.end("userinfo") for match in _URL_USERINFO.finditer(text)}
+    literal = text if literal is None else literal
+    authority = {
+        match.end("userinfo")
+        for pattern in (_URL_USERINFO, _URI_PASSWORD)
+        for match in _userinfos(pattern, text, literal)
+    }
     authority.update(
         text.rfind("@", *match.span(1)) for match in _DB_URI.finditer(text)
     )
@@ -1528,7 +1565,6 @@ def _scan_plate(text: str) -> list[Match]:
 
 
 _RECOGNIZERS: tuple[tuple[str, Callable[[str], list[Match]]], ...] = (
-    ("EMAIL_ADDRESS", _scan_email),
     ("PHONE_NUMBER", _scan_phone),
     (
         "CREDIT_CARD",
@@ -1577,6 +1613,8 @@ def analyze_text(
 ) -> list[Match]:
     requested = frozenset(entities)
     results: list[Match] = []
+    if "EMAIL_ADDRESS" in requested:
+        results.extend(_scan_email(text, literal))
     for entity, scan in _RECOGNIZERS:
         if entity in requested:
             results.extend(scan(text))
