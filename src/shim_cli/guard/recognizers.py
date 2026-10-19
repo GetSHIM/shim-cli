@@ -498,9 +498,14 @@ _PHONE_BREAK = re.compile(
     r"[\n\r!\"$%&'*<>?@\\^_`{|}b-df-hj-mp-ru-wyzB-DF-HJ-MP-RU-WYZ]"
 )
 _PHONE_ROW = 1_000
-# Candidates' outcomes remembered across rows and pieces: a list repeats its
-# numbers, and a candidate costs the walk 60 to 100 us.
-_PHONE_MEMO = 1 << 15
+# What the walk remembers across rows, pieces and calls: a list repeats its
+# numbers, and a candidate costs the walk 60 to 100 us. The memos hold about
+# `_PHONE_MEMO_BYTES` together, an eighth of it for parts' readings, however
+# much text a long-lived process (`shim watch`) reads.
+_PHONE_MEMO_BYTES = 10 << 20
+# Per entry, beyond its key and value: its slot in the memo, which takes 30 to
+# 60 bytes as the table grows, and a margin for older Pythons' objects.
+_PHONE_MEMO_ENTRY = 96
 # What `is_valid_number` asks a national number to match one of.
 _NUMBER_TYPES = (
     "premium_rate",
@@ -514,6 +519,25 @@ _NUMBER_TYPES = (
     "fixed_line",
     "mobile",
 )
+
+
+class _Memo(dict):
+    """A dict emptied once what it holds passes `budget` bytes."""
+
+    def __init__(self, budget: int) -> None:
+        super().__init__()
+        self.budget = budget
+        self.held = 0
+
+    def keep(self, key: str, value: object, size: int) -> None:
+        """Remember `value`, of `size` bytes, under `key`."""
+        size += sys.getsizeof(key) + _PHONE_MEMO_ENTRY
+        if self.held + size > self.budget:
+            # ponytail: emptied when full, not least-recently-used.
+            self.clear()
+            self.held = 0
+        self.held += size
+        self[key] = value
 
 
 class _PhoneRegion:
@@ -635,10 +659,11 @@ def _written_digits(written: str) -> str:
 
 
 # The type unions are compiled on first use: North America's alone takes 8 ms.
-_compiled = functools.cache(re.compile)
+# The nine regions' metadata gives 39 of them.
+_compiled = functools.lru_cache(maxsize=128)(re.compile)
 # A region's metadata is read when a candidate first needs it, as the library
 # reads it: North America's shared code alone is 25 regions' modules.
-_phone_region = functools.cache(_PhoneRegion)
+_phone_region = functools.lru_cache(maxsize=len(_PHONE_REGIONS))(_PhoneRegion)
 
 
 @functools.cache
@@ -647,8 +672,17 @@ def _phone_walk() -> Any:
     from phonenumbers import phonenumbermatcher as library
     from phonenumbers import phonenumberutil as util
 
-    @functools.lru_cache(maxsize=4_096)
+    readings = _Memo(_PHONE_MEMO_BYTES // 8)
+    outcomes = _Memo(_PHONE_MEMO_BYTES - readings.budget)
+
     def reading(candidate: str) -> str:
+        known = readings.get(candidate)
+        if known is None:
+            known = reading_of(candidate)
+            readings.keep(candidate, known, sys.getsizeof(known))
+        return known
+
+    def reading_of(candidate: str) -> str:
         """What decides whether a region's parser accepts `candidate`, with
         the text itself: its digits, after a `+` when no known country follows
         it; "" when no region can, and `_ANY_REGION` when every region reads it
@@ -679,16 +713,6 @@ def _phone_walk() -> Any:
         ):
             return _ANY_REGION
         return "+" + digits
-
-    @functools.lru_cache(maxsize=_PHONE_MEMO)
-    def admitted(candidate: str) -> bool:
-        """Whether any region's metadata admits `candidate` as a number."""
-        how = reading(candidate)
-        return how == _ANY_REGION or any(
-            _phone_region(name).admits(how, candidate) for name in _PHONE_REGIONS
-        )
-
-    outcomes: dict[tuple, tuple[tuple[str, int, int], ...]] = {}
 
     class Walk(library.PhoneNumberMatcher):
         """The nine regions' matchers over one row, walked together.
@@ -741,12 +765,21 @@ def _phone_walk() -> Any:
             with the same regions: a part's verdict looks one character out,
             the time-stamp check three."""
             end = start + len(candidate)
-            key = (
-                candidate,
-                self.text[max(start - 1, 0) : start],
-                self.text[end : end + 3],
-                tuple(names),
-                (start, end) in self.spans,
+            before = self.text[max(start - 1, 0) : start]
+            after = self.text[end : end + 3]
+            # One string, so the memo can size it. Each neighbour's length
+            # goes before it, as it may hold any character; region names and
+            # candidates hold no NUL.
+            key = "".join(
+                (
+                    chr(len(before)),
+                    before,
+                    chr(len(after)),
+                    after,
+                    ",".join(names),
+                    "\0+" if (start, end) in self.spans else "\0-",
+                    candidate,
+                )
             )
             known = outcomes.get(key)
             if known is None:
@@ -756,10 +789,9 @@ def _phone_walk() -> Any:
                     (name, offset - start, offset + len(part) - start)
                     for name, (offset, part) in self.found.items()
                 )
-                if len(outcomes) >= _PHONE_MEMO:
-                    # ponytail: emptied when full, not least-recently-used.
-                    outcomes.clear()
-                outcomes[key] = known
+                outcomes.keep(
+                    key, known, sys.getsizeof(known) + sum(map(sys.getsizeof, known))
+                )
             return known
 
         def _parse_and_verify(self, candidate, offset):
@@ -767,7 +799,7 @@ def _phone_walk() -> Any:
             first = self.waiting is None
             if first:
                 self.whole = part
-            elif part[2] == "" or part == self.whole or not admitted(candidate):
+            elif part[2] == "" or part == self.whole:
                 # No region reads a number in it, or every open region has
                 # read it already, so nothing changes.
                 return None

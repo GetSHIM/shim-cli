@@ -21,10 +21,14 @@ MAX_ATTACHED_BYTES = 1_000_000
 _BINARY_PROBE_BYTES = 8_192
 _START = r"(?:^|(?<=[\s。、？！]))@"
 _QUOTED = re.compile(_START + r'"([^"]+)"')
-_BARE = re.compile(
-    _START
-    + r"(\S+)(?:(?<=[A-Za-z0-9_])(?![A-Za-z0-9_])|(?<![A-Za-z0-9_])(?=[A-Za-z0-9_]))"
-)
+# A bare mention is the client's `@(\S+)` cut back to a word boundary: from
+# the first `@` of a run of non-space characters that starts the run or follows
+# 。、？！, to the run's last ASCII word character. Read per run, as written
+# here, because the regular expression retried every `@` of a run such as
+# `。@。@...` against the rest of the run: 20,000 characters took 4 s.
+_RUN = re.compile(r"\S+")
+_RUN_AT = re.compile(r"(?:^|(?<=[。、？！]))@")
+_TO_LAST_WORD = re.compile(r".*[A-Za-z0-9_]", re.DOTALL)
 _LINES = re.compile(r"([^#]+)(?:#L(\d+)(?:-(\d+))?)?(?:#[^#]*)?")
 
 
@@ -46,11 +50,12 @@ def mentions(prompt: str) -> tuple[str, ...]:
         for match in _QUOTED.finditer(prompt)
         if not match.group(1).endswith(" (agent)")
     ]
-    bare = [
-        match.group(1)
-        for match in _BARE.finditer(prompt)
-        if not match.group(1).startswith('"')
-    ]
+    bare = []
+    for run in map(re.Match.group, _RUN.finditer(prompt)):
+        at = _RUN_AT.search(run)
+        word = at and _TO_LAST_WORD.match(run, at.end())
+        if word and not run.startswith('"', at.end()):
+            bare.append(word.group())
     return tuple(
         dict.fromkeys(
             mention for mention in quoted + bare if ":" not in mention.split("/", 1)[0]
@@ -77,9 +82,16 @@ def attached(prompt: str, cwd: object) -> Iterator[tuple[str, str | None]]:
         return
     budget = MAX_ATTACHED_BYTES
     files = 0
+    seen = set()
     for mention in mentions(prompt):
         found = _LINES.fullmatch(mention)
         name = found.group(1) if found else mention
+        # A file and its lines are attached once however they are written;
+        # past the count limit nothing is inspected, so only the file counts.
+        lines = found.group(2, 3) if found and files < MAX_ATTACHMENTS else ()
+        if (name, lines) in seen:
+            continue
+        seen.add((name, lines))
         content = _read(str(Path(cwd, os.path.expanduser(name))), MAX_ATTACHMENT_BYTES)
         if (
             content is None

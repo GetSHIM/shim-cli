@@ -831,7 +831,12 @@ there is seen.
 
 The proxy sees the whole wire body — the system prompt, the tools array, the
 full message history and every file the client inlined for an `@` reference.
-None of it is kept.
+None of it is written to disk. One part of it stays in memory past its request:
+the detector remembers the phone-number-shaped text it has read, runs of digits
+and the punctuation between them with up to four characters around each, and
+its verdict on them, so a list repeated on every request is read once. That
+memory is capped at about 10 MiB, emptied when full, and dropped when
+`shim watch` exits.
 
 Every text field, object key and number of that body is offered to the
 detector: message content in either form, the text inside a tool result, the
