@@ -258,8 +258,37 @@ NARROWED_SPANS = {
 }
 
 
+LINE_BREAKS = (
+    "A key masked over several lines keeps their line breaks after its "
+    "placeholder, so every line after it keeps its number: a Read result's "
+    "line numbers and an edit by line still point at the right line."
+)
+
+# The frozen findings, with the placeholder followed by the line breaks of the
+# span it replaced. The text differs from the frozen text by those alone.
+KEPT_LINE_BREAKS = {
+    "secret-pem-complete": (LINE_BREAKS, "<SECRET_1>\n\n"),
+    "secret-pem-unterminated": (LINE_BREAKS, "<SECRET_1>\n\n"),
+    "secret-pem-openssh": (LINE_BREAKS, "<SECRET_1>\n\n"),
+}
+
+
+def test_kept_line_breaks_change_nothing_but_line_breaks() -> None:
+    by_id = {case["id"]: case for case in _CASES}
+    for identifier, (_reason, redacted) in KEPT_LINE_BREAKS.items():
+        case = by_id[identifier]
+        assert redacted != case["redacted"], identifier
+        assert redacted.replace("\n", "") == case["redacted"], identifier
+        assert redacted.count("\n") == case["text"].count("\n"), identifier
+
+
 def test_every_divergence_is_still_a_real_case() -> None:
-    tables = (set(DELIBERATE_DIVERGENCES), set(NARROWED_SPANS), set(TIGHTENED))
+    tables = (
+        set(DELIBERATE_DIVERGENCES),
+        set(NARROWED_SPANS),
+        set(TIGHTENED),
+        set(KEPT_LINE_BREAKS),
+    )
     assert set().union(*tables) <= {case["id"] for case in _CASES}
     assert sum(map(len, tables)) == len(set().union(*tables))
 
@@ -375,6 +404,11 @@ def test_detection_is_unchanged(case: dict) -> None:
         reason, expected = DELIBERATE_DIVERGENCES[case["id"]]
         assert actual == expected, f"{case['id']} diverges on purpose: {reason}"
         assert decision.redacted_text == case["text"]
+        return
+    if case["id"] in KEPT_LINE_BREAKS:
+        reason, redacted = KEPT_LINE_BREAKS[case["id"]]
+        assert actual == case["findings"], case["id"]
+        assert decision.redacted_text == redacted, f"{case['id']}: {reason}"
         return
     assert actual == case["findings"], (
         f"findings changed for {case['id']!r}\n"

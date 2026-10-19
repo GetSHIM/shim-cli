@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from dataclasses import replace as evolve
+from html import unescape
+from itertools import islice
 from typing import Any, Literal
+
+from shim_cli.guard.entities import PLACEHOLDER
+from shim_cli.guard.evaluate import line_breaks
+from shim_cli.guard.models import Finding
 
 # Matches the hook's own MAX_INPUT_BYTES: anything that got past that refusal
 # is worth scanning. Below this, a single large `Read` result was skipped here
@@ -125,35 +132,143 @@ def past_deadline(error: BaseException) -> bool:
     return isinstance(error, TimeoutError) or isinstance(error.__cause__, TimeoutError)
 
 
-def _shrink(masked: str, decision, transforms: tuple, shrink, evaluate) -> tuple:
-    """`masked` shrunk, and `decision` widened by what the shrinking revealed.
+def _shrink(
+    text: str, decision, transforms: tuple, shrink, evaluate, numbering
+) -> tuple:
+    """What the model will read of `text`, the transforms that made it, and
+    what was found in it. Raises only past the deadline.
 
-    Converting a page decodes entities and closes up text split across tags,
-    so the text the model will read can hold a value the first pass could not
-    see. It is scanned again, and left unconverted if that scan fails.
-    Raises only past the deadline.
+    A page is converted first and scanned as the model will read it. If that
+    cannot be done, the markup is masked and handed on unconverted.
     """
-    # ponytail: the second scan numbers its placeholders from 1 again, so
-    # `<EMAIL_1>` can name two values on one page; offset them if that misleads.
-    shrunk, names = shrink(masked, transforms)
-    if "html" not in names:
-        return shrunk, names, decision
+    if "html" in transforms and not decision.partial:
+        page = _page(text, decision, shrink, evaluate, numbering)
+        if page is not None:
+            return page
+    kept = tuple(name for name in transforms if name != "html")
+    shrunk, names = shrink(_masked(text, decision), kept)
+    return shrunk, names, decision
+
+
+# Conversion keeps private-use characters as text. Three the page holds
+# neither as written nor through an entity, put around each value found in
+# the markup with its index, show where it lands on the page.
+_PRIVATE_USE = range(0xE000, 0xF900)
+
+
+def _marks(text: str) -> tuple | None:
+    held = set(text) | set(unescape(text))
+    free = (chr(code) for code in _PRIVATE_USE if chr(code) not in held)
+    marks = tuple(islice(free, 3))
+    return marks if len(marks) == 3 else None
+
+
+def _page(text: str, found, shrink, evaluate, numbering: dict) -> tuple | None:
+    """The page `text` converts to, masked, or None if it must be masked as
+    markup. Raises past the deadline.
+
+    The page is scanned as the model will read it: entities decode, and a
+    value cut in two by tags is read whole. Conversion also joins a value to
+    the text beside it, where no recognizer finds it, so a value `found` in
+    the markup is masked where it lands too, with the placeholder it was
+    given there. One that runs across tags has no one place on the page: it
+    is masked in the markup, and lands as its placeholder.
+    """
+    pieces, landed, cursor = [], [], 0
+    given = _placeholders(text, found)
+    marks = _marks(text) if found.findings else ("", "", "")
+    if given is None or marks is None:
+        return None
+    opening, split, closing = marks
+    for index, finding in enumerate(found.findings):
+        value = text[finding.start : finding.end]
+        after = ""
+        if "<" in value or ">" in value:
+            value, after = given[index], line_breaks(value)
+        pieces += (
+            text[cursor : finding.start],
+            f"{opening}{index}{split}{value}{closing}{after}",
+        )
+        cursor = finding.end
+    marked, names = shrink("".join(pieces) + text[cursor:], ("html",))
+    if not names:
+        return None
+    page = marked
+    if found.findings:
+        parts, length, cursor = [], 0, 0
+        for match in re.finditer(
+            f"{opening}([0-9]+){split}([^{opening}{split}{closing}]*){closing}", marked
+        ):
+            before = marked[cursor : match.start()]
+            start = length + len(before)
+            length = start + len(match.group(2))
+            parts += (before, match.group(2))
+            landed.append((int(match.group(1)), start, length))
+            cursor = match.end()
+        page = "".join(parts) + marked[cursor:]
+        if any(mark in page for mark in marks):
+            return None  # a mark without its pair
     try:
-        again = evaluate(shrunk)
+        read = evaluate(page, numbering=numbering)
     except (ValueError, TimeoutError) as error:
         if past_deadline(error):
             raise
-        return masked, (), decision
-    if again.partial:
-        return masked, (), decision
-    if not again.findings:
-        return shrunk, names, decision
-    widened = evolve(
-        decision,
-        findings=decision.findings + again.findings,
-        redacted_text=again.redacted_text,
+        return None
+    if read.partial:
+        return None
+    covered = bytearray(len(page))
+    for finding in read.findings:
+        covered[finding.start : finding.end] = b"\x01" * (finding.end - finding.start)
+    joined = [
+        (index, start, end) for index, start, end in landed if 0 in covered[start:end]
+    ]
+    if not joined:
+        return _masked(page, read), names, read
+    shown = _placeholders(page, read)
+    if shown is None:
+        return None
+    regions = sorted(
+        [
+            (item.start, item.end, item, shown[at])
+            for at, item in enumerate(read.findings)
+        ]
+        + [(start, end, found.findings[at], given[at]) for at, start, end in joined],
+        key=lambda region: (region[0], -region[1]),
     )
-    return again.redacted_text, names, widened
+    # Overlapping values are masked as one, named by the first.
+    merged: list = []
+    for region in regions:
+        if merged and region[0] < merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], region[1]), *merged[-1][2:])
+        else:
+            merged.append(region)
+    pieces, findings, cursor = [], [], 0
+    for start, end, item, placeholder in merged:
+        pieces += (page[cursor:start], placeholder, line_breaks(page[start:end]))
+        findings.append(Finding(item.entity_type, start, end, item.score, item.label))
+        cursor = end
+    pieces.append(page[cursor:])
+    masked = "".join(pieces)
+    return masked, names, evolve(read, findings=tuple(findings), redacted_text=masked)
+
+
+def _placeholders(text: str, decision) -> list | None:
+    """The placeholder `decision` wrote for each of its findings, in order,
+    or None if it wrote them otherwise: each replaced its value, followed by
+    the value's line breaks."""
+    written, shift = [], 0
+    for finding in decision.findings:
+        match = PLACEHOLDER.match(decision.redacted_text, finding.start + shift)
+        if match is None:
+            return None
+        written.append(match.group())
+        span = text[finding.start : finding.end]
+        shift += len(match.group()) + len(line_breaks(span)) - len(span)
+    return written
+
+
+def _masked(text: str, decision) -> str:
+    return decision.redacted_text if decision.findings else text
 
 
 @dataclass(frozen=True)
@@ -171,10 +286,12 @@ class Inspection:
 
 def inspect(
     value: Any,
-    evaluate: Callable[[str], Any],
+    evaluate: Callable[..., Any],
     transforms: tuple = (),
     scan_markers: bool = False,
 ) -> Inspection:
+    """`value` is one event. `evaluate(text, numbering=...)` is the detector,
+    given one `numbering` for every field of it."""
     found = walk(value, partial=True)
     transform_order = ()
     apply_diet = None
@@ -196,9 +313,12 @@ def inspect(
     markers: set = set()
     inspected = 0
     bare_numbers = 0
+    # One numbering for the whole event, so a value keeps its placeholder in
+    # every field. Held here only: it maps values to numbers.
+    numbering: dict = {}
     for index, (path, text) in enumerate(found.leaves):
         try:
-            decision = evaluate(text)
+            decision = evaluate(text, numbering=numbering)
         except (ValueError, TimeoutError) as error:
             # Do not consume the hook deadline and continue.
             if past_deadline(error):
@@ -219,7 +339,7 @@ def inspect(
         if apply_diet is not None:
             try:
                 current, names, decision = _shrink(
-                    current, decision, transforms, apply_diet, evaluate
+                    text, decision, transforms, apply_diet, evaluate, numbering
                 )
                 applied.update(names)
             except (ValueError, TimeoutError):
@@ -254,6 +374,6 @@ def inspect(
     )
 
 
-def mask(value: Any, evaluate: Callable[[str], Any]) -> tuple:
+def mask(value: Any, evaluate: Callable[..., Any]) -> tuple:
     result = inspect(value, evaluate)
     return result.value, result.findings, result.changed

@@ -464,10 +464,10 @@ could pass. It has been superseded by:
 | `guard-tools-v1.json` | 24 | Exact output at 25 scanned paths in captured tool payloads, per event and policy direction. From 1.2.2 each case runs through the whole hook with no settings file; the `PostToolBatch` cases, an event shim does not install, are graded as no output, and their detector redaction is kept as `expected_redaction`. |
 | `parity-v1.json` | 475 | Exact findings, spans, scores, and redacted output from the previous Presidio implementation. |
 | `custom-v1.json` | 10 | Exact output with your own patterns, including where they overlap a built-in type. |
-| `reveal-v1.json` | 8 | Exact output with the last digits kept by `[reveal]`. |
+| `reveal-v1.json` | 11 | Exact output with the last digits kept by `[reveal]`. |
 | `gateway-detection-v1.json` | 140 | The gateway's own case file, copied byte for byte; see [Gateway parity](#gateway-parity). |
 
-Of the 475 parity cases, 408 remain byte-identical. Eight are deliberately
+Of the 475 parity cases, 405 remain byte-identical. Eight are deliberately
 left unmasked: `0.0.0.0` and `::1`, which identify no person or remote host and
 whose masking erased a meaningful bind-address distinction; five bare ids the
 phone recognizer used to claim; and a connection string with no credentials in
@@ -475,11 +475,13 @@ it. Thirty-seven still mask, over fewer characters: thirty-six connection
 strings lose only their user and password, and one address no longer runs into
 a query string. Twenty-two mask more than they did, ported from the gateway:
 twenty lowercase IBANs with a valid checksum, and two spaced IBANs that read
-as one IBAN instead of a card over their middle digits. All of them live in
-`DELIBERATE_DIVERGENCES`, `NARROWED_SPANS` or `TIGHTENED` with reasons and
-tightly pinned new output; a tightened case must cover every span the frozen
-build masked. The parity corpus is generated migration evidence and must never
-be regenerated to make a test pass.
+as one IBAN instead of a card over their middle digits. Three private keys
+mask the same span and keep its line breaks after the placeholder, so every
+line after the key keeps its number. All of them live in
+`DELIBERATE_DIVERGENCES`, `NARROWED_SPANS`, `TIGHTENED` or `KEPT_LINE_BREAKS`
+with reasons and tightly pinned new output; a tightened case must cover every
+span the frozen build masked. The parity corpus is generated migration
+evidence and must never be regenerated to make a test pass.
 
 The fixture-bound metrics report 100% synthetic precision, recall, and exact
 output. That is deterministic contract evidence, not a real-world statistical

@@ -39,7 +39,7 @@
         { "name": "CODENAME", "literal": "atlas", "whole_word": false }
       ],
       "text": "atlas and atlases",
-      "expected_output": "<CUSTOM_1> and <CUSTOM_2>es",
+      "expected_output": "<CUSTOM_1> and <CUSTOM_1>es",
       "expected_custom": { "CODENAME": 2 }
     },
     {

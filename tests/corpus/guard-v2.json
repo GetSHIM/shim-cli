@@ -520,7 +520,7 @@
       "categories": [
         "SECRET"
       ],
-      "expected_output": "<SECRET_1>"
+      "expected_output": "<SECRET_1>\n\n"
     },
     {
       "id": "db-uri-positive",
@@ -1647,7 +1647,7 @@
       "categories": [
         "IBAN"
       ],
-      "expected_output": "IBAN <IBAN_1>"
+      "expected_output": "IBAN <IBAN_1>\n"
     },
     {
       "id": "iban-next-line-not-pulled-in",

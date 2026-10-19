@@ -5,14 +5,50 @@ from collections.abc import Iterable, Iterator
 from .analyze import _resolve_overlaps, analyze_counting
 from .entities import DEFAULT_ENTITIES
 from .models import Finding, GuardDecision
-from .normalize import MAX_SOURCE_CHARACTERS, InputTooLarge
+from .normalize import MAX_SOURCE_CHARACTERS, InputTooLarge, normalize
 
 _OVERLAP = 4_096
+_ASCII_DIGITS = frozenset("0123456789")
+# Types whose value is the same however it is spaced, punctuated or cased, so
+# one account printed two ways keeps one number.
+_LAYOUT_FREE = frozenset(
+    (
+        "IBAN",
+        "CREDIT_CARD",
+        "PHONE",
+        "US_SSN",
+        "TR_NATIONAL_ID",
+        "TR_VKN",
+        "MAC_ADDRESS",
+        "TR_LICENSE_PLATE",
+    )
+)
 
 
-def _tail(span: str, digits: int) -> str:
-    """The last few digits, ignoring the separators the value was printed with."""
-    return "".join(character for character in span if character.isdigit())[-digits:]
+def line_breaks(span: str) -> str:
+    """The line breaks a placeholder keeps after it, so every line after a
+    masked key or wrapped block keeps its number."""
+    return "".join(character for character in span if character in "\r\n")
+
+
+def _value(span: str) -> str:
+    """The value as the detector read it: decoded, and in NFKC form."""
+    try:
+        return normalize(span).text
+    except InputTooLarge:  # longer than one analysis reads: as written
+        return span
+
+
+def _key(entity_type: str, value: str) -> str:
+    if entity_type in _LAYOUT_FREE:
+        return "".join(character for character in value if character.isalnum()).upper()
+    return value
+
+
+def _tail(value: str, digits: int) -> str:
+    """The last few digits of a decoded value, in ASCII, so a `%20` adds none."""
+    found = [character for character in value if character in _ASCII_DIGITS]
+    return "".join(found[-digits:])
 
 
 def _pieces(text: str, size: int = MAX_SOURCE_CHARACTERS) -> Iterator[tuple[int, str]]:
@@ -81,6 +117,9 @@ def _findings_in_pieces(
                 end=finding.end + offset,
                 score=finding.score,
                 label=finding.label,
+                value=None
+                if finding.value is None
+                else (finding.value[0] + offset, finding.value[1] + offset),
             )
             for finding in findings
         )
@@ -92,7 +131,15 @@ def evaluate(
     enabled_entities: Iterable[str] = DEFAULT_ENTITIES,
     custom: tuple = (),
     reveal: dict | None = None,
+    numbering: dict | None = None,
 ) -> GuardDecision:
+    """`text` with each value found replaced by a numbered placeholder.
+
+    A value keeps one number and two values never share one. `numbering`
+    holds the numbers given so far, by type and then value: pass one dict to
+    every call for one event, and the numbers run across all its fields. It
+    is never written anywhere.
+    """
     entities = tuple(enabled_entities)
     partial = False
     if len(text) > MAX_SOURCE_CHARACTERS:
@@ -107,16 +154,26 @@ def evaluate(
     if not findings:
         return GuardDecision((), text, partial, bare_numbers)
 
-    counts: dict[str, int] = {}
+    numbers = {} if numbering is None else numbering
     pieces: list[str] = []
     cursor = 0
     for finding in findings:
-        counts[finding.entity_type] = counts.get(finding.entity_type, 0) + 1
-        marker = f"{finding.entity_type}_{counts[finding.entity_type]}"
+        span = text[finding.start : finding.end]
+        value = _value(span)
+        given = numbers.setdefault(finding.entity_type, {})
+        number = given.setdefault(_key(finding.entity_type, value), len(given) + 1)
+        marker = f"{finding.entity_type}_{number}"
         digits = (reveal or {}).get(finding.entity_type, 0)
-        tail = _tail(text[finding.start : finding.end], digits) if digits else ""
+        tail = ""
+        if digits:
+            # Read from the value alone, never from a neighbour masked with it.
+            own = finding.value
+            tail = _tail(
+                value if own is None else _value(text[own[0] : own[1]]), digits
+            )
         pieces.append(text[cursor : finding.start])
         pieces.append(f"<{marker}:{tail}>" if tail else f"<{marker}>")
+        pieces.append(line_breaks(span))
         cursor = finding.end
     pieces.append(text[cursor:])
     return GuardDecision(findings, "".join(pieces), partial, bare_numbers)

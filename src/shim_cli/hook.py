@@ -769,10 +769,10 @@ def _tool_output(
     if ends is None:
         ends = time.perf_counter() + HOOK_DEADLINE_SECONDS
 
-    def scan(text: str, entities: tuple = DEFAULT_ENTITIES):
+    def scan(text: str, entities: tuple = DEFAULT_ENTITIES, numbering=None):
         if time.perf_counter() > ends:
             raise TimeoutError("shim hook deadline exceeded")
-        return evaluate(text, entities, policy.custom, policy.reveal)
+        return evaluate(text, entities, policy.custom, policy.reveal, numbering)
 
     def mode_for(direction: str, tool: str) -> str:
         mode = policy.mode_for(direction, tool, event)

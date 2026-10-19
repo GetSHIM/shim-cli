@@ -1088,7 +1088,10 @@ def test_a_secret_sent_as_base64_is_masked_as_a_whole(width: int) -> None:
 
     decision = evaluate(f"$ base64 .env\n{encoded}\n")
 
-    assert decision.redacted_text == "$ base64 .env\n<SECRET_1>\n"
+    # One placeholder, then the line breaks of the lines it was wrapped over.
+    assert decision.redacted_text == (
+        "$ base64 .env\n<SECRET_1>" + "\n" * encoded.count("\n") + "\n"
+    )
 
 
 @pytest.mark.parametrize(
@@ -1096,11 +1099,11 @@ def test_a_secret_sent_as_base64_is_masked_as_a_whole(width: int) -> None:
     (
         (
             f"data:\n  .env: |\n    {_wrapped(STRADDLING, 76, chr(10) + '    ')}\n",
-            "data:\n  .env: |\n    <SECRET_1>\n",
+            "data:\n  .env: |\n    <SECRET_1>\n\n",
         ),
-        (f"{_wrapped(STRADDLING, 76, '   ' + chr(10))}   \n", "<SECRET_1>   \n"),
-        (f"{_wrapped(STRADDLING, 76, chr(13) + chr(10))}\r\n", "<SECRET_1>\r\n"),
-        (f"{_wrapped(STRADDLING, 76, chr(13))}\r", "<SECRET_1>\r"),
+        (f"{_wrapped(STRADDLING, 76, '   ' + chr(10))}   \n", "<SECRET_1>\n   \n"),
+        (f"{_wrapped(STRADDLING, 76, chr(13) + chr(10))}\r\n", "<SECRET_1>\r\n\r\n"),
+        (f"{_wrapped(STRADDLING, 76, chr(13))}\r", "<SECRET_1>\r\r"),
         (
             '{"content": "' + _wrapped(STRADDLING, 60, "\\n") + '\\n"}',
             '{"content": "<SECRET_1>\\n"}',
@@ -1112,33 +1115,33 @@ def test_a_secret_sent_as_base64_is_masked_as_a_whole(width: int) -> None:
         (
             f"helm/values.yaml:5:    {STRADDLING[:76]}\n"
             f"helm/values.yaml:6:    {STRADDLING[76:]}\n",
-            "helm/values.yaml:5:    <SECRET_1>\n",
+            "helm/values.yaml:5:    <SECRET_1>\n\n",
         ),
         (
             f"     5\t    {STRADDLING[:76]}\n     6\t    {STRADDLING[76:]}\n",
-            "     5\t    <SECRET_1>\n",
+            "     5\t    <SECRET_1>\n\n",
         ),
         (
             f"2:envFile: |\n3-    {STRADDLING[:76]}\n4-    {STRADDLING[76:]}\n5-x: 1\n",
-            "2:envFile: |\n3-    <SECRET_1>\n5-x: 1\n",
+            "2:envFile: |\n3-    <SECRET_1>\n\n5-x: 1\n",
         ),
         (
             f"helm/values.yaml-3-    {STRADDLING[:76]}\n"
             f"helm/values.yaml-4-    {STRADDLING[76:]}\n",
-            "helm/values.yaml-3-    <SECRET_1>\n",
+            "helm/values.yaml-3-    <SECRET_1>\n\n",
         ),
         (
             f"My Project/values.yaml:3:    {STRADDLING[:76]}\n"
             f"My Project/values.yaml:4:    {STRADDLING[76:]}\n",
-            "My Project/values.yaml:3:    <SECRET_1>\n",
+            "My Project/values.yaml:3:    <SECRET_1>\n\n",
         ),
         (f"@@ -0,0 +1 @@\n+{STRADDLING}\n", "@@ -0,0 +1 @@\n+<SECRET_1>\n"),
-        (f"+{STRADDLING[:76]}\n+{STRADDLING[76:]}\n", "+<SECRET_1>\n"),
+        (f"+{STRADDLING[:76]}\n+{STRADDLING[76:]}\n", "+<SECRET_1>\n\n"),
         (
             f"+  envFile: |\n+    {STRADDLING[:76]}\n+    {STRADDLING[76:]}\n",
-            "+  envFile: |\n+    <SECRET_1>\n",
+            "+  envFile: |\n+    <SECRET_1>\n\n",
         ),
-        (f"-    {STRADDLING[:76]}\n-    {STRADDLING[76:]}\n", "-    <SECRET_1>\n"),
+        (f"-    {STRADDLING[:76]}\n-    {STRADDLING[76:]}\n", "-    <SECRET_1>\n\n"),
         ('{"row": "id\\t' + STRADDLING + '"}', '{"row": "id\\t<SECRET_1>"}'),
         (
             '{"content": "' + _wrapped(STRADDLING, 76, "\\r\\n") + '\\r\\n"}',
@@ -1182,7 +1185,15 @@ def test_a_secret_sent_as_base64_is_masked_as_a_whole(width: int) -> None:
 def test_a_secret_split_across_wrapped_lines_is_masked(
     text: str, expected: str
 ) -> None:
-    assert evaluate(text).redacted_text == expected
+    redacted = evaluate(text).redacted_text
+
+    assert redacted == expected
+    # The placeholder is followed by the line breaks it covered, so every line
+    # after it keeps its number.
+    assert (redacted.count("\n"), redacted.count("\r")) == (
+        text.count("\n"),
+        text.count("\r"),
+    )
 
 
 @pytest.mark.parametrize(

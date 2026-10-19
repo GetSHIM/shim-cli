@@ -50,6 +50,24 @@
       "reveal": {},
       "text": "pay TR330006100519786457841326 now",
       "expected_output": "pay <IBAN_1> now"
+    },
+    {
+      "id": "reveal-reads-a-percent-encoded-value-decoded",
+      "reveal": { "IBAN": 4 },
+      "text": "https://bank.example/move?from=TR33%200006%201005%201978%206457%208413%2026&to=GB29%20NWBK%206016%201331%209268%2019",
+      "expected_output": "https://bank.example/move?from=<IBAN_1:1326>&to=<IBAN_2:6819>"
+    },
+    {
+      "id": "reveal-writes-fullwidth-digits-as-ascii",
+      "reveal": { "IBAN": 4 },
+      "text": "pay TR３３ ０００６ １００５ １９７８ ６４５７ ８４１３ ２６ now",
+      "expected_output": "pay <IBAN_1:1326> now"
+    },
+    {
+      "id": "reveal-reads-the-value-not-the-neighbour-united-with-it",
+      "reveal": { "CREDIT_CARD": 4 },
+      "text": "ids 4242424249 0532 010 1234 on file",
+      "expected_output": "ids <CREDIT_CARD_1:0532> on file"
     }
   ]
 }

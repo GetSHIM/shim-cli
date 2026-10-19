@@ -739,10 +739,10 @@ def test_a_per_tool_entity_scope_narrows_only_that_tool() -> None:
 BAD = "a field the detector cannot analyse"
 
 
-def _failing_on_bad(text, *args):
+def _failing_on_bad(text, *args, **kwargs):
     if text == BAD:
         raise ValueError("Guard analysis failed safely.")
-    return evaluate(text, *args)
+    return evaluate(text, *args, **kwargs)
 
 
 def _uninspectable(raw: bytes, mode: str):
@@ -823,7 +823,7 @@ def test_a_failed_piece_leaves_nothing_partly_masked_to_emit() -> None:
     from shim_cli.events.payload import inspect
     from shim_cli.guard.models import Finding, GuardDecision
 
-    def evaluate(text: str) -> GuardDecision:
+    def evaluate(text: str, **_numbering) -> GuardDecision:
         found = (Finding("SECRET", 2, 8, 0.9, ""),)
         return GuardDecision(found, text.replace("secret", "<SECRET_1>"), True, 0)
 
@@ -1077,8 +1077,8 @@ def test_an_observed_page_is_never_converted() -> None:
 def test_a_value_the_markup_hid_is_masked_once_the_page_is_text(
     hidden: str, entity: str
 ) -> None:
-    # Entities decode and tags close up only in conversion, so the first pass
-    # cannot see these; the text the model will read is scanned again.
+    # Entities decode and tags close up only in conversion, so only a scan of
+    # the text the model will read finds these.
     page = PAGE.replace("Contact ops@example.com", f"Contact {hidden}")
 
     outcome = _process(_fetched_page(page), ENFORCE, diet=("json", "html"))
@@ -1092,11 +1092,11 @@ def test_a_value_the_markup_hid_is_masked_once_the_page_is_text(
     assert outcome.record.transforms == ("html",)
 
 
-def test_a_page_whose_text_cannot_be_scanned_again_is_not_converted() -> None:
-    def fails_on_text(text, *args):
+def test_a_page_whose_text_cannot_be_scanned_is_not_converted() -> None:
+    def fails_on_text(text, *args, **kwargs):
         if text.startswith(HEADER):
             raise ValueError("Guard analysis failed safely.")
-        return evaluate(text, *args)
+        return evaluate(text, *args, **kwargs)
 
     outcome = process(
         TOOL_EVENTS["PostToolUse"],

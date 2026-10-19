@@ -335,8 +335,8 @@ def process(
         scoped = entities_for(tool, entry.event)
         original = evaluate
 
-        def evaluate(text, _entities=scoped):
-            return original(text, _entities)
+        def evaluate(text, numbering=None, _entities=scoped):
+            return original(text, _entities, numbering=numbering)
 
     body = event.payload
     in_bytes = _size(body) if body else 0

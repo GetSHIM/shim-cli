@@ -72,14 +72,15 @@ def test_mask_returns_the_original_object_when_nothing_is_found() -> None:
     assert (findings, changed) == ([], False)
 
 
-def test_ordinals_restart_for_each_leaf() -> None:
+def test_ordinals_run_on_across_the_leaves_of_one_event() -> None:
+    # They restarted for each leaf, so two addresses were both <EMAIL_1>.
     document = {
         "first": "Contact alice@example.com",
         "second": "Contact bob@example.org",
     }
     result, _findings, _changed = mask(document, evaluate)
 
-    assert result == {"first": "Contact <EMAIL_1>", "second": "Contact <EMAIL_1>"}
+    assert result == {"first": "Contact <EMAIL_1>", "second": "Contact <EMAIL_2>"}
 
 
 def test_deep_nesting_is_refused_rather_than_partially_scanned() -> None:
@@ -152,11 +153,11 @@ def test_a_real_read_result_is_masked_in_place() -> None:
 def test_inspection_stops_at_the_deadline_and_hands_back_nothing_to_emit():
     seen = []
 
-    def deadline(text):
+    def deadline(text, **kwargs):
         seen.append(text)
         if text == "timeout":
             raise ValueError("analysis limit") from TimeoutError("hook deadline")
-        return evaluate(text)
+        return evaluate(text, **kwargs)
 
     result = payload.inspect(["alice@example.com", "timeout", "never scan"], deadline)
     assert seen == ["alice@example.com", "timeout"]
