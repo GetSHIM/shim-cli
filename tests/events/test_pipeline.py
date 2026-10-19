@@ -391,8 +391,7 @@ def test_a_target_always_uses_the_full_entity_scope() -> None:
         entities_for=lambda tool, event: ("SECRET",),
     )
 
-    assert "<EMAIL_1>" in outcome.record.target
-    assert outcome.record.target.endswith("/notes.txt")
+    assert outcome.record.target == "/work/<EMAIL_1>/notes.txt"
     assert address not in repr(outcome.record)
     assert address not in json.dumps(outcome.record.as_dict())
 

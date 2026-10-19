@@ -1249,6 +1249,36 @@
       "expected_output": "mailto:<EMAIL_1>"
     },
     {
+      "id": "email-in-file-path",
+      "text": "/work/x@example.com/notes.txt",
+      "categories": [
+        "EMAIL"
+      ],
+      "expected_output": "/work/<EMAIL_1>/notes.txt"
+    },
+    {
+      "id": "email-in-url-path",
+      "text": "GET https://api.example.com/v1/users/jane.doe@example.com",
+      "categories": [
+        "EMAIL"
+      ],
+      "expected_output": "GET https://api.example.com/v1/users/<EMAIL_1>"
+    },
+    {
+      "id": "email-after-url-fragment",
+      "text": "https://example.com/page#jane.doe@example.com",
+      "categories": [
+        "EMAIL"
+      ],
+      "expected_output": "https://example.com/page#<EMAIL_1>"
+    },
+    {
+      "id": "email-git-remote-negative",
+      "text": "git clone git@github.com:org/repo.git",
+      "categories": [],
+      "expected_output": "git clone git@github.com:org/repo.git"
+    },
+    {
       "id": "db-uri-placeholder-userinfo-quiet",
       "text": "postgresql://…@db-prod.kasa.internal:5432/kasa",
       "categories": [],

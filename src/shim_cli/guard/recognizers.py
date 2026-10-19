@@ -162,13 +162,21 @@ def _trim_trailing_prose(text: str, start: int, end: int) -> int:
 # the variable name too — so a `.env` came back with `AWS_ACCESS_KEY_ID=<SECRET_1>`
 # on one line and a bare `<EMAIL_1>` on the next. The cost is that a genuine
 # address with `=` before the `@` is missed.
-_LOCAL = r"!#$%&'*+\-/?^_`{|}~\w"
+# Nor `/`, `?`, `#` or `&`: they separate path segments and query fields, so
+# `https://host/u/jane@x.com` or `/work/jane@x.com/notes.txt` lost its host and
+# folders to the placeholder. An address starts after the last of them.
+_LOCAL = r"!$%'*+\-^_`{|}~\w"
 # The run of local-part characters before each `@`, read once. The ported
 # pattern tried every word start in the run, so `a.` repeated before an `@`
 # was quadratic: 9 s at 40 KB.
 _LOCAL_RUN = re.compile(rf"(?<![{_LOCAL}.])[{_LOCAL}.]+(?=@)")
 _LOCAL_START = re.compile(rf"\b[{_LOCAL}]")
 _DOMAIN = re.compile(r"\w+(?:-+\w+)*(?:\.\w+(?:-+\w+)*)+\b")
+# `git@github.com:org/repo.git`: a git remote, not an address. Only a path that
+# ends in `.git` counts, because `jane@x.com:Pa55/w0rd` combo lines, ports
+# (`:8080/api`) and scp targets (`deploy@x.com:/var/www/`) look the same up to
+# there; those stay masked.
+_GIT_REMOTE = re.compile(r":[\w.~-]*/[\w.~/-]*")
 
 
 def _validate_email(text: str) -> bool:
@@ -1255,7 +1263,7 @@ def _scan_basic_auth(text: str) -> list[Match]:
 
 
 _WRITTEN_AT = re.compile(r"\[ *at *\]|\( *at *\)", re.IGNORECASE)
-_LOCAL_PART = re.compile(r"\w[\w.!#$%&'*+/?^`{|}~-]{0,63}\Z")
+_LOCAL_PART = re.compile(rf"\w[{_LOCAL}.]{{0,63}}\Z")
 _WRITTEN_DOMAIN = re.compile(r"[\w-]+(?:\.[\w-]+)+\b")
 
 
@@ -1287,6 +1295,9 @@ def _scan_addresses(text: str) -> list[Match]:
         if start is None or text[at - 1] == "." or domain is None:
             continue
         end = domain.end()
+        remote = _GIT_REMOTE.match(text, end)
+        if remote and remote[0].endswith(".git"):
+            continue
         if _validate_email(text[start.start() : end]):
             results.append(Match("EMAIL_ADDRESS", start.start(), end, 1.0))
     return results
