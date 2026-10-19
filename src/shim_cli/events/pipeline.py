@@ -56,9 +56,10 @@ class Adapter:
     event: str
     root: str
     decode: Callable[[bytes | dict[str, object]], Event]
-    # (action, payload, message, found, tool label[, tool name]): the name is
-    # passed only for UNINSPECTED, where what can replace a result depends on
-    # which tool it came from and a label may no longer say.
+    # (action, payload, message, found, tool label[, tool name]): the name
+    # matters where a result is withheld, as UNINSPECTED or DENY: what can
+    # replace it depends on which tool it came from, and a label may no
+    # longer say.
     encode: Callable[..., bytes]
     # No default: a new adapter must say which of the three it is, because
     # claiming more than the client grants is how a user ends up trusting a
@@ -148,6 +149,11 @@ _UNROUTED = (
     " shim cannot tell where this tool sends its input, so it refuses the call "
     "rather than rewrite it. Leave these values out, or ask the user how to "
     "continue."
+)
+_UNMASKABLE = " A placeholder cannot replace it without breaking the call."
+_UNMASKABLE_RESULT = (
+    "shim: withheld this {tool} result; it holds {found}, which a placeholder "
+    "cannot replace without breaking it."
 )
 _RESHAPED = (
     "shim: reformatted this result to save space ({}); it is not byte-for-byte "
@@ -391,7 +397,7 @@ def process(
         and entry.power == REWRITE
     )
     transforms = diet if shrinkable else ()
-    result = inspect(body, evaluate, transforms, scan_markers=inbound)
+    result = inspect(body, evaluate, transforms, inbound)
     if result.skipped:
         reason = _skipped_reason(result.reasons)
         counts = _counts(result.findings)
@@ -462,13 +468,24 @@ def process(
             ),
         )
 
+    # Found in a file's bytes, or in keys that would become one: masked, it
+    # would no longer be what it is, so it is withheld or refused instead.
+    unmaskable = action == MASK and result.unmaskable
+    if unmaskable:
+        action = DENY
     message = _message(tool_label, counts, action)
     if action == DENY and unrouted:
         message += _UNROUTED
+    elif unmaskable:
+        message = (
+            _UNMASKABLE_RESULT.format(tool=tool_label, found=_summary(counts))
+            if inbound
+            else message + _UNMASKABLE
+        )
     if action == MASK and result.transforms:
         message = f"{_RESHAPED.format(', '.join(result.transforms))} {message}"
     emitted = rewritten if action == MASK and changed else body
-    output = entry.encode(action, emitted, message, _summary(counts), tool_label)
+    output = entry.encode(action, emitted, message, _summary(counts), tool_label, tool)
     out_bytes = _size(emitted) if action == MASK else in_bytes
     return Outcome(
         output,

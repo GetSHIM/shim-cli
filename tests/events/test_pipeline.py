@@ -823,7 +823,11 @@ def test_a_failed_piece_leaves_nothing_partly_masked_to_emit() -> None:
     from shim_cli.guard.models import Finding, GuardDecision
 
     def evaluate(text: str, **_numbering) -> GuardDecision:
-        found = (Finding("SECRET", 2, 8, 0.9, ""),)
+        # A detector whose one piece failed in the text that holds "secret".
+        start = text.find("secret")
+        if start < 0:
+            return GuardDecision((), text, False, 0)
+        found = (Finding("SECRET", start, start + 6, 0.9, ""),)
         return GuardDecision(found, text.replace("secret", "<SECRET_1>"), True, 0)
 
     result = inspect({"tool_response": "a secret here"}, evaluate)
@@ -844,8 +848,10 @@ def test_the_walk_budget_still_reports_a_leaf_it_cannot_afford() -> None:
 
     result = inspect({"tool_response": "x" * (MAX_TEXT_CHARACTERS + 1)}, evaluate)
 
-    assert result.status == "not-inspected"
+    # Its key was read; the text under it was not.
+    assert (result.status, result.skipped) == ("partial", 1)
     assert result.reasons == ("size-limit",)
+    assert (result.value, result.changed) == (None, False)
 
 
 def test_a_sibling_past_the_detectors_single_pass_limit_is_now_masked() -> None:

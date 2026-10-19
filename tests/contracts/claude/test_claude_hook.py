@@ -638,9 +638,14 @@ def test_a_result_nested_past_the_depth_bound_is_withheld(tmp_path: Path) -> Non
 
 
 def test_a_megabyte_of_tiny_fields_is_never_passed_through(tmp_path: Path) -> None:
-    """A full-size result of one-letter fields, with the deadline cut short:
-    whatever is left unread when it fires is withheld, the secret with it."""
-    rows = ["a"] * 249_950 + [f"AWS_ACCESS_KEY_ID={AWS_KEY}"]
+    """A full-size result of short fields, with the deadline cut short:
+    whatever is left unread when it fires is withheld, the secret with it.
+    The fields differ, as a text repeated in one event is read once."""
+    from itertools import islice, product
+    from string import ascii_lowercase
+
+    words = map("".join, product(ascii_lowercase, repeat=4))
+    rows = [*islice(words, 142_700), f"AWS_ACCESS_KEY_ID={AWS_KEY}"]
     raw = _event("PostToolUse", "mcp__sheets__read", "tool_response", rows)
     assert 999_000 < len(raw) <= 1_000_000
     code = (

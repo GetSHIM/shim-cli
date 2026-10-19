@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import re
+import struct
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from dataclasses import replace as evolve
@@ -23,6 +26,13 @@ MAX_TEXT_CHARACTERS = 1_000_000
 # that only turned the fields after it into fields nobody inspected. Anything
 # nested deeper than this is not inspected, so the hook withholds it.
 MAX_DEPTH = 64
+# How much of a value is read with its key in front. The detector's cue
+# windows are 48 characters at most, so a key is context for the start of its
+# value only; as with the detector's own pieces, a finding the key starts and
+# that runs past this is still read whole.
+KEY_CONTEXT = 4_096
+# Enough base64 for a JPEG's frame header behind its metadata.
+IMAGE_HEADER_CHARACTERS = 65_536
 
 Path = tuple
 
@@ -76,6 +86,8 @@ def walk(
 
 
 def _walk(value: Any, path: Path, found: Traversal, depth: int) -> None:
+    """Keys, text and numbers are leaves. A key's leaf is `(key,)` after the
+    path of its object."""
     if depth > found.max_depth:
         if found.partial:
             found.skipped += 1
@@ -86,10 +98,18 @@ def _walk(value: Any, path: Path, found: Traversal, depth: int) -> None:
         if value:
             found.add(path, value)
         return
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if isinstance(value, float) and value.is_integer():
+            value = int(value)  # 9.05e11 is 905321234567, not "905321234567.0"
+        found.add(path, str(value))
+        return
     if isinstance(value, dict):
         for key, item in value.items():
-            if isinstance(key, str):
-                _walk(item, (*path, key), found, depth + 1)
+            if not isinstance(key, str):
+                continue
+            if key:
+                found.add((*path, (key,)), key)
+            _walk(item, (*path, key), found, depth + 1)
         return
     if isinstance(value, list):
         for index, item in enumerate(value):
@@ -103,28 +123,28 @@ def replace(value: Any, replacements: dict) -> Any:
 def _replace(value: Any, path: Path, replacements: dict) -> Any:
     if len(path) > MAX_DEPTH:
         return value
-    if isinstance(value, str):
-        replacement = replacements.get(path)
-        if replacement is None:
-            return value
-        if not isinstance(replacement, str):
-            raise TypeError("a string leaf may only be replaced by a string")
-        return replacement
     if isinstance(value, dict):
-        return {
-            key: (
-                _replace(item, (*path, key), replacements)
-                if isinstance(key, str)
-                else item
-            )
-            for key, item in value.items()
-        }
+        rebuilt: dict = {}
+        for key, item in value.items():
+            if isinstance(key, str):
+                item = _replace(item, (*path, key), replacements)
+                key = replacements.get((*path, (key,)), key)
+            if key in rebuilt:
+                # Two keys masked to one placeholder: neither can be kept.
+                raise ValueError("masked keys collide")
+            rebuilt[key] = item
+        return rebuilt
     if isinstance(value, list):
         return [
             _replace(item, (*path, index), replacements)
             for index, item in enumerate(value)
         ]
-    return value
+    replacement = replacements.get(path)
+    if replacement is None:
+        return value
+    if not isinstance(replacement, str):
+        raise TypeError("a leaf may only be replaced by a string")
+    return replacement
 
 
 def past_deadline(error: BaseException) -> bool:
@@ -227,29 +247,34 @@ def _page(text: str, found, shrink, evaluate, numbering: dict) -> tuple | None:
     shown = _placeholders(page, read)
     if shown is None:
         return None
-    regions = sorted(
+    masked, findings = _merged(
+        page,
         [
             (item.start, item.end, item, shown[at])
             for at, item in enumerate(read.findings)
         ]
         + [(start, end, found.findings[at], given[at]) for at, start, end in joined],
-        key=lambda region: (region[0], -region[1]),
     )
-    # Overlapping values are masked as one, named by the first.
+    return masked, names, evolve(read, findings=findings, redacted_text=masked)
+
+
+def _merged(text: str, regions: list) -> tuple:
+    """`text` with each (start, end, finding, placeholder) region masked, and
+    the findings that masked it. Overlapping values are masked as one, named
+    by the first."""
     merged: list = []
-    for region in regions:
+    for region in sorted(regions, key=lambda region: (region[0], -region[1])):
         if merged and region[0] < merged[-1][1]:
             merged[-1] = (merged[-1][0], max(merged[-1][1], region[1]), *merged[-1][2:])
         else:
             merged.append(region)
     pieces, findings, cursor = [], [], 0
     for start, end, item, placeholder in merged:
-        pieces += (page[cursor:start], placeholder, line_breaks(page[start:end]))
+        pieces += (text[cursor:start], placeholder, line_breaks(text[start:end]))
         findings.append(Finding(item.entity_type, start, end, item.score, item.label))
         cursor = end
-    pieces.append(page[cursor:])
-    masked = "".join(pieces)
-    return masked, names, evolve(read, findings=tuple(findings), redacted_text=masked)
+    pieces.append(text[cursor:])
+    return "".join(pieces), tuple(findings)
 
 
 def _placeholders(text: str, decision) -> list | None:
@@ -271,6 +296,165 @@ def _masked(text: str, decision) -> str:
     return decision.redacted_text if decision.findings else text
 
 
+def _node(value: Any, path: Path) -> Any:
+    for step in path:
+        value = value[step]
+    return value
+
+
+def _key(value: Any, path: Path) -> str | None:
+    """The key a value is read under: its own or, in an entry such as
+    `{"name": "DB_PASSWORD", "value": ...}`, its sibling's. A key, a list item
+    and the whole event are read alone."""
+    if not path or not isinstance(path[-1], str):
+        return None
+    if path[-1] in ("value", "Value"):
+        entry = _node(value, path[:-1])
+        for name in ("name", "Name", "key", "Key"):
+            if isinstance(entry.get(name), str) and entry[name]:
+                return entry[name]
+    return path[-1]
+
+
+def _dimensions(raw: bytes) -> tuple[int, int] | None:
+    if raw[:8] == b"\x89PNG\r\n\x1a\n" and raw[12:16] == b"IHDR":
+        return struct.unpack(">II", raw[16:24])
+    if raw[:6] in (b"GIF87a", b"GIF89a"):
+        return struct.unpack("<HH", raw[6:10])
+    if raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+        chunk = raw[12:16]
+        if chunk == b"VP8 " and raw[23:26] == b"\x9d\x01\x2a":
+            width, height = struct.unpack("<HH", raw[26:30])
+            return width & 0x3FFF, height & 0x3FFF
+        if chunk == b"VP8L" and raw[20:21] == b"\x2f":
+            bits = int.from_bytes(raw[21:25], "little")
+            return (bits & 0x3FFF) + 1, ((bits >> 14) & 0x3FFF) + 1
+        if chunk == b"VP8X":
+            width = int.from_bytes(raw[24:27], "little") + 1
+            return width, int.from_bytes(raw[27:30], "little") + 1
+        return None
+    if raw[:2] != b"\xff\xd8":
+        return None
+    position = 2
+    while position + 4 <= len(raw):
+        if raw[position] != 0xFF:
+            return None
+        marker = raw[position + 1]
+        if marker == 0xFF:
+            position += 1
+            continue
+        if marker == 0x01 or 0xD0 <= marker <= 0xD8:
+            position += 2
+            continue
+        if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
+            height, width = struct.unpack(">HH", raw[position + 5 : position + 9])
+            return width, height
+        position += 2 + struct.unpack(">H", raw[position + 2 : position + 4])[0]
+    return None
+
+
+def image_size(data: str) -> tuple[int, int] | None:
+    """Width and height from the header alone; None when it cannot be read."""
+    head = data[:IMAGE_HEADER_CHARACTERS]
+    try:
+        raw = base64.b64decode(head[: len(head) - len(head) % 4], validate=True)
+        size = _dimensions(raw)
+    except (binascii.Error, ValueError, struct.error):
+        return None
+    return size if size and size[0] > 0 and size[1] > 0 else None
+
+
+def _picture(data: str) -> bool:
+    """A real image: a readable header, and base64 to the last character,
+    so no text rides behind the part the header check reads."""
+    try:
+        base64.b64decode(data, validate=True)
+    except (binascii.Error, ValueError):
+        return False
+    return image_size(data) is not None
+
+
+def _type(value: Any, path: Path) -> Any:
+    block = _node(value, path)
+    return block.get("type") if isinstance(block, dict) else None
+
+
+def _opaque(value: Any, path: Path) -> str | None:
+    """ "image" or "pdf" when `path` holds a file's bytes: a Read's
+    `file.base64` or page, or an image block's `data`. No placeholder can
+    stand in for them without breaking the file."""
+    if path[-2:] == ("file", "base64"):
+        kind = _type(value, path[:-2])
+        return kind if kind in ("image", "pdf") else None
+    if path[-3:-2] == ("pages",) and path[-1:] == ("base64",):
+        return "image" if _type(value, path[:-3]) == "parts" else None
+    if path[-1:] == ("data",) and _type(value, path[:-1]) == "image":
+        return "image"
+    return None
+
+
+def _read(text: str, key: str | None, read, evaluate):
+    """The detector's decision on `text`, read alone and, under `key`, as
+    `"key": "text"` too, so a key that names a secret or a phone is its
+    value's context. Each reading keeps what it found in the value: the
+    context only adds, and a value that starts the text alone is still
+    read as one. `read` gives the event's numbering; a long value's start is
+    read with its key against none, as its findings only decide."""
+    alone = read(text)
+    if key is None:
+        return alone
+    prefix = f'"{key}": "'
+    start = len(prefix)
+    if len(text) > KEY_CONTEXT:
+        head = evaluate(f'{prefix}{text[:KEY_CONTEXT]}"', numbering={})
+        cut = start + KEY_CONTEXT
+        spans = {(item.start + start, item.end + start) for item in alone.findings}
+        if all(
+            item.end <= start or ((item.start, item.end) in spans and item.end < cut)
+            for item in head.findings
+        ):
+            return alone  # the key added nothing at the start
+    framed = f'{prefix}{text}"'
+    near = read(framed)
+    end = start + len(text)
+    kept = [
+        (at, item)
+        for at, item in enumerate(near.findings)
+        if item.end > start and item.start < end
+    ]
+    # A number named by its key is no longer bare; the key's own are not
+    # the value's.
+    bare = min(alone.bare_numbers, near.bare_numbers)
+    if not kept:
+        return evolve(alone, bare_numbers=bare)
+    own, shown = _placeholders(text, alone), _placeholders(framed, near)
+    if own is None or shown is None:
+        raise ValueError("a placeholder could not be placed in the value")
+    masked, findings = _merged(
+        text,
+        [
+            (item.start, item.end, item, own[at])
+            for at, item in enumerate(alone.findings)
+        ]
+        + [
+            (
+                max(item.start, start) - start,
+                min(item.end, end) - start,
+                item,
+                shown[at],
+            )
+            for at, item in kept
+        ],
+    )
+    return evolve(
+        alone,
+        findings=findings,
+        redacted_text=masked,
+        partial=alone.partial or near.partial,
+        bare_numbers=bare,
+    )
+
+
 @dataclass(frozen=True)
 class Inspection:
     value: Any
@@ -282,16 +466,21 @@ class Inspection:
     skipped: int = 0
     reasons: tuple[str, ...] = ()
     bare_numbers: int = 0
+    # Something was found where no placeholder can stand in for it: a file's
+    # bytes, or two keys that would become one. `value` is then None.
+    unmaskable: bool = False
 
 
 def inspect(
     value: Any,
     evaluate: Callable[..., Any],
     transforms: tuple = (),
-    scan_markers: bool = False,
+    inbound: bool = False,
 ) -> Inspection:
     """`value` is one event. `evaluate(text, numbering=...)` is the detector,
-    given one `numbering` for every field of it."""
+    given one `numbering` for every field of it. An `inbound` event is a
+    result the model will read: it is scanned for markers, and an image in it
+    reaches the model as a picture, so its bytes are not read as text."""
     found = walk(value, partial=True)
     transform_order = ()
     apply_diet = None
@@ -302,7 +491,7 @@ def inspect(
         apply_diet = shrink
     marker_order = ()
     scan_injection = None
-    if scan_markers:
+    if inbound:
         from .injection import MARKERS, scan
 
         marker_order = MARKERS
@@ -313,12 +502,27 @@ def inspect(
     markers: set = set()
     inspected = 0
     bare_numbers = 0
+    unmaskable = False
     # One numbering for the whole event, so a value keeps its placeholder in
-    # every field. Held here only: it maps values to numbers.
+    # every field. Held here only, as are the decisions: both map values.
     numbering: dict = {}
+    # A text read once is read for every field that repeats it.
+    decisions: dict = {}
+
+    def read(text: str):
+        if text not in decisions:
+            decisions[text] = evaluate(text, numbering=numbering)
+        return decisions[text]
+
     for index, (path, text) in enumerate(found.leaves):
+        named = bool(path) and isinstance(path[-1], tuple)
+        opaque = None if named else _opaque(value, path)
+        if inbound and opaque == "image" and _picture(text):
+            continue  # a picture to the model, never text
         try:
-            decision = evaluate(text, numbering=numbering)
+            # A file's bytes are read alone: their key adds nothing.
+            key = None if named or opaque else _key(value, path)
+            decision = _read(text, key, read, evaluate)
         except (ValueError, TimeoutError) as error:
             # Do not consume the hook deadline and continue.
             if past_deadline(error):
@@ -334,9 +538,18 @@ def inspect(
             # A piece of an oversized leaf failed; the rest is masked below.
             found.skipped += 1
             found.reasons.add("piece-failed")
+        if opaque and decision.findings:
+            unmaskable = True
+            findings.append((path, decision))
+            continue
         current = decision.redacted_text if decision.findings else text
         late = False
-        if apply_diet is not None:
+        # Only text is reshaped: a key, a number or a file's bytes are not.
+        if (
+            apply_diet is not None
+            and not (named or opaque)
+            and isinstance(_node(value, path), str)
+        ):
             try:
                 current, names, decision = _shrink(
                     text, decision, transforms, apply_diet, evaluate, numbering
@@ -356,13 +569,21 @@ def inspect(
             break
     ordered_transforms = tuple(name for name in transform_order if name in applied)
     ordered_markers = tuple(name for name in marker_order if name in markers)
+    rewritten = value
+    if replacements and not found.skipped and not unmaskable:
+        try:
+            rewritten = replace(value, replacements)
+        except ValueError:  # two keys masked to one name: neither can stay
+            unmaskable = True
     status = "complete"
     if found.skipped:
         status = "partial" if inspected else "not-inspected"
-        # Part of it was never read, so no version of it may be handed on.
-        value, replacements = None, {}
+    if found.skipped or unmaskable:
+        # Part of it was never read, or cannot be masked: no version of it
+        # may be handed on.
+        rewritten, replacements = None, {}
     return Inspection(
-        replace(value, replacements) if replacements else value,
+        rewritten,
         findings,
         bool(replacements),
         ordered_transforms,
@@ -371,6 +592,7 @@ def inspect(
         found.skipped,
         tuple(sorted(found.reasons)),
         bare_numbers,
+        unmaskable,
     )
 
 

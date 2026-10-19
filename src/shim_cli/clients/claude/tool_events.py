@@ -23,10 +23,12 @@ WITHHELD = "[withheld by shim]"
 _WITHHELD_MESSAGE = (
     "shim: withheld this {tool} result; it could not be inspected ({reason})."
 )
+_NOT_EMPTY = (
+    "It is not empty; do not guess what it held, and ask the user how to continue."
+)
 _WITHHELD_CONTEXT = (
     "shim withheld this {tool} result because it could not be inspected "
-    "({reason}). It is not empty; do not guess what it held, and ask the user "
-    "how to continue."
+    "({reason}). " + _NOT_EMPTY
 )
 # Claude Code (2.1.286) checks a built-in tool's replacement against that
 # tool's output schema and, when it does not match, sends the model the
@@ -275,7 +277,17 @@ def post_tool_use(
             }
         )
     if action == DENY:
-        raise ValueError("a tool result cannot be denied")
+        # Inspected, but it cannot be masked: withheld, saying what it holds.
+        return _dump(
+            {
+                "systemMessage": message,
+                **_specific(
+                    "PostToolUse",
+                    updatedToolOutput=_withheld(name, payload),
+                    additionalContext=f"{message} {_NOT_EMPTY}",
+                ),
+            }
+        )
     raise ValueError("unsupported action")
 
 
