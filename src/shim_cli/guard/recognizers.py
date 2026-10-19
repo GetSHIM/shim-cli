@@ -272,8 +272,11 @@ _IP_PATTERNS = _compile(
 # "ver" after a word is the Turkish verb: "izin ver 10.0.0.5" is an address.
 # `==` is a pinned requirement only glued to a name holding a lowercase letter,
 # `numpy==1.26.4.1`; not `ip == "203.0.113.7"` or `SERVER_IP==203.0.113.9`.
+# "version" may end a name, as code writes one: `<AssemblyVersion>1.0.0.0`,
+# `APP_VERSION = "2.3.1.0"`, `__version__ = "4.0.0.1"`.
 _VERSION_CUE = re.compile(
-    r"(?:\b(?:version|sürüm|ver\.)|(?<!\w\s)\bver)\W{0,2}\Z"
+    r"(?:(?:\b|_|(?-i:(?<=[a-z])(?=V)))version[\W_]{0,6}"
+    r"|(?:\b(?:sürüm|ver\.)|(?<!\w\s)\bver)\W{0,2})\Z"
     r"|(?-i:[\w.-]*[a-z][\w.-]*)==\Z",
     re.IGNORECASE,
 )
@@ -1010,7 +1013,8 @@ _SECRET_ASSIGNMENT = re.compile(
 _TYPE_WORD = re.compile(r"[A-Za-z]+(?:_[A-Za-z]+)*")
 _BARE_END = re.compile(r"[\s,}\]\"']")
 # The gateway's key and value with a space alone between them: the key starts a
-# word and a bare value carries a digit or a symbol, so "token budget" is prose.
+# word and a bare value carries a digit or a symbol, so "token budget" is prose,
+# and so is "rotate the token weekly.": a sentence's last mark is no symbol.
 # Unlike the gateway, the space never crosses a line: "# rotate the token" over
 # a line of code is not an assignment, and a command's next `--option` is no
 # value. A value attribute after the key holds the value:
@@ -1021,7 +1025,8 @@ _BARE_END = re.compile(r"[\s,}\]\"']")
 _SPACED_ASSIGNMENT = re.compile(
     r"(?=[adpst])(?<![^\W_])(?:" + _LEGACY_KEY + r")(?P<closed>[\"'])?[ \t]+"
     r"(?:(?P<quote>[\"'])(?P<quoted>[^\r\n]{6,}?)(?P=quote)"
-    r"|(?!--)(?=[^\s,}\]\"']*[0-9!#$%&*+./;<=>?@^_|~-])(?P<bare>[^\s,}\]\"']{6,}))",
+    r"|(?!--)(?=[^\s,}\]\"']*(?:[0-9!#$%&*+/<=>@^_|~-]|[.;?](?=[^\s,}\]\"'])))"
+    r"(?P<bare>[^\s,}\]\"']{6,}))",
     re.IGNORECASE,
 )
 # The element's next attribute, with its value: `aGVsbG8=` is a padded value.
@@ -1113,13 +1118,19 @@ _OPENERS = {")": "(", ">": "<", "`": "`", "}": "{", "]": "["}
 _CLOSING_MARK = re.compile(r"[)>`}\]]")
 _UNQUOTED_END = re.compile(r"[\s>]")
 _LINE_BREAK = re.compile(r"[\r\n]")
+# `${NAME:?message}` and `${NAME?message}` stop the shell when NAME is unset:
+# the text after `?` is the message, never a value. A `:-` default can be one.
+# An environment lookup is one in every language that names it: Go's
+# `os.Getenv(`, Java's `System.getenv(`, C#'s, Rust's and Vite's.
 _REFERENCE = re.compile(
-    r"\$\{\w+\}?|\$[A-Za-z_]\w*|%\w+%"
-    r"|(?:os\.environ\W|process\.env\.|(?:os\.)?getenv\(|env\().*"
+    r"\$\{\w+(?::?\?[^}]*)?\}?|\$[A-Za-z_]\w*|%\w+%"
+    r"|(?:os\.environ\W|process\.env[.\[]|import\.meta\.env\.|(?:os\.)?getenv\("
+    r"|os\.Getenv\(|System\.getenv\(|Environment\.GetEnvironmentVariable\("
+    r"|(?:std::)?env(?:::var)?\().*"
 )
 _TYPE_NAME = re.compile(
-    r"(?:string|number|boolean|object|unknown|undefined|SecretStr|Optional\[\w*)"
-    r"[;,?|)>\[\]]*"
+    r"(?:string|String|number|boolean|object|unknown|undefined|SecretStr"
+    r"|Optional\[\w*)[;,?|)>\[\]:]*"
 )
 _QUALIFIER = re.compile(
     r"(?:[_.-]|(?-i:(?<=[a-z0-9])(?=[A-Z])))"
@@ -1132,7 +1143,7 @@ _CODE_VALUE = re.compile(
     r"|(?:[A-Za-z_]+\??\.)+[A-Za-z_]+[;)]*"
 )
 _OPEN_CODE_VALUE = re.compile(_CODE_PATH + r"[(\[<][A-Za-z_.=(\[<]*")
-_TYPE_VALUE = re.compile(r"(?P<name>(?:[A-Z][a-z]+){2,}|String)(?P<end>[?;)>]*)")
+_TYPE_VALUE = re.compile(r"(?P<name>(?:[A-Z][a-z]+){2,})(?P<end>[?;)>]*)")
 _NAME_WORD = re.compile(r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])")
 # An identifier as people write one: in one case, or in camel case with every
 # capital opening a word.
@@ -1164,6 +1175,46 @@ _IMAGE_DIGEST = re.compile(r"(?i)sha(?:256|512):[0-9a-f]{64}")
 # A template's placeholder for a value: `<your-api-token>`, `<YOUR_API_TOKEN>`.
 _TEMPLATE_VALUE = re.compile(r"<(?:[a-z]+(?:[-_][a-z]+)*|[A-Z]+(?:[-_][A-Z]+)*)>")
 _NOT_A_CREDENTIAL = re.compile(r"[….*•:]+|(?:\$\{\w+\}|\{\w*\}|\$\w+|%\w+%|:)+")
+# An environment lookup is no secret, but the literal it falls back to, or has
+# added to it, is one when the variable it reads or the key it is assigned to
+# names a secret: `os.getenv("DB_PASSWORD", "...")`, `process.env.X || "..."`,
+# `env::var("X").unwrap_or_else(|_| "...".into())`, `ENV.fetch("X", "...")`,
+# `DB_PASSWORD=${DB_PASSWORD:?}...`. A default argument counts only inside a
+# call that takes one, still open (`call`): after a closed call, `process.env.X`
+# or `ENV["X"]`, a comma leads to the next argument or entry, never a default.
+# A shell default may be one variable, `${X:-${Y}}...`. Text a URI, a path or a
+# name joins to a variable is no literal of its own: `${DB_PASS}@db.internal`,
+# `${HOME}/workspace`, `${SECRET_PREFIX}-database`, `${SECRET_KEY}_backup`.
+# The windows are bounded: each start reads at most a line's 256 characters on.
+_ENV_FALLBACK = re.compile(
+    r"(?=[egiopsES$])(?:(?<![\w.])"
+    r"(?:(?P<call>(?:os\.)?getenv\(|(?:os\.)?environ\.get\("
+    r"|System\.getenv\(\)\.getOrDefault\(|ENV\.fetch\()"
+    r"|os\.Getenv\(|System\.getenv\(|Environment\.GetEnvironmentVariable\("
+    r"|(?:std::)?env::var\(|process\.env[.\[]|import\.meta\.env\.|ENV\[|\$_ENV\[)"
+    r"[ \t]*(?:key=)?(?P<mark>[\"']?)(?P<name>\w{1,64})(?P=mark)"
+    r"(?:(?(call)[ \t]*,[ \t]*(?:\r?\n[ \t]*)?(?:default=)?|(?!))"
+    r"|[)\]]{0,2}(?:\.ok\(\))?"
+    r"(?:[ \t]*(?:\|\||\?\?|\?:|\+|or\b)[ \t]*(?:\r?\n[ \t]*)?"
+    r"|\.(?:unwrap_or|orElse)\(|\.unwrap_or_else\(\|\w*\|[ \t]*))"
+    r"(?:String::from\()?"
+    r"(?P<quote>[\"'`])(?P<value>(?:(?!(?P=quote))[^\r\n\\]|\\[^\r\n]){6,256})(?P=quote)"
+    r"|\$\{(?P<shell>\w{1,64})"
+    r"(?:[:?+=-](?:[^}$\r\n]|\$(?!\{)|\$\{\w{1,64}\}){0,256})?\}"
+    r"(?P<tail>[^\s\"'`;|&<>(){}$@:/?#=,.%_-][^\s\"'`;|&<>(){}$]{5,255}))"
+)
+# A literal glued to a variable carries a digit or a symbol, as a spaced value
+# does: `${API_TOKEN_VERSION}release` is a name.
+_GLUED_LITERAL = re.compile(r"[0-9!%*+=@^_~.-]")
+# The key a lookup is assigned to, or the variable whose `:-` default it is. A
+# call between them takes the lookup's value as one argument of its own:
+# `password = hash_password(os.getenv("DEFAULT_ROLE", "..."))`.
+_ASSIGNED_KEY = re.compile(
+    r"(?:\$\{(?P<outer>\w{1,64}):?-"
+    r"|(?P<key>[\w.-]{1,64})[\"']?[ \t]*(?::=|\??:|=)[ \t]*)\Z"
+)
+# A `:-` default that is another variable: `${APP_TOKEN:-${FALLBACK_TOKEN}}`.
+_DEFAULT_REFERENCE = re.compile(r"-\$\{\w+\}\}")
 # A key with no value is matched too, so the scan moves past it once: the `?`s
 # inside it start the same failed key, and retrying each was quadratic.
 _QUERY_PARAMETER = re.compile(r"[?&;](?P<key>[^=&;#]*)(?:=(?P<value>[^&;#]+))?")
@@ -1331,8 +1382,6 @@ def _a_type_of(key: str, value: str, after: str) -> bool:
     found = _TYPE_VALUE.fullmatch(value)
     if found is None:
         return False
-    if found["name"] == "String":
-        return True
     ended = bool(found["end"]) or after == ","
     return ended and bool(_words(found["name"]) & _words(key))
 
@@ -1387,6 +1436,46 @@ def _not_a_secret(
     )
 
 
+# The name a key sits in: `db_password` around `password`.
+_KEY_NAME_START = re.compile(r"\w{0,64}\Z")
+_OPERAND_END = re.compile(r"[ \t]*(?:[,)}]|\?\?|\|\|)")
+_CODE_OPERATOR = re.compile(r"[ \t]*\?\?")
+_CAMEL_NAME = re.compile(r"[a-z]+(?:[A-Z][a-z]+)+")
+_RECEIVER = re.compile(r"(?<![\w.])(?:self|this)\Z")
+
+
+def _handed_on(text: str, key: int, start: int, end: int, separator: str) -> bool:
+    """Code handing a variable on: `password=password,`, `self.token = token`,
+    `{ Password = password ?? "" }`, `user.password = hashedPassword;`. A
+    config file's unquoted value is the password itself, `PASSWORD=password`,
+    `{user: admin, password: password}` and a `.properties` line's
+    `db.password = adminPassword` too, so a bare name counts only where code
+    assigns it: the key's own name as an argument or an operand, or a member
+    set in a statement, one `;` ends or `self` or `this` owns, from the key's
+    own name or from a camel-case name holding the key's word (`;` only)."""
+    if "=" not in separator or end - start > _MAX_SHAPED_VALUE:
+        return False
+    value = text[start:end]
+    name = value.rstrip(";)")
+    own = _NAME_RUN.match(text, key)
+    if own is None or not name.isidentifier():
+        return False
+    member = text[key - 1 : key] == "." and separator == " = "
+    statement = member and value.endswith(";")
+    if name == own[0]:
+        return bool(
+            ")" in value
+            or _OPERAND_END.match(text, end)
+            or statement
+            or (member and _RECEIVER.search(text, max(0, key - 6), key - 1))
+        )
+    if name.lower() == own[0].lower():
+        return _CODE_OPERATOR.match(text, end) is not None
+    return bool(
+        statement and _CAMEL_NAME.fullmatch(name) and _words(name) & _words(own[0])
+    )
+
+
 def _userinfos(
     pattern: re.Pattern[str], text: str, literal: str
 ) -> Iterator[re.Match[str]]:
@@ -1411,6 +1500,31 @@ def _scan_secret(text: str, literal: str | None = None) -> list[Match]:
             if start < end:
                 results.append(Match("SECRET", start, end, score))
     results.extend(Match("SECRET", *span, 0.99) for span in _vendor_tokens(text))
+    for match in _ENV_FALLBACK.finditer(text):
+        group = "value" if match["value"] is not None else "tail"
+        assigned = _ASSIGNED_KEY.search(text, max(0, match.start() - 80), match.start())
+        names = (
+            match["name"] or match["shell"],
+            assigned and (assigned["outer"] or assigned["key"]),
+        )
+        key = next((name for name in names if name and _SECRET_NAME.search(name)), "")
+        value = match[group]
+        if (group == "tail" and not _GLUED_LITERAL.search(value)) or (
+            # A JavaScript template literal that interpolates is code.
+            match["quote"] == "`" and "${" in value
+        ):
+            continue
+        if key and not (
+            _NOT_A_CREDENTIAL.fullmatch(value)
+            or _not_a_secret(
+                value,
+                None if _LEGACY_NAME.search(key) else key,
+                group == "value",
+                False,
+                "",
+            )
+        ):
+            results.append(Match("SECRET", *match.span(group), 0.97))
     for match in _userinfos(_URL_USERINFO, text, literal):
         if not _NOT_A_CREDENTIAL.fullmatch(text, *match.span("userinfo")):
             results.append(Match("SECRET", *match.span("userinfo"), 0.99))
@@ -1513,6 +1627,18 @@ def _scan_secret(text: str, literal: str | None = None) -> list[Match]:
         if legacy is None and "\n" in separator:
             continue
         new_key = None if legacy else text[match.start() : match.end("tail")]
+        key = _KEY_NAME_START.search(text, max(0, match.start() - 64), match.start())
+        key_start = key.start() if key else match.start()
+        if not quoted and (
+            # `${API_TOKEN:?message}`: the shell's check that it is set, and
+            # `${APP_TOKEN:-${FALLBACK_TOKEN}}`: a default that is a variable.
+            (
+                text[key_start - 2 : key_start] == "${"
+                and (text[start] == "?" or _DEFAULT_REFERENCE.match(text, start))
+            )
+            or _handed_on(text, key_start, start, end, separator)
+        ):
+            continue
         value = text[start : min(end, start + _MAX_SHAPED_VALUE + 1)]
         after = "" if quoted else text[end : end + 1]
         if start < cut and not _not_a_secret(

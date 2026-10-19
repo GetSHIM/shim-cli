@@ -145,7 +145,10 @@ def test_an_mcp_write_carrying_a_key_is_refused_under_the_shipped_default(
             "hookEventName": "PreToolUse",
             "permissionDecision": "deny",
             "permissionDecisionReason": (
-                "shim: blocked SECRET (1) in mcp__filesystem__write_file." + UNROUTED
+                "shim: blocked SECRET (1) in mcp__filesystem__write_file."
+                + UNROUTED
+                + ' The user can allow this tool with "mcp__filesystem__write_file" = '
+                '"warn" under [mode] in shim\'s settings.'
             ),
         }
     }

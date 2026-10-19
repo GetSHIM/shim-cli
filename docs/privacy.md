@@ -32,7 +32,9 @@ Five things follow, and all five are limits rather than features:
   default `enforce`, a call carrying a finding is refused (`shim cannot tell
   where this tool sends its input, so it refuses the call rather than rewrite
   it.`); `outbound = "warn"`, or a key for that tool such as
-  `"mcp__crm__lookup" = "warn"` under `[mode]`, reports it instead. The input
+  `"mcp__crm__lookup" = "warn"` under `[mode]`, reports it instead, and the
+  refusal names that key: `The user can allow this tool with
+  "mcp__crm__lookup" = "warn" under [mode] in shim's settings.` The input
   of a local tool (`Read`, `Grep`, `Glob`, a sub-agent's task, a question to
   you) is never rewritten or refused at all: it names a file or a pattern on
   this machine, so rewriting it breaks the call and keeps nothing from
@@ -125,8 +127,11 @@ ID is not reported. An email address counts only on a public domain, one on the
 public suffix list, so `ops@acme.internal` or `dev@build.local` is not an email
 to shim; a team with internal mail domains adds a custom pattern. Detection also stays deliberately quiet on values that name
 nobody: the loopback and unspecified addresses (`127.0.0.1`, `0.0.0.0`, `::1`)
-and connection strings that carry no credentials, wherever they point. Private
-and public IP addresses are still detected. A connection string is masked over
+and connection strings that carry no credentials, wherever they point, and a
+four-part version after a name ending in "version" (`<AssemblyVersion>1.0.0.0`,
+`APP_VERSION = "2.3.1.0"`, `__version__ = "4.0.0.1"`), so an address after
+such a name, `server_version: 10.1.2.3`, is not reported either. Private and public IP
+addresses are still detected. A connection string is masked over
 its user and password only, as one placeholder:
 `postgresql://<DB_URI_1>@db-prod.kasa.internal:5432/kasa` keeps the host the
 agent needs, and a password-like parameter in its query string (`?password=…`)
@@ -160,7 +165,8 @@ A secret is found by its key name or by its vendor prefix. `password`,
 `passwd`, `pwd`, `secret`, `token` or `api_key` followed by a space and a value
 on the same line is a secret too, the gateway's rule, when the value carries a
 digit or a symbol, so `password hunter2abc` and `export API_KEY abcdef123456`
-are masked and `token budget` is not. A key name counts
+are masked and `token budget` is not. A sentence's closing `.`, `;` or `?` is no
+symbol: `rotate the token weekly.` is prose. A key name counts
 when a secret word is one of its segments, in any case: `DB_PASSWORD`,
 `AWS_SECRET_ACCESS_KEY`, `LEDGER_API_TOKEN`, `client.secret`, `x-api-key`,
 `clientSecret`; `MAX_TOKENS`, `tokenizer` and `SORT_KEY` are not secrets. A
@@ -194,9 +200,40 @@ npm, Hugging Face, Stripe, OpenAI and SendGrid, plus JSON web tokens, private ke
 blocks, Slack and Discord webhook URLs, Azure storage `AccountKey` values and
 HTTP `Authorization: Basic` and `Bearer` headers. A
 value is not a secret when it only refers to another variable (`${DB_PASS}`,
-`$DB_PASS`, `os.environ[…]`, `process.env.X`), is a placeholder shim already
-wrote, a template placeholder (`<your-api-token>`, `<YOUR_API_TOKEN>`) or a
-type name (`string`), or is an `http(s)` URL. A value made only of digits, or
+`$DB_PASS`, `os.environ[…]`, `process.env.X`, `process.env["X"]`,
+`import.meta.env.X`, `os.Getenv("X")`, `System.getenv("X")`,
+`Environment.GetEnvironmentVariable("X")`, `std::env::var("X")`), is the
+shell's check that a variable is set (`${API_TOKEN:?API_TOKEN is required}`)
+or a `:-` default that is another variable (`${APP_TOKEN:-${FALLBACK_TOKEN}}`),
+is a placeholder shim already wrote, a template placeholder
+(`<your-api-token>`, `<YOUR_API_TOKEN>`) or a type name (`string`, `String`),
+or is an `http(s)` URL. The literal such a lookup falls back to, or has added
+to it, is a secret when the variable it reads or the key it is assigned to
+names one: `os.getenv("DB_PASSWORD", "...")`, `os.environ.get(...)`,
+`process.env.X || "..."`, `process.env["X"] ?? "..."`,
+`System.getenv().getOrDefault("X", "...")`, `... ?: "..."`,
+`Optional.ofNullable(System.getenv("X")).orElse("...")`,
+`env::var("X").unwrap_or_else(|_| "...".to_string())`,
+`os.Getenv("X") + "..."`, `ENV.fetch("X", "...")`, `$_ENV["X"] ?? "..."`, and
+the text glued after a shell variable, `DB_PASSWORD=${DB_PASSWORD:?}...` or
+`${DB_PASSWORD:-${FALLBACK}}...`, when it carries a digit or a symbol. A
+comma leads to a default only inside a call that takes one, still open
+(`getenv(`, `environ.get(`, `getOrDefault(`, `ENV.fetch(`): the next argument
+or entry after a closed lookup, `process.env.X` or `ENV["X"]` is not one
+(`connect(os.getenv("DB_PASSWORD"), "dbname=app")`), and neither is a default
+of another variable inside a call the key is assigned from
+(`password = hash_password(os.getenv("DEFAULT_ROLE", "..."))`). An empty
+fallback, one of fewer than six characters, a placeholder, a path or a
+JavaScript template that interpolates (`` `${prefix}-default` ``) does not
+count, and neither does a name built on a variable (`${SECRET_PREFIX}-database`,
+`${SECRET_KEY}_backup`, `${API_TOKEN_VERSION}release`), so a glued tail of
+letters alone passes: `DB_PASSWORD=${X:?X}BlueHarborTide` is not masked. A development default
+under a secret's name is masked like any literal there:
+`os.environ.get("SECRET_KEY", "django-insecure-dev-only")`,
+`process.env.JWT_SECRET || "change-me"`. Not read: a Java ternary
+(`System.getenv("X") != null ? System.getenv("X") : "..."`), Python's
+`os.environ["X"] if ... else "..."`, and an operator that opens a line
+(`os.getenv("X")` then `or "..."` on the next). A value made only of digits, or
 a file path, is not a secret when the key's last word is not a password word
 (`password`, `passwd`, `pwd`, `pass`, `secret`, `şifre`, `parola`, optionally
 followed by digits), so `TOKEN_TTL=86400` and `DB_PASSWORD_FILE=/run/secret`
@@ -207,17 +244,34 @@ a secret when the key's last part is `_id`, `_ids`, `_type`, `_name`,
 `api_key_header`, `tokenService`), and neither is an unquoted value of letters
 that reads as a call or lookup, closed or continued by a quote, comma or `]`
 (`tokenizer.encode(text)`, `self.auth_token`, `settings["DB_PASSWORD"]`), or,
-after a `:`, as a type name that is `String`, or that repeats a word of its key
-and ends like code (`clientSecret: String`, `authToken: AuthToken;`). Under a
-password word, code is exempt only when it is written in names
-(`config.db_password`, `settings["DB_PASSWORD"]`). A value with a
-digit in it, or longer than 1 KB, is never read as code, and a YAML password
-such as `adminPassword: BlueHarbor` or `REDIS_PASSWORD: RedisPassword` is
-masked. These stay undetected: a secret pasted with no key name and no known
-prefix; a value made only of digits under a key whose last word is not a
-password word (`PGPASSWORD_PROD=12345678`), which is the cost of keeping
-`TOKEN_TTL=86400` quiet; an unquoted password written in names that reads as
-code, such as `SMTP_PASSWORD=correct.horse.battery`, which is the cost of
+after a `:`, as a type name that repeats a word of its key and ends like code
+(`authToken: AuthToken;`). Under a password word, code is exempt only when it
+is written in names (`config.db_password`, `settings["DB_PASSWORD"]`). Under
+every key, the bare word included, code that hands a variable on under its own
+name is not a secret either: with `=`, as an argument, an operand, or a member
+set in a statement that `;` ends or `self` or `this` owns (`password=password,`,
+`f(token=token)`, `self.token = token`, `this.token = token;`,
+`{ Password = password ?? "" }`), or a member set from a camel-case variable
+holding its key's word in a statement that `;` ends
+(`user.password = hashedPassword;`). Apart from a variable handed on, a value
+with a digit in it or longer than 1 KB is never read as code, and neither is
+any value under a bare key word (`password`, `token`, `secret`, `api_key`, a
+member's `.password` too), so a passphrase shaped like a call is masked
+whatever its argument (`DB_PASSWORD=summer2024.winter.go(1)`, `password = pass.word()`). That
+masks ordinary code too, and an MCP call that carries it is refused:
+`token = secrets.token_urlsafe(32)`, `password = getpass.getpass()`,
+`api_key = get_api_key()`, `password: z.string().min(12),`. A YAML or `.env`
+password such as `adminPassword: BlueHarbor`, `REDIS_PASSWORD: RedisPassword`,
+`PASSWORD=password` or `{user: admin, password: password}`, a `.properties`
+line (`spring.datasource.password = adminPassword`, `x.password = password`), a
+member set to any other bare value (`mail.smtp.password = letmein;`), and a
+`:-` default (`${DB_PASSWORD:-...}`), are masked. These stay undetected: a
+secret pasted with no key name and no known prefix; a value made only of digits
+under a key whose last word is not a password word (`PGPASSWORD_PROD=12345678`),
+which is the cost of keeping `TOKEN_TTL=86400` quiet; an unquoted password
+written in names that reads as code, such as
+`SMTP_PASSWORD=correct.horse.battery`, or as a variable handed on, such as
+`password=password)` or `user.password = myPassword;`, which is the cost of
 keeping code quiet; a password that is `$` and an identifier
 (`password=$ecretPass1`), which reads as a variable reference under any key;
 and a password of letters written as `key: Word = "..."`, which reads as a type

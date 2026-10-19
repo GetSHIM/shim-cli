@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -151,6 +152,11 @@ _UNROUTED = (
     " shim cannot tell where this tool sends its input, so it refuses the call "
     "rather than rewrite it. Leave these values out, or ask the user how to "
     "continue."
+)
+# The per-tool `[mode]` key, as TOML writes it: a JSON string is a TOML string,
+# but for the surrogate pairs `ensure_ascii` would write.
+_ALLOW_TOOL = (
+    ' The user can allow this tool with {} = "warn" under [mode] in shim\'s settings.'
 )
 _UNMASKABLE = " A placeholder cannot replace it without breaking the call."
 _UNMASKABLE_RESULT = (
@@ -571,6 +577,8 @@ def process(
     message = _message(tool_label, counts, action)
     if action == DENY and unrouted:
         message += _UNROUTED
+        if tool_label == tool:
+            message += _ALLOW_TOOL.format(json.dumps(tool, ensure_ascii=False))
     elif unmaskable:
         message = (
             _UNMASKABLE_RESULT.format(tool=tool_label, found=_summary(counts))

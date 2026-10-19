@@ -136,7 +136,9 @@ def test_a_read_result_is_masked_in_place_under_enforce() -> None:
 UNROUTED = (
     "shim: blocked EMAIL (1) in mcp__probe__probe_echo. shim cannot tell where "
     "this tool sends its input, so it refuses the call rather than rewrite it. "
-    "Leave these values out, or ask the user how to continue."
+    "Leave these values out, or ask the user how to continue. The user can allow "
+    'this tool with "mcp__probe__probe_echo" = "warn" under [mode] in shim\'s '
+    "settings."
 )
 
 
