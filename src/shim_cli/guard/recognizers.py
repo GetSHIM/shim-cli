@@ -54,7 +54,9 @@ _CUE_START = r"(?:(?<![^\W\d_])|(?-i:(?<=[a-zçğıöşü])(?=[A-Z])))"
 _CUE_END = r"(?:(?![^\W\d_])|(?-i:(?<=[a-zçğıöşü])(?=[A-Z])))"
 # A vCard line names the phone before its parameters: `TEL;TYPE=CELL:`.
 _PHONE_CUE = re.compile(
-    _CUE_START
+    # Each cue's first letter; see `_SECRET_WORD`.
+    r"(?=[cfgmnptw])"
+    + _CUE_START
     + r"(?P<cue>telefon(?:um?)?|telephone|tel|phone|gsm|cep|mobile|mobil|cell|fax|whatsapp|call"
     r"|numara|num|no)(?:[\W_]{0,3}(?:number|numaras[ıi]))?"
     r"(?:\W{0,4}|(?<=tel)(?:;[^;:\s]*)+:)\Z",
@@ -66,7 +68,8 @@ _PHONE_CUE_WINDOW = 48
 # `order no`, `order_no`, `orderNo`.
 _GENERIC_CUES = ("numara", "num", "no")
 _NOT_PHONE_WORD = re.compile(
-    _CUE_START
+    r"(?=[cfikorst])"
+    + _CUE_START
     + r"(?:order|sipari[şs]|fatura|invoice|ticket|ref|reference|sku|kod|code)"
     r"[^a-zçğıöşü]{0,3}\Z",
     re.IGNORECASE,
@@ -359,7 +362,8 @@ def _validate_tckn(text: str) -> bool:
 
 _VKN_PATTERNS = _compile(((r"(?<!\d)\d{10}(?!\d)", 0.4),))
 _VKN_CONTEXT = re.compile(
-    _CUE_START
+    r"(?=[tv])"
+    + _CUE_START
     + r"(?:vkn|vergi(?:kimlik)?(?:no|numaras[ıi])?|tax(?:payer)?(?:id|no|number)?)"
     + _CUE_END,
     re.IGNORECASE,
