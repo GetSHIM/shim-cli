@@ -3,7 +3,7 @@
   "corpus": {
     "file": "guard-v2.json",
     "version": 2,
-    "case_count": 235
+    "case_count": 264
   },
   "evaluation_unit": "exact redacted output",
   "claim_scope": "Synthetic fixture-bound evidence only; not a real-world statistical claim.",
@@ -13,13 +13,13 @@
     "exact_output": 1.0
   },
   "exact_output": {
-    "cases": 235,
-    "matching": 235,
+    "cases": 264,
+    "matching": 264,
     "ratio": 1.0
   },
   "exact_source_spans": {
-    "cases": 22,
-    "matching": 22,
+    "cases": 25,
+    "matching": 25,
     "ratio": 1.0
   },
   "categories": {
@@ -27,15 +27,15 @@
       "true_positive": 17,
       "false_positive": 0,
       "false_negative": 0,
-      "negative_cases": 218,
+      "negative_cases": 247,
       "precision": 1.0,
       "recall": 1.0
     },
     "PHONE": {
-      "true_positive": 20,
+      "true_positive": 33,
       "false_positive": 0,
       "false_negative": 0,
-      "negative_cases": 215,
+      "negative_cases": 231,
       "precision": 1.0,
       "recall": 1.0
     },
@@ -43,7 +43,7 @@
       "true_positive": 4,
       "false_positive": 0,
       "false_negative": 0,
-      "negative_cases": 231,
+      "negative_cases": 260,
       "precision": 1.0,
       "recall": 1.0
     },
@@ -51,7 +51,7 @@
       "true_positive": 5,
       "false_positive": 0,
       "false_negative": 0,
-      "negative_cases": 230,
+      "negative_cases": 259,
       "precision": 1.0,
       "recall": 1.0
     },
@@ -59,7 +59,7 @@
       "true_positive": 15,
       "false_positive": 0,
       "false_negative": 0,
-      "negative_cases": 220,
+      "negative_cases": 249,
       "precision": 1.0,
       "recall": 1.0
     },
@@ -67,7 +67,7 @@
       "true_positive": 2,
       "false_positive": 0,
       "false_negative": 0,
-      "negative_cases": 233,
+      "negative_cases": 262,
       "precision": 1.0,
       "recall": 1.0
     },
@@ -75,7 +75,7 @@
       "true_positive": 3,
       "false_positive": 0,
       "false_negative": 0,
-      "negative_cases": 232,
+      "negative_cases": 261,
       "precision": 1.0,
       "recall": 1.0
     },
@@ -83,15 +83,15 @@
       "true_positive": 4,
       "false_positive": 0,
       "false_negative": 0,
-      "negative_cases": 231,
+      "negative_cases": 260,
       "precision": 1.0,
       "recall": 1.0
     },
     "TR_VKN": {
-      "true_positive": 2,
+      "true_positive": 13,
       "false_positive": 0,
       "false_negative": 0,
-      "negative_cases": 233,
+      "negative_cases": 251,
       "precision": 1.0,
       "recall": 1.0
     },
@@ -99,7 +99,7 @@
       "true_positive": 9,
       "false_positive": 0,
       "false_negative": 0,
-      "negative_cases": 226,
+      "negative_cases": 255,
       "precision": 1.0,
       "recall": 1.0
     },
@@ -107,7 +107,7 @@
       "true_positive": 46,
       "false_positive": 0,
       "false_negative": 0,
-      "negative_cases": 189,
+      "negative_cases": 218,
       "precision": 1.0,
       "recall": 1.0
     },
@@ -115,13 +115,13 @@
       "true_positive": 10,
       "false_positive": 0,
       "false_negative": 0,
-      "negative_cases": 225,
+      "negative_cases": 254,
       "precision": 1.0,
       "recall": 1.0
     }
   },
   "micro": {
-    "true_positive": 137,
+    "true_positive": 161,
     "false_positive": 0,
     "false_negative": 0,
     "precision": 1.0,

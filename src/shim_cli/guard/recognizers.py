@@ -48,18 +48,27 @@ _DECIMAL_POINT = re.compile(r"\d\.|\.\d")
 _TURKISH_SHAPES = re.compile(r"(?:90)?0?5\d{9}|0[2-4]\d{9}")
 _NOT_DIGIT = re.compile(r"\D")
 _PHONE_FORMAT = re.compile(r"[\s()+]")
-# `_` joins a cue to its key: `phone_number`, `"customer_phone"`.
+# A context cue is a word of its own or one part of a key: not after a letter,
+# or at a lower-to-upper camel join (`phone_number`, `contactPhone`, `alıcıVkn`).
+_CUE_START = r"(?:(?<![^\W\d_])|(?-i:(?<=[a-zçğıöşü])(?=[A-Z])))"
+_CUE_END = r"(?:(?![^\W\d_])|(?-i:(?<=[a-zçğıöşü])(?=[A-Z])))"
+# A vCard line names the phone before its parameters: `TEL;TYPE=CELL:`.
 _PHONE_CUE = re.compile(
-    r"(?<![a-z])(?P<cue>telefon|tel|phone|gsm|cep|mobile|mobil|fax|whatsapp|call"
-    r"|numara|num|no)(?:[\W_]{1,3}(?:number|numaras[ıi]))?\W{0,4}\Z",
+    _CUE_START
+    + r"(?P<cue>telefon(?:um?)?|telephone|tel|phone|gsm|cep|mobile|mobil|cell|fax|whatsapp|call"
+    r"|numara|num|no)(?:[\W_]{0,3}(?:number|numaras[ıi]))?"
+    r"(?:\W{0,4}|(?<=tel)(?:;[^;:\s]*)+:)\Z",
     re.IGNORECASE,
 )
-_PHONE_CUE_WINDOW = 24
-# A generic number word after one of these names another kind of number.
+# The longest cue it reads: `TEL;type=CELL;type=VOICE;type=pref:` is 35.
+_PHONE_CUE_WINDOW = 48
+# A generic number word after one of these names another kind of number:
+# `order no`, `order_no`, `orderNo`.
 _GENERIC_CUES = ("numara", "num", "no")
 _NOT_PHONE_WORD = re.compile(
-    r"(?<![a-z])(?:order|sipari[şs]|fatura|invoice|ticket|ref|reference|sku|kod|code)"
-    r"[^a-zçğıöşü]{1,3}\Z",
+    _CUE_START
+    + r"(?:order|sipari[şs]|fatura|invoice|ticket|ref|reference|sku|kod|code)"
+    r"[^a-zçğıöşü]{0,3}\Z",
     re.IGNORECASE,
 )
 _IDENTIFIER_TAIL = re.compile(r"[A-Za-z0-9_.-]*\Z")
@@ -340,7 +349,10 @@ def _validate_tckn(text: str) -> bool:
 
 _VKN_PATTERNS = _compile(((r"(?<!\d)\d{10}(?!\d)", 0.4),))
 _VKN_CONTEXT = re.compile(
-    r"(?i)\b(?:vkn|vergi(?:\s+(?:kimlik|numarası))?|tax(?:\s+id)?)\b"
+    _CUE_START
+    + r"(?:vkn|vergi(?:kimlik)?(?:no|numaras[ıi])?|tax(?:payer)?(?:id|no|number)?)"
+    + _CUE_END,
+    re.IGNORECASE,
 )
 _VKN_WINDOW = 32
 

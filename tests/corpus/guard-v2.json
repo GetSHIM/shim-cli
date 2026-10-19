@@ -324,6 +324,113 @@
       "expected_output": "tax id <TR_VKN_1> on file"
     },
     {
+      "id": "tr-vkn-env-snake-key",
+      "text": "TAX_ID=1234567890",
+      "categories": [
+        "TR_VKN"
+      ],
+      "expected_output": "TAX_ID=<TR_VKN_1>"
+    },
+    {
+      "id": "tr-vkn-json-camel-key",
+      "text": "{\"taxId\": \"1234567890\"}",
+      "categories": [
+        "TR_VKN"
+      ],
+      "expected_output": "{\"taxId\": \"<TR_VKN_1>\"}"
+    },
+    {
+      "id": "tr-vkn-snake-number-key",
+      "text": "tax_number: 1234567890",
+      "categories": [
+        "TR_VKN"
+      ],
+      "expected_output": "tax_number: <TR_VKN_1>"
+    },
+    {
+      "id": "tr-vkn-joined-upper-key",
+      "text": "TAXID=1234567890",
+      "categories": [
+        "TR_VKN"
+      ],
+      "expected_output": "TAXID=<TR_VKN_1>"
+    },
+    {
+      "id": "tr-vkn-turkish-camel-key",
+      "text": "{\"vergiKimlikNo\": \"1234567890\"}",
+      "categories": [
+        "TR_VKN"
+      ],
+      "expected_output": "{\"vergiKimlikNo\": \"<TR_VKN_1>\"}"
+    },
+    {
+      "id": "tr-vkn-turkish-snake-key",
+      "text": "VERGI_NO=1234567890",
+      "categories": [
+        "TR_VKN"
+      ],
+      "expected_output": "VERGI_NO=<TR_VKN_1>"
+    },
+    {
+      "id": "tr-vkn-camel-long-key",
+      "text": "{\"taxIdentificationNumber\": \"1234567890\"}",
+      "categories": [
+        "TR_VKN"
+      ],
+      "expected_output": "{\"taxIdentificationNumber\": \"<TR_VKN_1>\"}"
+    },
+    {
+      "id": "tr-vkn-joined-turkish-key",
+      "text": "VERGINO=1234567890",
+      "categories": [
+        "TR_VKN"
+      ],
+      "expected_output": "VERGINO=<TR_VKN_1>"
+    },
+    {
+      "id": "tr-vkn-taxonomy-key-negative",
+      "text": "{\"taxonomyId\": \"1234567890\"}",
+      "categories": [],
+      "expected_output": "{\"taxonomyId\": \"1234567890\"}"
+    },
+    {
+      "id": "tr-vkn-turkish-letter-camel-key",
+      "text": "alıcıVkn=1234567890",
+      "categories": [
+        "TR_VKN"
+      ],
+      "expected_output": "alıcıVkn=<TR_VKN_1>",
+      "expected_spans": [
+        [
+          9,
+          19,
+          "TR_VKN"
+        ]
+      ]
+    },
+    {
+      "id": "tr-vkn-taxpayer-camel-key",
+      "text": "{\"taxpayerId\": \"1234567890\"}",
+      "categories": [
+        "TR_VKN"
+      ],
+      "expected_output": "{\"taxpayerId\": \"<TR_VKN_1>\"}"
+    },
+    {
+      "id": "tr-vkn-taxpayer-env-key",
+      "text": "TAXPAYER_ID=1234567890",
+      "categories": [
+        "TR_VKN"
+      ],
+      "expected_output": "TAXPAYER_ID=<TR_VKN_1>"
+    },
+    {
+      "id": "tr-vkn-cueless-id-negative",
+      "text": "{\"id\": \"1234567890\"}",
+      "categories": [],
+      "expected_output": "{\"id\": \"1234567890\"}"
+    },
+    {
       "id": "secret-positive",
       "text": "password = SuperSecret123!",
       "categories": [
@@ -1306,6 +1413,136 @@
         "PHONE"
       ],
       "expected_output": "\"customer_phone\": \"<PHONE_1>\""
+    },
+    {
+      "id": "phone-camel-number-key",
+      "text": "{\"phoneNumber\": \"4155552671\"}",
+      "categories": [
+        "PHONE"
+      ],
+      "expected_output": "{\"phoneNumber\": \"<PHONE_1>\"}"
+    },
+    {
+      "id": "phone-camel-mobile-number-key",
+      "text": "mobileNumber: 4155552671",
+      "categories": [
+        "PHONE"
+      ],
+      "expected_output": "mobileNumber: <PHONE_1>"
+    },
+    {
+      "id": "phone-camel-suffix-key",
+      "text": "\"contactPhone\": \"4155552671\"",
+      "categories": [
+        "PHONE"
+      ],
+      "expected_output": "\"contactPhone\": \"<PHONE_1>\""
+    },
+    {
+      "id": "phone-cell-cue",
+      "text": "Cell: 4155552671",
+      "categories": [
+        "PHONE"
+      ],
+      "expected_output": "Cell: <PHONE_1>"
+    },
+    {
+      "id": "phone-vcard-typed-tel",
+      "text": "TEL;TYPE=WORK,VOICE:4155552671",
+      "categories": [
+        "PHONE"
+      ],
+      "expected_output": "TEL;TYPE=WORK,VOICE:<PHONE_1>"
+    },
+    {
+      "id": "phone-vcard-cell-tel",
+      "text": "TEL;TYPE=CELL:4155552671",
+      "categories": [
+        "PHONE"
+      ],
+      "expected_output": "TEL;TYPE=CELL:<PHONE_1>"
+    },
+    {
+      "id": "phone-vcard-repeated-params",
+      "text": "item1.TEL;type=CELL;type=VOICE;type=pref:4155552671",
+      "categories": [
+        "PHONE"
+      ],
+      "expected_output": "item1.TEL;type=CELL;type=VOICE;type=pref:<PHONE_1>"
+    },
+    {
+      "id": "phone-turkish-letter-camel-key",
+      "text": "kullanıcıPhone: 4155552671",
+      "categories": [
+        "PHONE"
+      ],
+      "expected_output": "kullanıcıPhone: <PHONE_1>",
+      "expected_spans": [
+        [
+          16,
+          26,
+          "PHONE"
+        ]
+      ]
+    },
+    {
+      "id": "phone-telephone-cue",
+      "text": "Telephone: 4155552671",
+      "categories": [
+        "PHONE"
+      ],
+      "expected_output": "Telephone: <PHONE_1>"
+    },
+    {
+      "id": "phone-telephone-camel-key",
+      "text": "telephoneNumber=4155552671",
+      "categories": [
+        "PHONE"
+      ],
+      "expected_output": "telephoneNumber=<PHONE_1>"
+    },
+    {
+      "id": "phone-turkish-possessive-camel-key",
+      "text": "{\"cepTelefonu\": \"4155552671\"}",
+      "categories": [
+        "PHONE"
+      ],
+      "expected_output": "{\"cepTelefonu\": \"<PHONE_1>\"}"
+    },
+    {
+      "id": "phone-turkish-possessive-snake-key",
+      "text": "cep_telefonu: 4155552671",
+      "categories": [
+        "PHONE"
+      ],
+      "expected_output": "cep_telefonu: <PHONE_1>"
+    },
+    {
+      "id": "phone-turkish-first-person-cue",
+      "text": "Telefonum: 4155552671",
+      "categories": [
+        "PHONE"
+      ],
+      "expected_output": "Telefonum: <PHONE_1>"
+    },
+    {
+      "id": "phone-telemetry-key-negative",
+      "text": "telemetryId=4155552671",
+      "categories": [],
+      "expected_output": "telemetryId=4155552671"
+    },
+    {
+      "id": "phone-camel-order-number-negative",
+      "text": "{\"orderNo\": \"4155552671\"}",
+      "categories": [],
+      "expected_output": "{\"orderNo\": \"4155552671\"}"
+    },
+    {
+      "id": "phone-turkish-camel-order-number-negative",
+      "text": "{\"siparişNo\": \"4155552671\"}",
+      "categories": [],
+      "expected_output": "{\"siparişNo\": \"4155552671\"}",
+      "expected_spans": []
     },
     {
       "id": "phone-order-number-negative",
