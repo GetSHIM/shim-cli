@@ -377,13 +377,13 @@ def _elapsed_ms() -> int:
     return max(0, round((time.perf_counter() - _STARTED) * 1000))
 
 
-def _attachment_decision(text, policy):
+def _attachment_decision(text, policy, entities):
     from shim_cli.guard import evaluate
 
     if text is None or _elapsed_ms() > ATTACHMENT_SECONDS * 1000:
         return None
     try:
-        found = evaluate(text, policy.entities, policy.custom, policy.reveal)
+        found = evaluate(text, entities, policy.custom, policy.reveal)
     except Exception:
         return None
     return None if found.partial and not found.blocked else found
@@ -480,7 +480,7 @@ def _forget(session_id: str) -> bytes:
     return b""
 
 
-def _described(source: bytes | dict, root: str = "") -> tuple:
+def _described(source: bytes | dict, root: str = "", policy=None) -> tuple:
     """Tool label, target, the payload at `root` and the tool's own name,
     from as much as parses.
 
@@ -492,7 +492,7 @@ def _described(source: bytes | dict, root: str = "") -> tuple:
 
     from shim_cli.session.record import (
         UNKNOWN_TOOL_LABEL,
-        display_label,
+        scrubbed_label,
         scrubbed_target,
     )
 
@@ -522,15 +522,10 @@ def _described(source: bytes | dict, root: str = "") -> tuple:
         found = _prefix_event(source)
         tool = found["tool_name"]
         target = target or found["target"]
-    label = display_label(tool, UNKNOWN_TOOL_LABEL)
     try:
-        from shim_cli.guard import evaluate
-
-        if label != UNKNOWN_TOOL_LABEL:
-            decision = evaluate(label)
-            if decision.counts:
-                label = display_label(decision.redacted_text, UNKNOWN_TOOL_LABEL)
-        target = scrubbed_target(target, evaluate)
+        scrub = _record_scrub(policy)
+        label = scrubbed_label(tool, scrub)
+        target = scrubbed_target(target, scrub)
     except Exception:
         label, target = UNKNOWN_TOOL_LABEL, ""
     return label, target, payload, tool
@@ -544,6 +539,7 @@ def _uninspected(
     reason: str,
     action: str,
     described: tuple,
+    policy,
 ) -> None:
     try:
         from shim_cli.session import remember
@@ -553,7 +549,7 @@ def _uninspected(
             Record,
         )
 
-        tool, target, *_ = described or _described(source)
+        tool, target, *_ = described or _described(source, "", policy)
         remember(
             session_id,
             Record(
@@ -567,7 +563,7 @@ def _uninspected(
                 note=f"{NOT_INSPECTED}: {reason}",
             ),
             _elapsed_ms(),
-            _policy_ledger(),
+            policy is not None and policy.ledger,
         )
     except Exception:
         pass
@@ -609,11 +605,12 @@ def _not_inspected(
     answer or the record comes from the payload.
     """
     reason = reason or _ANALYSIS_FAILED
+    policy = _settings()
     try:
         from shim_cli.events.pipeline import UNINSPECTED
 
         entry = entry or _tool_entry(client, event)
-        described = _described(source, entry.root if entry else "")
+        described = _described(source, entry.root if entry else "", policy)
         label, _target, payload, name = described
         output = (
             entry.encode(UNINSPECTED, payload, reason, "", label, name)
@@ -637,6 +634,7 @@ def _not_inspected(
             reason,
             "deny" if withheld else "report",
             described,
+            policy,
         )
     return output
 
@@ -801,13 +799,29 @@ def _issue(session_id: str, runs: tuple) -> None:
         spool.issue(session_id, runs)
 
 
-def _policy_ledger() -> bool:
+def _record_scrub(policy):
+    """The one scan for what a record keeps of a path or a tool name: every
+    type the settings name anywhere, every default type and the user's own
+    patterns, and never a revealed digit. Without settings, the defaults."""
+    from shim_cli.guard import evaluate
+    from shim_cli.guard.entities import DEFAULT_ENTITIES
+
+    if policy is None:
+        return evaluate
+    scoped = (name for names in policy.tool_entities.values() for name in names)
+    entities = tuple(dict.fromkeys((*DEFAULT_ENTITIES, *policy.entities, *scoped)))
+    return lambda text: evaluate(text, entities, policy.custom)
+
+
+def _settings():
+    """The settings, or None when they cannot be read. A record is scrubbed
+    with them, or with the defaults; it never keeps a value raw."""
     try:
         from shim_cli.config import load_policy
 
-        return load_policy().ledger
+        return load_policy()
     except Exception:
-        return False
+        return None
 
 
 def _tool_output(
@@ -869,6 +883,7 @@ def _tool_output(
         _protected(raw),
         lambda: _issued(session_id),
         lambda runs: _issue(session_id, runs),
+        _record_scrub(policy),
     )
     remember(session_id, outcome.record, _elapsed_ms(), policy.ledger)
     if (
@@ -1008,10 +1023,11 @@ def _output(raw: bytes, client: str = "codex", ends: float | None = None) -> byt
                 from shim_cli.session import remember
 
                 policy = load_policy()
+                entities = policy.entities_for("", event or _PROMPT_EVENT)
                 # Held here only: the names the redacted prompt shows, for D3.
                 numbering = numbering_for((prompt,))
                 decision = evaluate(
-                    prompt, policy.entities, policy.custom, policy.reveal, numbering
+                    prompt, entities, policy.custom, policy.reveal, numbering
                 )
                 if decision.partial:
                     return error_output()
@@ -1021,11 +1037,12 @@ def _output(raw: bytes, client: str = "codex", ends: float | None = None) -> byt
                     from shim_cli.clients.claude.hook import attached
                     from shim_cli.session.record import scrubbed_target
 
+                    scrub = _record_scrub(policy)
                     files = [
                         (
-                            scrubbed_target(name, evaluate),
+                            scrubbed_target(name, scrub),
                             text,
-                            _attachment_decision(text, policy),
+                            _attachment_decision(text, policy, entities),
                         )
                         for name, text in attached(prompt, document.get("cwd"))
                     ]

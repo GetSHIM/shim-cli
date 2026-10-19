@@ -4,6 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from shim_cli import json_bytes
+from shim_cli.guard.evaluate import evaluate as default_scrub
 from shim_cli.guard.evaluate import placeholder_names
 from shim_cli.policy import (
     ALLOW,
@@ -23,9 +24,8 @@ from shim_cli.policy import (
 )
 from shim_cli.session.record import (
     NOT_INSPECTED,
-    UNKNOWN_TOOL_LABEL,
     Record,
-    display_label,
+    scrubbed_label,
     scrubbed_target,
 )
 
@@ -400,8 +400,14 @@ def process(
     protected=None,
     issued=None,
     issue=None,
+    scrub=None,
 ) -> Outcome:
     """One tool event's answer and record.
+
+    `scrub` scans the target and tool label the record keeps, with the
+    settings' whole scope and no reveal. The hook always passes the one
+    built from the settings; the default types, used when it is left out,
+    serve only the unit tests that call this without any settings.
 
     `issued()` gives the (type, first, last) runs of placeholder numbers shim
     issued in this session, and `issue(runs)` adds to them when this event is
@@ -415,12 +421,9 @@ def process(
     # An MCP or unknown tool's input may go anywhere: never rewritten.
     unrouted = direction == OUTBOUND and kind != OUTBOUND
     mode = mode_for(direction, tool)
-    target = scrubbed_target(event.target, evaluate)
-    tool_label = display_label(tool, UNKNOWN_TOOL_LABEL)
-    if tool_label != UNKNOWN_TOOL_LABEL:
-        decision = evaluate(tool_label)
-        if decision.counts:
-            tool_label = display_label(decision.redacted_text, UNKNOWN_TOOL_LABEL)
+    scrub = scrub or default_scrub
+    target = scrubbed_target(event.target, scrub)
+    tool_label = scrubbed_label(tool, scrub)
     if entities_for is not None:
         scoped = entities_for(tool, entry.event)
         original = evaluate

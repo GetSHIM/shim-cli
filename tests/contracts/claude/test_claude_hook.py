@@ -359,7 +359,7 @@ def test_an_oversized_mcp_result_is_withheld_and_still_reaches_the_summary(
         "mcp__drive__read",
         "tool_response",
         [{"type": "text", "text": f"AWS_ACCESS_KEY_ID={AWS_KEY}\n" + "x" * 1_200_000}],
-        tool_input={"path": "/work/big.txt"},
+        tool_input={"path": f"/work/{AWS_KEY}/big.txt"},
         session_id="oversized",
     )
 
@@ -372,8 +372,8 @@ def test_an_oversized_mcp_result_is_withheld_and_still_reaches_the_summary(
     )
     [record] = _spooled(tmp_path)
     assert record["tool_name"] == "mcp__drive__read"
-    # The record keeps the path; the summary is what shortens it to a name.
-    assert record["target"] == "/work/big.txt"
+    # The record keeps the path, scrubbed; the summary shortens it to a name.
+    assert record["target"] == "/work/<SECRET_1>/big.txt"
     assert (record["action"], record["note"]) == ("deny", "not inspected: too large")
 
 
@@ -389,7 +389,7 @@ def test_an_oversized_built_in_result_is_reported_as_reaching_the_model(
         "Read",
         "tool_response",
         {"content": "x" * 1_200_000},
-        tool_input={"file_path": "/work/big.txt"},
+        tool_input={"file_path": f"/work/{AWS_KEY}/big.txt"},
         session_id="oversized",
     )
 
@@ -398,7 +398,10 @@ def test_an_oversized_built_in_result_is_reported_as_reaching_the_model(
     assert (result.returncode, result.stderr) == (0, b"")
     assert json.loads(result.stdout) == _unreplaced("Read", "too large")
     [record] = _spooled(tmp_path)
-    assert (record["tool_name"], record["target"]) == ("Read", "/work/big.txt")
+    assert (record["tool_name"], record["target"]) == (
+        "Read",
+        "/work/<SECRET_1>/big.txt",
+    )
     assert (record["action"], record["note"]) == (
         "report",
         "not inspected: too large",
