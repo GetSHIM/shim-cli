@@ -779,6 +779,15 @@ A pattern that backtracks badly is refused before it is saved:
 FAIL pattern BAD backtracks on repeated input; simplify it
 ```
 
+It is tried on runs of digits, letters, spaces and separators, on pairs of them
+alternating and on the pattern's own words. `shim doctor` checks the patterns
+already in the file the same way, with each entry's `ignore_case`, and fails
+with `CUSTOM_PATTERN_UNSAFE`. An unanchored greedy pattern such as
+`\w+@\w+\.internal`, `[A-Z]+_TOKEN` or `.*@corp` is refused, so a pattern 1.2.2
+accepted can now fail doctor; bound it
+(`\b\w{1,64}@\w{1,64}\.internal\b`). [The privacy
+notes](privacy.md#patterns-you-named-yourself) say what the check cannot see.
+
 Matches appear as `<CUSTOM_1>`, `<CUSTOM_2>` in the text and are named in the
 summary's `custom` line.
 
@@ -1056,7 +1065,7 @@ Which direction a tool call takes depends on the client and the tool's name:
 A tool result is `inbound`, except the answer you type to `AskUserQuestion` or
 `vscode_askQuestions`, which is `local-tool`. A key naming one tool overrides
 its direction, so `"mcp__crm__lookup" = "warn"` reports that MCP tool's
-findings instead of refusing the call. A tool shim does not know, such as one a
+findings instead of refusing the call, and a refusal names that key. A tool shim does not know, such as one a
 newer client adds or a host adds beside the built-ins, is treated as
 `outbound` until it is classified. The full lists are `TOOLS` in
 `src/shim_cli/policy.py`, read from Claude Code 2.1.286 and Copilot Chat

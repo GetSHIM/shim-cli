@@ -123,7 +123,14 @@ withheld, tool calls are denied and tool results are withheld, each naming
 read again, up to three times, rather than refused.
 
 Where a checksum exists it is verified, so a mistyped IBAN or Turkish national
-ID is not reported. An email address counts only on a public domain, one on the
+ID is not reported. A card of 18 or 19 digits is read for the issuers that print
+them (Visa, Maestro, Discover and UnionPay, JCB, Mir). A US SSN written as nine
+bare digits is masked only right after an `ssn`, `SSNs` or `social security
+(number)` cue, with up to eight separator characters between
+(`"ssn": "219099999"`), or right after such an SSN in a list
+(`SSNs: 219099999, 111223333`); nine digits after other words are not, and in
+a list joined by a word (`SSNs: a and b`) only the first is. An email address
+counts only on a public domain, one on the
 public suffix list, so `ops@acme.internal` or `dev@build.local` is not an email
 to shim; a team with internal mail domains adds a custom pattern. Detection also stays deliberately quiet on values that name
 nobody: the loopback and unspecified addresses (`127.0.0.1`, `0.0.0.0`, `::1`)
@@ -174,7 +181,8 @@ secret word glued onto a prefix in the same case counts too: `PGPASSWORD`,
 `DBPASSWORD`, `SECRETKEY`, `ACCESSTOKEN`, `OPENAIAPIKEY`, `DBPassword`,
 `registrytoken`, `refreshtoken`. A glued `PASS` never does, so `BYPASS`,
 `COMPASS` and `LOWPASS` stay quiet. Digits, `_` or `.` may follow the secret
-word: `PASSWORD2`, `PGPASSWORD_PROD`, `DBPASSWORD.prod`.
+word: `PASSWORD2`, `PGPASSWORD_PROD`, `DBPASSWORD.prod`. A value under a key
+needs at least six characters, so `DB_PASSWORD=admin` is not masked.
 
 The value need not follow `=` or `:` directly. A typed declaration masks its
 literal initializer in Python, TypeScript (also `password?:`), Kotlin, Swift
@@ -198,7 +206,18 @@ assignment form leaves alone; that is noise, not a leak.
 The prefixes are AWS, GitHub (classic and fine-grained), GitLab, Slack, Google,
 npm, Hugging Face, Stripe, OpenAI and SendGrid, plus JSON web tokens, private key
 blocks, Slack and Discord webhook URLs, Azure storage `AccountKey` values and
-HTTP `Authorization: Basic` and `Bearer` headers. A
+HTTP `Authorization: Basic` and `Bearer` headers, `Proxy-Authorization` too. A
+private key block is any PEM or PGP `... PRIVATE KEY` block, DSA and encrypted
+keys included, or the SSH2 `---- BEGIN ... ----` form. The GitLab prefixes
+include runner, deploy, trigger, feed and SCIM tokens (`glrt-`, `gldt-`,
+`glptt-`, `glft-`, `glsoat-`), and Slack's include app tokens (`xapp-`). A
+Stripe secret key (`sk_live_`, `sk_test_`) is read wherever it stands, glued
+to a word too, so an identifier such as `Task_live_SessionHandlerAdapter` is
+masked, as noise; a restricted key (`rk_live_`, `rk_test_`) is read unless a
+letter is glued right before it, because `rk_` ends words such as
+`benchmark_test_`. A token right after an escape written as text (`\n`, `\t`,
+`\r`, `\f`, `\b`, `\v`), as a JSON string holds one, is read too:
+`{"env": "A=1\\nsk_live_..."}` is masked. A
 value is not a secret when it only refers to another variable (`${DB_PASS}`,
 `$DB_PASS`, `os.environ[…]`, `process.env.X`, `process.env["X"]`,
 `import.meta.env.X`, `os.Getenv("X")`, `System.getenv("X")`,
@@ -230,10 +249,19 @@ count, and neither does a name built on a variable (`${SECRET_PREFIX}-database`,
 letters alone passes: `DB_PASSWORD=${X:?X}BlueHarborTide` is not masked. A development default
 under a secret's name is masked like any literal there:
 `os.environ.get("SECRET_KEY", "django-insecure-dev-only")`,
-`process.env.JWT_SECRET || "change-me"`. Not read: a Java ternary
+`process.env.JWT_SECRET || "change-me"`. The literal is read whatever it is
+for, so text added to a lookup or or-ed with it is masked as noise
+(`"Bearer " + os.getenv("API_TOKEN") + " ; charset-utf8"`,
+`os.getenv("API_TOKEN") or "token not set!"`), and a variable whose name holds
+a secret word counts as a key does: `getOrDefault("API_TOKEN_REGION",
+"eu-west-1")` masks `eu-west-1`, as `AWS_SECRET_REGION=eu-central-1` does. Not
+read: a call whose arguments each start a line, as Black writes one, an
+operator that opens a line (`os.getenv("X")` then `or "..."` on the next),
+Ruby's `ENV["X"].presence || "..."`, a Java ternary
 (`System.getenv("X") != null ? System.getenv("X") : "..."`), Python's
-`os.environ["X"] if ... else "..."`, and an operator that opens a line
-(`os.getenv("X")` then `or "..."` on the next). A value made only of digits, or
+`os.environ["X"] if ... else "..."`, Swift's
+`ProcessInfo.processInfo.environment["X"] ?? "..."` and Elixir's
+`System.get_env("X", "...")`. A value made only of digits, or
 a file path, is not a secret when the key's last word is not a password word
 (`password`, `passwd`, `pwd`, `pass`, `secret`, `şifre`, `parola`, optionally
 followed by digits), so `TOKEN_TTL=86400` and `DB_PASSWORD_FILE=/run/secret`
@@ -287,9 +315,14 @@ can stay readable.
 The `auth` value that `docker login` writes to a Docker `config.json` and npm's
 `_auth`, each a base64 `user:password`, are secrets as well, and so is Docker's
 `identitytoken`. Besides base64, only percent escapes that form UTF-8 text are
-decoded (`alice%40example.com` is an email): hex, compressed or reversed text,
-or a value with spaces put between its characters, reaches the model as it was
-written.
+decoded (`alice%40example.com` is an email), and text that holds escapes is
+read as written too, so an address beside a broken escape
+(`alice%C3%28@example.com`) is masked. A password, token or user-info that is
+a reference once its escapes are decoded (`%24%7BDB_PASS%7D`,
+`%3Cyour-password%3E`, `%2A%2A%2A`) is not masked. An address split by an
+encoded space (`jane.doe%20%40example.com`) is not detected. Hex, compressed or
+reversed text, or a value with spaces put between its characters, reaches the
+model as it was written.
 
 An email address's local part never holds `/`, `?`, `#`, `&`, `=` or `:`, so
 a path or a URL keeps everything before the address: a `WebFetch` URL becomes
@@ -451,6 +484,18 @@ as with a built-in type, and the placeholder is `<CUSTOM_n>` so the name does
 not reach the model either. Names are bounded to 32 characters and there are at
 most 32 of them.
 
+A pattern that backtracks is refused by `shim config` and fails `shim doctor`
+([`CUSTOM_PATTERN_UNSAFE`](commands.md#error-codes)): it is tried, with its
+`ignore_case`, on runs of digits, letters, spaces and separators, on pairs of
+them alternating and on its own words, up to 10,000 characters. An unanchored
+greedy pattern such as `\w+@\w+\.internal`, `[A-Z]+_TOKEN` or `.*@corp` is
+refused for that reason: it is quadratic, about 11 s on 100,000 characters.
+Bound it instead (`\b\w{1,64}@\w{1,64}\.internal\b`). The check reads how far
+each part of a pattern reaches, and a lookaround with a bounded upper limit
+hides that: `\b(?!\d{0,1099}\D)\d*\d*\d*` is accepted and backtracks on a run
+of 1,100 digits or more. The hook still runs it, and an event that runs it into
+the deadline is withheld or refused, never passed on as inspected.
+
 ### Files you attach with `@`
 
 In Claude Code, `@path` in a prompt attaches that file. The client inlines it
@@ -464,7 +509,10 @@ or a binary file is skipped, and so is a file over 256 KiB, which Claude Code
 reads it, with the invalid bytes replaced. At most 8 files and 1 MB in total are
 read per prompt. A file past that, a file still unread 15 seconds into the hook,
 or one the detector cannot analyse is reported as not inspected, and it never
-withholds the prompt. What it keeps is
+withholds the prompt. A file named twice, or with fragments that name no lines
+(`@notes.txt#1 @notes.txt#2`), is read, reported and recorded once, and past
+the eight-file limit each file is named once. Mentions are found in time
+linear in the prompt, after `。`, `、`, `？` or `！` too. What it keeps is
 what it keeps for a prompt: entity names, counts and the scrubbed name of the
 file. The file's text is scanned in memory and stored nowhere, and shim still
 never reads the session transcript (`transcript_path`).
@@ -582,12 +630,14 @@ deadline. Measured on an M1 under load, 1 MB took about 2.5 s for a numeric
 CSV, 3 s for a run of base64, 1 s for e-mail punctuation, 5 s for a list of
 IP addresses and about 1.4 s for `- 0 - 0 - 0` repeated; text that expands
 eighteen-fold costs about 3 s per 100,000 characters. Not all text: one line
-of single digits in no repeating order joined by ` - `, `/` or `–` is read at
-about 10 to 25 µs per character on an M1, depending on load, so toward the
-1 MB bound such a line can reach the deadline and is handled as above, as an
-event shim could not inspect; the same text split into lines is read about
-ten times faster. A megabyte of distinct valid phone numbers takes about 5 to
-10 s. Text whose keys add context (a JSON result dense with keys near 1 MB)
+of single digits in no repeating order joined by ` - `, `/` or `–` takes about
+2 s for 100 KB, 10 s for 500 KB and 20 s for 1 MB on an M1 under light load,
+so a line toward the 1 MB bound reaches the deadline, sooner on a busy
+machine, and is handled as above, as an event shim could not inspect: never
+passed on as inspected. The same text split into lines is read about ten
+times faster. A megabyte of distinct valid phone numbers takes about 5 to
+10 s, the lower figure with one number a line. Text whose keys add context (a
+JSON result dense with keys near 1 MB)
 takes 4 to 10 s. A phone-shaped number deep in a long table is still checked:
 the phone library's limit of 65,535 tries per text no longer applies.
 

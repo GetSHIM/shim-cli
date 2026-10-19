@@ -57,7 +57,8 @@ CLI use `shim install codex` or `copilot`; [Install](https://github.com/GetSHIM/
   attached with `@` is read and reported, not masked. A path or pattern given
   to a local tool such as `Read` or `Grep` is only reported, and an MCP tool's
   arguments are never masked: a call carrying a finding is refused by
-  default.
+  default, and the refusal names the `[mode]` key that lets that tool
+  through.
 - **Windows is not supported.** macOS and Linux are; WSL is not yet verified.
 
 Detection is best-effort and misses some values. [Privacy](https://github.com/GetSHIM/shim-cli/blob/main/docs/privacy.md) lists every limit.
@@ -238,17 +239,19 @@ hook sits on the client's own tool calls and sees those too.
 What shim-cli detects, and masks wherever the client allows it:
 
 - **Personal data:** email addresses (also written `name[at]domain.tld`),
-  phone numbers, payment cards that pass the Luhn check (Troy and the
-  Mastercard 2-series included), IBANs (lowercase, spaced, or broken over a
-  line), IP and MAC addresses, US SSNs, and Turkish national IDs (also in
+  phone numbers, payment cards that pass the Luhn check (Troy, the
+  Mastercard 2-series and 18- or 19-digit cards included), IBANs (lowercase,
+  spaced, or broken over a line), IP and MAC addresses, US SSNs (nine bare
+  digits after an `ssn` cue too), and Turkish national IDs (also in
   `100 000 001 46` or `100 000 00 146` groups) and tax IDs. Turkish licence plates are the one
   opt-in type: `shim config --enable TR_LICENSE_PLATE`, because coding traffic
   is full of plate-shaped strings such as `[12 GET 200]`.
-- **Keys and tokens:** Anthropic, OpenAI, Stripe and SendGrid keys; Slack
-  tokens, and Slack and Discord webhook URLs; AWS access key IDs; GitHub,
-  GitLab, npm, Hugging Face and Google API tokens; JWTs; private keys in PEM
-  form; Azure storage `AccountKey` values; HTTP `Authorization: Basic` and
-  `Bearer` headers.
+- **Keys and tokens:** Anthropic, OpenAI and SendGrid keys; Stripe secret and
+  restricted keys; Slack tokens, app tokens included, and Slack and Discord
+  webhook URLs; AWS access key IDs; GitHub, npm, Hugging Face and Google API
+  tokens; GitLab tokens, runner and deploy tokens included; JWTs; private keys
+  in PEM, PGP and SSH2 form; Azure storage `AccountKey` values; HTTP
+  `Authorization: Basic` and `Bearer` headers, `Proxy-Authorization` too.
 - **Credentials by context:** the value of a named key such as `DB_PASSWORD`,
   `AWS_SECRET_ACCESS_KEY` or, in Turkish, `şifre` and `parola` with `=` or `:`,
   also with the secret word glued on (`PGPASSWORD`, `SECRETKEY`), in a typed
@@ -265,10 +268,9 @@ What it does not detect: person names, postal addresses, a password with no key
 name or known prefix (`the login is Synthetic-pass-0000`), and an email address
 at an internal domain such as `ops@acme.internal`. [Your own
 patterns](https://github.com/GetSHIM/shim-cli/blob/main/README.md#your-own-patterns) cover what your project has that these do not.
-It also misses PGP and DSA private key blocks, Stripe restricted keys
-(`rk_live_`), Slack app tokens (`xapp-`), GitLab runner and deploy tokens, and
-a digit-only password under a key whose last word is not a password word
-(`PGPASSWORD_PROD=12345678`); the [1.2.3 release
+It also misses a digit-only password under a key whose last word is not a
+password word (`PGPASSWORD_PROD=12345678`) and an address split by an encoded
+space (`jane.doe%20%40example.com`); the [1.2.3 release
 notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/1.2.3.md#known-gaps)
 list every known gap.
 
@@ -665,7 +667,8 @@ While reading results shim also flags text that is trying to give the model
 orders, in English or Turkish — "ignore all previous instructions", "önceki tüm
 talimatları yok say", impersonated system messages, invisible characters.
 Turkish is read however it is typed (capitals, no accents, separate accent
-marks); a commit subject such as `fix: eski komutları unut`, a data line such as
+marks); a commit subject that names a flag, such as
+`fix: eski komutları unut bayrağını kaldır`, a data line such as
 `Sistem: Linux 6.1` or a noun phrase such as `kullanıcıya gösterme mantığı` is
 not flagged. These are **reported and never acted on**: rewriting a tool result because it reads
 as imperative would corrupt legitimate content, and nothing is ever blocked for
@@ -849,7 +852,7 @@ Every figure here was measured on the released build, not estimated.
 | Tests | **4,000+**, one command: `python scripts/check.py` — lock, lint, format, types, suite, wheel, sdist |
 | Hook cost | **70 ms** median end to end, interpreter start included; **42 ms** for a session summary. CI and the release fail when a median passes 420 ms, or 2,000 ms for a prompt built from the shapes that once made the detector quadratic |
 | With 32 custom patterns | **+0.6 ms** median against the same prompt with none |
-| Detector corpus | **869 cases** in five corpora (`guard-v2` 349, `parity-v1` 475, `guard-tools-v1` 24, `custom-v1` 10, `reveal-v1` 11), graded on exact redacted output rather than category presence, and the gateway's own 140-case corpus, against which every difference is pinned with its reason |
+| Detector corpus | **869 cases** in five corpora (`guard-v2` 349, `parity-v1` 475, `guard-tools-v1` 24, `custom-v1` 10, `reveal-v1` 11), graded on exact redacted output rather than category presence, and the gateway's own 140-case corpus, against which 15 differences are pinned with their reason, 13 of them cases shim-cli misses |
 | Release evidence | SBOM, provenance and Sigstore bundles on the release page from 0.3.2, with the `gh attestation verify` command in [the compatibility record](https://github.com/GetSHIM/shim-cli/blob/main/docs/compatibility.md#100-release-evidence) |
 
 <p align="center">

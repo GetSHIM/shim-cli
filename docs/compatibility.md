@@ -460,22 +460,25 @@ could pass. It has been superseded by:
 
 | Corpus | Cases | Contract |
 | --- | ---: | --- |
-| `guard-v2.json` | 335 | Exact redacted output for every case, with every built-in type enabled, plus source spans for normalization-sensitive cases. |
+| `guard-v2.json` | 349 | Exact redacted output for every case, with every built-in type enabled, plus source spans for normalization-sensitive cases. |
 | `guard-tools-v1.json` | 24 | Exact output at 25 scanned paths in captured tool payloads, per event and policy direction. From 1.2.2 each case runs through the whole hook with no settings file; the `PostToolBatch` cases, an event shim does not install, are graded as no output, and their detector redaction is kept as `expected_redaction`. |
 | `parity-v1.json` | 475 | Exact findings, spans, scores, and redacted output from the previous Presidio implementation. |
 | `custom-v1.json` | 10 | Exact output with your own patterns, including where they overlap a built-in type. |
 | `reveal-v1.json` | 11 | Exact output with the last digits kept by `[reveal]`. |
 | `gateway-detection-v1.json` | 140 | The gateway's own case file, copied byte for byte; see [Gateway parity](#gateway-parity). |
 
-Of the 475 parity cases, 405 remain byte-identical. Eight are deliberately
+Of the 475 parity cases, 394 remain byte-identical. Eight are deliberately
 left unmasked: `0.0.0.0` and `::1`, which identify no person or remote host and
-whose masking erased a meaningful bind-address distinction; five bare ids the
-phone recognizer used to claim; and a connection string with no credentials in
-it. Thirty-seven still mask, over fewer characters: thirty-six connection
+whose masking erased a meaningful bind-address distinction; four bare ids the
+phone recognizer used to claim; `078-05-1120`, the Woolworth wallet-card SSN,
+written bare, which names no one; and a connection string with no credentials
+in it. Thirty-seven still mask, over fewer characters: thirty-six connection
 strings lose only their user and password, and one address no longer runs into
-a query string. Twenty-two mask more than they did, ported from the gateway:
-twenty lowercase IBANs with a valid checksum, and two spaced IBANs that read
-as one IBAN instead of a card over their middle digits. Three private keys
+a query string. Thirty-three mask more than they did: twenty lowercase IBANs
+with a valid checksum and two spaced IBANs that read as one IBAN instead of a
+card over their middle digits, ported from the gateway; nine 19-digit cards,
+plain, spaced and hyphenated, where the frozen build stopped at 17 digits or
+masked the first 16; and two bare 9-digit SSNs right after an `ssn` cue. Three private keys
 mask the same span and keep its line breaks after the placeholder, so every
 line after the key keeps its number. All of them live in
 `DELIBERATE_DIVERGENCES`, `NARROWED_SPANS`, `TIGHTENED` or `KEPT_LINE_BREAKS`
@@ -493,15 +496,17 @@ negative, and the secret-assignment rule has prose negatives.
 `tests/guard/test_gateway_parity.py` runs the gateway's own case file
 (`tests/gateway/privacy/corpus/detection-v1.json` at GetSHIM/shim `ca6b2e9`,
 140 cases) through shim-cli with every type enabled. 125 agree. The other 15
-are pinned with shim-cli's exact output and one of four reasons; a case that
+are pinned with shim-cli's exact output and one of five reasons, 13 of them
+cases shim-cli misses; a case that
 starts agreeing fails the test until its entry is removed.
 
 | Reason | Cases | What it means |
 | --- | ---: | --- |
-| `PRECISION_FIRST` | 6 | An uncued bare number the gateway calls a phone. In coding traffic shim-cli counts it as a bare number unless it is Turkish-shaped or cued. |
+| `PRECISION_FIRST` | 5 | A bare number after no phone cue word in either detector (`my number is` included). The gateway calls every such run a phone; in coding traffic shim-cli counts it as a bare number unless it is Turkish-shaped or cued. |
 | `NOT_PORTED` | 5 | A gateway rule shim-cli does not have: tier 3's dotted phones (`0532.1234567`), a VKN with no tax word, the more-than-four-numbers IP rule (`1.2.3.4.5`), and the whole-URI `DB_URI` (shim-cli masks the user-info only). |
 | `NO_TYPE` | 3 | `FILE_PATH`, `PERSON`, `LOCATION`: shim-cli has no such type. |
 | `CUE_VOCABULARY` | 1 | `contact` is a phone word for the gateway, not for shim-cli. |
+| `ORDER_WORD` | 1 | `Sipariş no:`: a generic number word after an order or invoice word names that number, not a phone, in shim-cli. |
 
 Divergences outside that file, measured against the gateway's analyzer at
 `ca6b2e9`:
