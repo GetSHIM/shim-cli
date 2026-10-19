@@ -97,7 +97,7 @@ def test_invalid_or_incomplete_analyzer_spans_fail_safely(
 ) -> None:
     module = importlib.import_module("shim_cli.guard.analyze")
 
-    def out_of_range(_text: str, _entities: tuple[str, ...], _custom=()) -> list[Match]:
+    def out_of_range(_text: str, *_rest) -> list[Match]:
         return [Match("EMAIL_ADDRESS", 0, 999, 0.9)]
 
     monkeypatch.setattr(module, "analyze_text", out_of_range)
@@ -110,7 +110,7 @@ def test_shared_analysis_deadline_fails_safely(
 ) -> None:
     module = importlib.import_module("shim_cli.guard.analyze")
 
-    def slow(_text: str, _entities: tuple[str, ...], _custom=()) -> list[Match]:
+    def slow(_text: str, *_rest) -> list[Match]:
         time.sleep(1)
         return []
 
@@ -630,7 +630,7 @@ def test_scanning_resumes_inside_a_value_it_dropped() -> None:
     text = "TOKEN_URL=https://x.example.com/?a=1&api_key=0123456789abcdef&b=2"
 
     assert evaluate(text).redacted_text == (
-        "TOKEN_URL=https://x.example.com/?a=1&api_key=<SECRET_1>"
+        "TOKEN_URL=https://x.example.com/?a=1&api_key=<SECRET_1>&b=2"
     )
 
 
@@ -961,10 +961,10 @@ def test_the_hook_deadline_ends_the_scan_of_later_fields(
     real = analyze_module.analyze_text
     calls = []
 
-    def slow(text, entities, custom):
+    def slow(text, *rest):
         calls.append(len(text))
         time.sleep(2)
-        return real(text, entities, custom)
+        return real(text, *rest)
 
     monkeypatch.setattr(hook, "HOOK_DEADLINE_SECONDS", 0.3)
     monkeypatch.setattr(analyze_module, "ANALYSIS_DEADLINE_SECONDS", 0.5)

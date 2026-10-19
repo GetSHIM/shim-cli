@@ -2082,6 +2082,182 @@
         "TR_LICENSE_PLATE"
       ],
       "expected_output": "plaka: <TR_LICENSE_PLATE_1>"
+    },
+    {
+      "id": "secret-connection-string-keeps-its-options",
+      "text": "Server=db;User Id=sa;Password=s3cr3tPass;Encrypt=true",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "Server=db;User Id=sa;Password=<SECRET_1>;Encrypt=true"
+    },
+    {
+      "id": "secret-jdbc-url-keeps-its-options",
+      "text": "jdbc:sqlserver://h;user=sa;password=Hunter2abc9;databaseName=Orders;encrypt=true",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "jdbc:sqlserver://h;user=sa;password=<SECRET_1>;databaseName=Orders;encrypt=true"
+    },
+    {
+      "id": "secret-url-keeps-later-parameters",
+      "text": "https://h/x?password=s3cr3tPass&page=2",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "https://h/x?password=<SECRET_1>&page=2"
+    },
+    {
+      "id": "secret-pipe-separated-fields",
+      "text": "user=admin|password=s3cr3tPass|role=ops",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "user=admin|password=<SECRET_1>|role=ops"
+    },
+    {
+      "id": "secret-in-parentheses",
+      "text": "(password=s3cr3tPass)",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "(password=<SECRET_1>)"
+    },
+    {
+      "id": "secret-call-argument",
+      "text": "f(password=Hunter2abc9)",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "f(password=<SECRET_1>)"
+    },
+    {
+      "id": "secret-template-literal-url",
+      "text": "fetch(`https://x?token=abc123def456&limit=50`)",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "fetch(`https://x?token=<SECRET_1>&limit=50`)"
+    },
+    {
+      "id": "secret-template-literal-end",
+      "text": "fetch(`https://x?token=abc123def456`)",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "fetch(`https://x?token=<SECRET_1>`)"
+    },
+    {
+      "id": "secret-xml-app-setting-value",
+      "text": "<add key=\"DbPassword\" value=\"s3cr3tPass1\"/>",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "<add key=\"DbPassword\" value=\"<SECRET_1>\"/>"
+    },
+    {
+      "id": "secret-html-input-value",
+      "text": "<input name=\"password\" value=\"s3cr3tPass1\">",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "<input name=\"password\" value=\"<SECRET_1>\">"
+    },
+    {
+      "id": "secret-html-input-value-after-type",
+      "text": "<input name=\"password\" type=\"password\" value=\"s3cr3tPass1\">",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "<input name=\"password\" type=\"password\" value=\"<SECRET_1>\">"
+    },
+    {
+      "id": "secret-xml-setting-safe-negative",
+      "text": "<add key=\"Theme\" value=\"dark-mode-1\"/>",
+      "categories": [],
+      "expected_output": "<add key=\"Theme\" value=\"dark-mode-1\"/>"
+    },
+    {
+      "id": "secret-html-empty-password-negative",
+      "text": "<input name=\"password\" value=\"\">",
+      "categories": [],
+      "expected_output": "<input name=\"password\" value=\"\">"
+    },
+    {
+      "id": "secret-escaped-json-secret-string",
+      "text": "{\"SecretString\":\"{\\\"password\\\":\\\"s3cr3tPass1\\\"}\"}",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "{\"SecretString\":\"<SECRET_1>\"}"
+    },
+    {
+      "id": "secret-escaped-json-log-body",
+      "text": "{\"level\":\"info\",\"msg\":\"login\",\"body\":\"{\\\"user\\\":\\\"admin\\\",\\\"password\\\":\\\"s3cr3tPass1\\\"}\"}",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "{\"level\":\"info\",\"msg\":\"login\",\"body\":\"{\\\"user\\\":\\\"admin\\\",\\\"password\\\":\\\"<SECRET_1>\\\"}\"}"
+    },
+    {
+      "id": "secret-escaped-single-quotes",
+      "text": "{\\'password\\': \\'s3cr3tPass1\\'}",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "{\\'password\\': \\'<SECRET_1>\\'}"
+    },
+    {
+      "id": "secret-escaped-quote-inside-a-quoted-value",
+      "text": "\"password\": \"abcdefg\\\"xyz\"",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "\"password\": \"<SECRET_1>\""
+    },
+    {
+      "id": "secret-escaped-json-quote-inside-value",
+      "text": "{\"event\": \"login\", \"body\": \"{\\\"user\\\": \\\"admin\\\", \\\"password\\\": \\\"Xk9mP2qL7\\\\\\\"tail9Zq\\\"}\"}",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "{\"event\": \"login\", \"body\": \"{\\\"user\\\": \\\"admin\\\", \\\"password\\\": \\\"<SECRET_1>\\\"}\"}"
+    },
+    {
+      "id": "secret-escaped-code-negative",
+      "text": "json = \"{\\\"password\\\": \\\"\" + password + \"\\\"}\"",
+      "categories": [],
+      "expected_output": "json = \"{\\\"password\\\": \\\"\" + password + \"\\\"}\""
+    },
+    {
+      "id": "secret-connection-string-empty-password-negative",
+      "text": "Server=localhost;Uid=root;Pwd=;Database=app;Port=3306",
+      "categories": [],
+      "expected_output": "Server=localhost;Uid=root;Pwd=;Database=app;Port=3306"
+    },
+    {
+      "id": "secret-env-password-masks-through-delimiters",
+      "text": "DB_PASSWORD=Xk9;a=mP2qL7zz",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "DB_PASSWORD=<SECRET_1>"
+    },
+    {
+      "id": "secret-html-input-value-before-name",
+      "text": "<input value=\"S3cretPass1\" name=\"password\">",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "<input value=\"<SECRET_1>\" name=\"password\">"
+    },
+    {
+      "id": "secret-xml-legacy-key-numeric-value",
+      "text": "<entry key=\"jdbc.password\" value=\"12345678\"/>",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "<entry key=\"jdbc.password\" value=\"<SECRET_1>\"/>"
     }
   ],
   "generated_cases": [

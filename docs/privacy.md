@@ -174,6 +174,28 @@ decoded (`alice%40example.com` is an email): hex, compressed or reversed text,
 or a value with spaces put between its characters, reaches the model as it was
 written.
 
+A secret's placeholder covers its value and nothing beside it. In a list of
+fields, the list's separator ends the value: a connection string keeps its
+options (`Server=db;Password=<SECRET_1>;Encrypt=true`), a URL its later
+parameters (`?password=<SECRET_1>&page=2`), a log line its `|` fields. Only a
+separator or quote written as itself ends a value: one a percent escape stands
+for is the password's, so `?password=Pa55%26w%3Drd99&next=home` becomes
+`?password=<SECRET_1>&next=home` and `PASSWORD="Pa55word%22rd99"` becomes
+`PASSWORD="<SECRET_1>"`. A `)`, `>` or backtick that closes what the line
+opened stays outside the placeholder: `(password=<SECRET_1>)`. In an XML or
+HTML element the value attribute is masked, quoted or not, and not the
+attribute's name: `<add key="DbPassword" value="<SECRET_1>"/>`,
+`<input type=password value=<SECRET_1>>`. An unquoted value runs, as a browser
+reads it, to whitespace or `>`, so an `=`, `<` or backtick in it is masked
+with it. The attribute after a secret's name is not its value:
+`<input name="password" id=pwfield1>` is left alone. JSON held in a JSON
+string, as structured logs write it, is read one escape level down, and AWS
+Secrets Manager's `SecretString` is masked whole. Where a value's end is
+ambiguous, as in the `.env` line `PASSWORD=s3cr3tPass|next`, the placeholder
+runs through the trailing `;`, `&` or `|` text (`PASSWORD=<SECRET_1>`): outside
+a list each of them can be a character of the password, and a password is
+never partly exposed.
+
 ## What is recorded
 
 shim keeps a record of what it did, so that a tool which is silent when it

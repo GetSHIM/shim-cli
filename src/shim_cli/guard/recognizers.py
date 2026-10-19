@@ -892,9 +892,20 @@ _SECRET_WORD = (
     r"(?:(?![^\W_])|(?-i:(?<=[a-z])(?=[A-Z])))"
 )
 _SECRET_NAME = re.compile(_SECRET_WORD, re.IGNORECASE)
+# A key name ending in a legacy key, as `_LEGACY_ASSIGNMENT` reads one.
+_LEGACY_NAME = re.compile(r"(?<![\w-])(?:" + _LEGACY_KEY + r")\Z", re.IGNORECASE)
+# A quote around a key or a value may be escaped, as in JSON held in a JSON
+# string. A value an escaped quote opened is read one escape level down, so
+# `\\\"` is a quote inside it and a bare quote cannot be. A value an unescaped
+# quote opened runs to its unescaped closing quote, which a word never follows.
+# When there is no such quote six characters in, it runs, as before, to the
+# first quote that is: `password="abcdef\" other="x"` ends at the backslash.
 _SECRET_ASSIGNMENT = re.compile(
-    _SECRET_WORD + r"(?P<tail>[\w.-]{0,64})[\"']?\s*[=:]\s*"
-    r"(?:(?P<quote>[\"'])(?P<quoted>[^\r\n]{6,}?)(?P=quote)"
+    _SECRET_WORD + r"(?P<tail>[\w.-]{0,64})(?:\\?[\"'])?\s*[=:]\s*"
+    r"(?:(?P<quote>(?P<escaped>\\)?(?P<mark>[\"']))(?P<quoted>(?(escaped)"
+    r"(?:\\?(?!(?P=mark))[^\r\n\\]|\\\\(?:\\[^\r\n]|[^\r\n\\])){6,}?"
+    r"|(?:(?:(?!(?P=mark))[^\r\n\\]|\\[^\r\n]){6,}(?=(?P=mark)(?!\w))"
+    r"|[^\r\n]{6,}?)))(?P=quote)"
     r"|(?P<bare>[^\s,}\]\"']{6}))",
     re.IGNORECASE,
 )
@@ -902,17 +913,69 @@ _BARE_END = re.compile(r"[\s,}\]\"']")
 # The gateway's key and value with a space alone between them: the key starts a
 # word and a bare value carries a digit or a symbol, so "token budget" is prose.
 # Unlike the gateway, the space never crosses a line: "# rotate the token" over
-# a line of code is not an assignment.
+# a line of code is not an assignment. A value attribute after the key holds
+# the value: `password value=<SECRET_1>`. A key that is an attribute's value,
+# as in `name="password"` or `name=password`, is followed by the element's
+# next attribute, which is no value: `id=pwfield1` stays.
 _SPACED_ASSIGNMENT = re.compile(
-    r"(?<![^\W_])(?:" + _LEGACY_KEY + r")[\"']?[ \t]+"
+    r"(?<![^\W_])(?:" + _LEGACY_KEY + r")(?P<closed>[\"'])?[ \t]+"
     r"(?:(?P<quote>[\"'])(?P<quoted>[^\r\n]{6,}?)(?P=quote)"
     r"|(?=[^\s,}\]\"']*[0-9!#$%&*+./;<=>?@^_|~-])(?P<bare>[^\s,}\]\"']{6,}))",
     re.IGNORECASE,
 )
+# The element's next attribute, with its value: `aGVsbG8=` is a padded value.
+_ATTRIBUTE_NAME = re.compile(r"[A-Za-z_][\w.:-]*=(?=[\w\"'#/\\])")
 _LEGACY_ASSIGNMENT = re.compile(
-    r"(?<![\w-])[\"']?(?:" + _LEGACY_KEY + r")[\"']?\s*[=:]\s*\Z",
+    r"(?<![\w-])(?:" + _LEGACY_KEY + r")(?:\\?[\"'])?\s*[=:]\s*\Z",
     re.IGNORECASE,
 )
+# `<add key="DbPassword" value="..."/>`, `<input type="password" value="...">`,
+# `<meta name="api-key" content="...">`: the secret's name and its value are
+# two attributes of one element, in either order, and others may sit between.
+# Either may carry a prefix, as `data-name` does, and a value attribute's value
+# may be unquoted: it runs, as a browser reads it, to whitespace or `>`. An
+# attribute follows whitespace, so `value=value=` is one value, read once.
+# `:value` and `th:value` bind an expression, not a value.
+_NAME_ATTRIBUTE = (
+    r"(?<![\w:.-])(?:[\w.:-]*-)?(?:key|name|type|id)\s*=\s*"
+    r"(?P<open>(?:\\?[\"'])?)"
+    r"(?P<key>[\w.:-]{0,64}?" + _SECRET_WORD + r"[\w.:-]{0,64})(?P=open)"
+)
+_VALUE_ATTRIBUTE = (
+    r"(?<!\S)(?:[\w.:-]*-)?(?:value|content)\s*=\s*(?P<quote>\\?[\"'])?"
+    r"(?P<value>(?(quote)(?:(?!(?P=quote))[^\r\n])*|[^\s>]*))(?(quote)(?P=quote))"
+)
+_VALUE_ATTRIBUTE_AT = re.compile(_VALUE_ATTRIBUTE, re.IGNORECASE)
+_OTHER_ATTRIBUTES = (
+    r"(?:\s+[\w:.-]+(?:\s*=\s*(?:\\?\"[^\"\r\n]*\"|\\?'[^'\r\n]*'|[^\s\"'>][^\s>]*))?)"
+    r"{0,8}?\s+"
+)
+_ATTRIBUTE_PAIRS = (
+    re.compile(_NAME_ATTRIBUTE + _OTHER_ATTRIBUTES + _VALUE_ATTRIBUTE, re.IGNORECASE),
+    re.compile(
+        _VALUE_ATTRIBUTE + r"(?=" + _OTHER_ATTRIBUTES + _NAME_ATTRIBUTE + r")",
+        re.IGNORECASE,
+    ),
+)
+# A key that a `;`, `&`, `?` or `|` puts in a list of fields: a connection
+# string's option, a URL's parameter, a log line's field. Only there does the
+# separator end a value. In a .env, YAML or properties value it can be a
+# character of the password. A key has 64 characters at most, so the separator,
+# a space, the key and its `=` fit in `_KEY_REACH`.
+_LISTED_KEY = re.compile(r"(?P<separator>[;&?|])[ \t]?[\w.-]{1,64}=\Z")
+_KEY_REACH = 67
+# The list's next field, whose name may hold spaces (`;Connect Timeout=30`).
+_NEXT_FIELD = {
+    separator: re.compile(re.escape(separator) + r"(?=[ \t]?[A-Za-z_][\w. -]{0,64}=)")
+    for separator in ";&|"
+}
+# What a bare value may end with that belongs to the text around it, and what
+# opens each closing mark.
+_VALUE_MARKS = ";&|)>`"
+_OPENERS = {")": "(", ">": "<", "`": "`"}
+_CLOSING_MARK = re.compile(r"[)>`]")
+_UNQUOTED_END = re.compile(r"[\s>]")
+_LINE_BREAK = re.compile(r"[\r\n]")
 _REFERENCE = re.compile(
     r"\$\{\w+\}?|\$[A-Za-z_]\w*|%\w+%"
     r"|(?:os\.environ\W|process\.env\.|(?:os\.)?getenv\(|env\().*"
@@ -961,7 +1024,84 @@ _VENDOR_TOKEN = re.compile(
 )
 _JWT = re.compile(r"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+")
 _NOT_TOKEN = re.compile(r"[^A-Za-z0-9_-]")
-_SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str | None, float, bool], ...] = (
+
+
+def _depth(text: str, start: int, end: int, closer: str) -> int:
+    """How many of what `closer` closes `text[start:end]` leaves open."""
+    opener = _OPENERS[closer]
+    if opener == closer:
+        return text.count(opener, start, end) % 2
+    return text.count(opener, start, end) - text.count(closer, start, end)
+
+
+def _value_end(text: str, start: int, end: int) -> int:
+    """Where a bare value read from `start` ends, `end` being where its run of
+    value characters does. `text` is the literal text, so a mark the source
+    does not write as itself is NUL and ends nothing. A listed value ends at
+    its list's next field, or at its list's separator among the marks it ends
+    with. Otherwise a value inside brackets or a backtick its line left open
+    ends before the closing marks it ends with that close them, when what it
+    keeps is balanced. A password may hold any of these characters, so nothing
+    else ends it; on a line whose marks do not balance, as in
+    `(x (password=abc123)`, a closing mark of its own can stay outside. A value
+    longer than `_MAX_SHAPED_VALUE` keeps its run, which bounds the work for
+    every value read inside another."""
+    listed = _LISTED_KEY.search(text, max(0, start - _KEY_REACH), start)
+    separator = listed["separator"].replace("?", "&") if listed else ""
+    if separator:
+        reach = min(end, start + _MAX_SHAPED_VALUE + 1)
+        found = _NEXT_FIELD[separator].search(text, start, reach + _KEY_REACH)
+        if found and found.start() < end:
+            return start + len(text[start : found.start()].rstrip(separator))
+    if end - start > _MAX_SHAPED_VALUE:
+        return end
+    marks = start + len(text[start:end].rstrip(_VALUE_MARKS))
+    if separator and (cut := text.find(separator, marks, end)) >= 0:
+        return cut
+    first = _CLOSING_MARK.search(text, marks, end)
+    if first:
+        closer = first.group()
+        line = max(
+            text.rfind("\n", max(0, start - _MAX_SHAPED_VALUE), start) + 1,
+            start - _MAX_SHAPED_VALUE,
+        )
+        opened = _depth(text, line, start, closer)
+        if opened > 0:
+            closing = [i for i in range(first.start(), end) if text[i] == closer]
+            cut = closing[max(len(closing) - opened, 0)]
+            if not _depth(text, start, cut, closer):
+                return cut
+    return end
+
+
+def _quoted_end(text: str, start: int, end: int) -> int:
+    """Where a value quoted from `start` ends, a quote having closed it at
+    `end`. `text` is the literal text: a value whose source writes its opening
+    quote ends only at a quote its source writes, so a `%22` inside it is the
+    password's. With no such quote on its line, it runs to the line's end."""
+    mark = text[start - 1]
+    if mark not in "\"'" or text[end] == mark or text[end : end + 2] == "\\" + mark:
+        return end
+    close = text.find(mark, end)
+    line = _LINE_BREAK.search(text, end, len(text) if close < 0 else close)
+    if line:
+        return line.start()
+    return len(text) if close < 0 else close
+
+
+def _attribute_value(text: str, match: re.Match[str]) -> tuple[int, int]:
+    """The span of a value attribute's value, ended in the literal `text`."""
+    start, end = match.span("value")
+    if match["quote"]:
+        return start, _quoted_end(text, start, end)
+    found = _UNQUOTED_END.search(text, start)
+    return start, found.start() if found else len(text)
+
+
+_SECRET_PATTERNS: tuple[
+    tuple[re.Pattern[str], str | None, float, Callable[[str, int, int], int] | None],
+    ...,
+] = (
     (
         re.compile(
             r"-----BEGIN "
@@ -970,7 +1110,7 @@ _SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str | None, float, bool], ...] = 
         ),
         None,
         0.99,
-        False,
+        None,
     ),
     (
         re.compile(
@@ -980,7 +1120,7 @@ _SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str | None, float, bool], ...] = 
         ),
         None,
         0.99,
-        True,
+        _trim_trailing_prose,
     ),
     (
         re.compile(
@@ -989,7 +1129,7 @@ _SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str | None, float, bool], ...] = 
         ),
         "value",
         0.97,
-        False,
+        _quoted_end,
     ),
     (
         re.compile(
@@ -998,7 +1138,7 @@ _SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str | None, float, bool], ...] = 
         ),
         "value",
         0.97,
-        False,
+        None,
     ),
     (
         re.compile(
@@ -1008,7 +1148,7 @@ _SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str | None, float, bool], ...] = 
         ),
         "value",
         0.97,
-        False,
+        None,
     ),
     (
         re.compile(
@@ -1017,13 +1157,13 @@ _SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str | None, float, bool], ...] = 
         ),
         "value",
         0.97,
-        False,
+        _quoted_end,
     ),
     (
         re.compile(r"--password(?:=|\s+)(?P<value>[^\s]+)", re.IGNORECASE),
         "value",
         0.97,
-        False,
+        _value_end,
     ),
 )
 
@@ -1069,13 +1209,16 @@ def _not_a_secret(
     )
 
 
-def _scan_secret(text: str) -> list[Match]:
+def _scan_secret(text: str, literal: str | None = None) -> list[Match]:
+    """`literal` is `text` with NUL for each character its source does not write
+    as itself: a value is cut only at a mark the source writes."""
+    literal = text if literal is None else literal
     results: list[Match] = []
     for pattern, value_group, score, trim in _SECRET_PATTERNS:
         for match in pattern.finditer(text):
             start, end = match.span(value_group) if value_group else match.span()
-            if trim:
-                end = _trim_trailing_prose(text, start, end)
+            if trim is not None:
+                end = trim(literal, start, end)
             if start < end:
                 results.append(Match("SECRET", start, end, score))
     results.extend(Match("SECRET", *span, 0.99) for span in _vendor_tokens(text))
@@ -1091,19 +1234,43 @@ def _scan_secret(text: str) -> list[Match]:
             if parameter["value"] and _SECRET_NAME.search(parameter["key"]):
                 results.append(Match("SECRET", *parameter.span("value"), 0.97))
     for match in _SPACED_ASSIGNMENT.finditer(text):
-        group = "quoted" if match.group("quoted") is not None else "bare"
-        if not _not_a_secret(match.group(group), None, group == "quoted", False, ""):
-            results.append(Match("SECRET", *match.span(group), 0.97))
+        quoted = match.group("quoted") is not None
+        start, end = match.span("quoted" if quoted else "bare")
+        attribute = match["closed"] or text[match.start() - 1 : match.start()] == "="
+        if quoted:
+            end = _quoted_end(literal, start, end)
+        elif found := _VALUE_ATTRIBUTE_AT.match(text, start):
+            quoted = bool(found["quote"])
+            start, end = _attribute_value(literal, found)
+            if end - start < 6:
+                continue
+        elif attribute and _ATTRIBUTE_NAME.match(text, start):
+            continue
+        if not _not_a_secret(text[start:end], None, quoted, False, ""):
+            cut = end if quoted else _value_end(literal, start, end)
+            if start < cut:
+                results.append(Match("SECRET", start, cut, 0.97))
+    for pattern in _ATTRIBUTE_PAIRS:
+        for match in pattern.finditer(text):
+            key = match["key"]
+            start, end = _attribute_value(literal, match)
+            value = text[start:end]
+            new_key = None if _LEGACY_NAME.search(key) else key
+            if len(value) >= 6 and not _not_a_secret(value, new_key, True, False, ""):
+                results.append(Match("SECRET", start, end, 0.97))
     position = 0
     run = (0, 0)
     while match := _SECRET_ASSIGNMENT.search(text, position):
         quoted = match.group("quoted") is not None
         start, end = match.span("quoted" if quoted else "bare")
-        if not quoted:
+        if quoted:
+            end = cut = _quoted_end(literal, start, end)
+        else:
             if not run[0] <= start < run[1]:
-                found = _BARE_END.search(text, start)
+                found = _BARE_END.search(literal, start)
                 run = (start, found.start() if found else len(text))
             end = run[1]
+            cut = _value_end(literal, start, end)
         position = start
         separator = text[match.end("tail") : match.start("quote") if quoted else start]
         legacy = _LEGACY_ASSIGNMENT.search(
@@ -1114,8 +1281,10 @@ def _scan_secret(text: str) -> list[Match]:
         new_key = None if legacy else text[match.start() : match.end("tail")]
         value = text[start : min(end, start + _MAX_SHAPED_VALUE + 1)]
         after = "" if quoted else text[end : end + 1]
-        if not _not_a_secret(value, new_key, quoted, ":" in separator, after):
-            results.append(Match("SECRET", start, end, 0.97))
+        if start < cut and not _not_a_secret(
+            value, new_key, quoted, ":" in separator, after
+        ):
+            results.append(Match("SECRET", start, cut, 0.97))
     return deduplicate(results)
 
 
@@ -1387,7 +1556,6 @@ _RECOGNIZERS: tuple[tuple[str, Callable[[str], list[Match]]], ...] = (
     ),
     ("TR_VKN", _scan_vkn),
     ("TR_LICENSE_PLATE", _scan_plate),
-    ("SECRET", _scan_secret),
     ("DB_URI", _scan_db_uri),
     ("SECRET", _scan_encoded_secret),
     ("SECRET", _scan_basic_auth),
@@ -1405,13 +1573,15 @@ def scan_custom(text: str, patterns: tuple) -> list[Match]:
 
 
 def analyze_text(
-    text: str, entities: tuple[str, ...], custom: tuple = ()
+    text: str, entities: tuple[str, ...], custom: tuple = (), literal: str | None = None
 ) -> list[Match]:
     requested = frozenset(entities)
     results: list[Match] = []
     for entity, scan in _RECOGNIZERS:
         if entity in requested:
             results.extend(scan(text))
+    if "SECRET" in requested:
+        results.extend(_scan_secret(text, literal))
     if custom and "CUSTOM" in requested:
         results.extend(scan_custom(text, custom))
     ibans = [

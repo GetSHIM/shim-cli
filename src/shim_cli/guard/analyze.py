@@ -245,7 +245,9 @@ def analyze_counting(
     )
     try:
         with _deadline():
-            raw = analyze_text(normalized.text, source_entities, custom)
+            raw = analyze_text(
+                normalized.text, source_entities, custom, normalized.literal
+            )
         bare = [item for item in raw if item.entity_type == BARE_NUMBER]
         claimed = [item for item in raw if item.entity_type != BARE_NUMBER]
         normalized_findings = _resolve_overlaps(

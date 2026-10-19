@@ -18,10 +18,15 @@ _SourceSpan = tuple[int, int]
 
 @dataclass(frozen=True)
 class NormalizedText:
-    __slots__ = ("source_spans", "text")
+    """`literal` is `text` with NUL for each character the source does not
+    write as itself, as a `&` decoded from `%26` or folded from a fullwidth
+    ampersand. A value ends only at a mark its source writes."""
+
+    __slots__ = ("literal", "source_spans", "text")
 
     text: str
     source_spans: tuple[_SourceSpan, ...]
+    literal: str
 
 
 class InputTooLarge(ValueError):
@@ -122,6 +127,7 @@ def normalize(text: str) -> NormalizedText:
         return NormalizedText(
             text,
             tuple((index, index + 1) for index in range(len(text))),
+            text,
         )
 
     decoded, spans = _decode_percent(text)
@@ -137,4 +143,9 @@ def normalize(text: str) -> NormalizedText:
     normalized, normalized_spans = _normalize_unicode(
         "".join(visible_text), visible_spans
     )
-    return NormalizedText(normalized, normalized_spans)
+    literal = "".join(
+        character if end - start == 1 and text[start] == character else "\0"
+        # No `strict=`; see _normalize_unicode. Both come from one loop.
+        for character, (start, end) in zip(normalized, normalized_spans)  # noqa: B905
+    )
+    return NormalizedText(normalized, normalized_spans, literal)
