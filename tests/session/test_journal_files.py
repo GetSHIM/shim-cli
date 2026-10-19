@@ -114,11 +114,19 @@ def _held(root: int, name: str, mode: int, seconds: float) -> threading.Thread:
 def test_concurrent_processes_each_land_their_record_under_a_held_lock(tmp_path):
     path = tmp_path / "journal"
     root = _files.open_root(path)
+    # Each child says when it first finds the lock held and pauses to retry.
     code = """
-import os, sys
+import os, sys, time, types
 from pathlib import Path
 from shim_cli.session import _files
 root = _files.open_root(Path(sys.argv[1]))
+waited = []
+def pause(seconds):
+    if not waited:
+        waited.append(True)
+        print("waiting", flush=True)
+    time.sleep(seconds)
+_files.time = types.SimpleNamespace(monotonic=time.monotonic, sleep=pause)
 print("ready", flush=True)
 sys.stdin.readline()
 try:
@@ -139,15 +147,22 @@ finally:
             )
         for child in children:
             assert child.stdout.readline() == b"ready\n"
-        holder = _held(root, "entries", fcntl.LOCK_EX, 0.03)
-        for child in children:
+        # The first child finds the lock held; the rest are let go as it is
+        # released, so they meet each other's appends: no timer decides it.
+        holder = os.open("entries", os.O_RDWR | os.O_CREAT, 0o600, dir_fd=root)
+        fcntl.flock(holder, fcntl.LOCK_EX)
+        first, *rest = children
+        first.stdin.write(b"go\n")
+        first.stdin.flush()
+        assert first.stdout.readline() == b"waiting\n"
+        for child in rest:
             child.stdin.write(b"go\n")
             child.stdin.flush()
+        os.close(holder)
         for child in children:
             stdout, stderr = child.communicate(timeout=10)
             assert child.returncode == 0, stderr
             assert stdout.endswith(b"True\n")
-        holder.join()
         content = _files.read(root, "entries", 1000)
         assert sorted(content.splitlines()) == [
             f"record-{index}".encode() for index in range(6)

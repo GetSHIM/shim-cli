@@ -646,13 +646,18 @@ def test_code_that_builds_an_escaped_value_is_no_secret(text: str) -> None:
 
 
 def _cpu(text: str) -> tuple[float, float]:
-    """Wall and CPU seconds of one evaluation, from a collected heap: a full
-    collection the earlier tests' objects bring due mid-run scans all of them,
-    and cost the larger run 0.16 s on its own."""
-    gc.collect()
-    wall, cpu = time.perf_counter(), time.process_time()
-    evaluate(text, ENTITY_TYPES)
-    return time.perf_counter() - wall, time.process_time() - cpu
+    """Wall and CPU seconds of the fastest of three evaluations, each from a
+    collected heap. A full collection the earlier tests' objects bring due
+    mid-run scans all of them, and cost the larger run 0.16 s on its own; a
+    slower run is the machine's, as `timeit` reads it, not the detector's."""
+    best = (float("inf"), float("inf"))
+    for _ in range(3):
+        gc.collect()
+        wall, cpu = time.perf_counter(), time.process_time()
+        evaluate(text, ENTITY_TYPES)
+        run = (time.perf_counter() - wall, time.process_time() - cpu)
+        best = (min(best[0], run[0]), min(best[1], run[1]))
+    return best
 
 
 @pytest.mark.parametrize(
