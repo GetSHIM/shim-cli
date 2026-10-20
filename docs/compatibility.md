@@ -223,6 +223,27 @@ tool listings). `history.jsonl`, beside `projects/`, holds one line per
 interactive prompt with the keys `display`, `pastedContents`, `project`,
 `sessionId` and `timestamp`; `sessionId` is the transcript's file name.
 
+## 1.2.3 release evidence
+
+Recorded 20 October 2026 on macOS 26.4 arm64 (8 GB), uv 0.12.5, on the 1.2.3
+candidate tree and its rebuilt `bin/shim.pyz`. Every hook run used a scratch
+`HOME` and `TMPDIR`. Claude Code live sessions used the real home for sign-in
+only, with `claude -p --setting-sources project --settings <scratch
+settings.json>` and shim's config and temporary folders from a scratch home.
+Every value was synthetic.
+
+| Evidence | Recorded result |
+| --- | --- |
+| Local gate | `python scripts/check.py` green on the candidate: lint, format, types, 5,702 tests, build, `git diff --check`. |
+| Release notes | 14 claims replayed through the hook, each as the notes state it: one number per value across a result's fields, a URL keeping its host and folders, a `.git` remote left alone, a digit-only password masked, a connection string keeping its options, `amqp://` as `SECRET` and `mariadb://` as `DB_URI`, `rk_live_` and a cued SSN, `os.Getenv` passing an MCP write and a fallback literal refusing one with the `[mode]` key named, an issued placeholder's write refused and an unissued one's written, `shim keys --json` giving `FILE_UNREADABLE`, a Turkish override written as a commit subject flagged, and a safe `Read` answered with nothing. |
+| Claude Code | tested: 2.1.291, run on 2.1.286. 6 live sessions in the release review: a `Read` of a file holding an AWS key reached the model as `<SECRET_1>`; a `Read` of a file holding a Stripe key, a DSA private key block, a cued SSN and a Stripe restricted key reached it as `<SECRET_1>` to `<SECRET_3>` and `<US_SSN_1>`, the key block keeping its line breaks; an agent `Write` of that masked text back to a new file was refused with the placeholder named and the file was not created; an agent `Write` of a password as an environment lookup's fallback was reported and its `Read` back reached the model as `<SECRET_1>`; under `user-prompt = "enforce"` a prompt holding `https://api.example.com/v1/users/jane.doe@example.com/profile` was blocked and its `0600` redacted copy read `https://api.example.com/v1/users/<EMAIL_1>/profile`; a 13 KB prompt of `@notes.txt` mentions was answered in 150 ms with the attached key reported. |
+| Plugin archive on 3.9 | The rebuilt archive run with the stock macOS `python3` 3.9.6 (`-I -S -B`) masked an AWS key in a `Read` result and answered a safe prompt with nothing. CI builds a fresh archive and runs it on 3.9 and 3.13. |
+| Hook cost | 1 KB prompt holding secrets, median of 60, interleaved with the 1.2.2 release on the same machine: 92 ms through the package on 3.13 (1.2.2: 79 ms), 174 ms through the archive on 3.10 (149 ms) and 200 ms on 3.13 (174 ms), 15–17% above 1.2.2. `scripts/benchmark_hook.py`, 60 per fixture through the package on 3.13: safe 75 ms, block 76 ms, stop 45 ms, custom 76 ms, adversarial 163 ms, each under its ceiling. |
+| Codex CLI | tested: 0.159.0. Replayed events only, **no live session**: the Codex hook contract tests in `tests/contracts/codex`, run by the local gate. |
+| GitHub Copilot CLI | tested: 1.0.83. Replayed events only, **no live session**: the Copilot hook contract tests in `tests/contracts/copilot`, run by the local gate. |
+| VS Code | tested: 1.137.0. Replayed events only, **no live session**: the VS Code hook contract tests in `tests/contracts/vscode`, write-back refusals included, run by the local gate. |
+| Windows | Unchanged: every command still refuses with exit 2 before touching a file. |
+
 ## 1.2.2 release evidence
 
 Recorded 18 October 2026 on macOS 26.4 arm64 (8 GB), uv 0.12.5, on the 1.2.2

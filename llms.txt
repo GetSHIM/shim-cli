@@ -18,5 +18,4 @@ What it does when it cannot inspect: from 1.2.2 it fails closed in every mode. T
 
 ## Optional
 
-- [1.2.3 release notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/1.2.3.md): the next release, in preparation
-- [1.2.2 release notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/1.2.2.md): the newest release
+- [1.2.3 release notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/1.2.3.md): the newest release

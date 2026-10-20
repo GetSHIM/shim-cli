@@ -384,7 +384,7 @@ and the `shim` package does not carry the plugin folder. Clone the newest
 release tag to a folder you keep:
 
 ```console
-git clone --depth 1 --branch v1.2.2 https://github.com/GetSHIM/shim-cli ~/.local/share/shim-cli
+git clone --depth 1 --branch v1.2.3 https://github.com/GetSHIM/shim-cli ~/.local/share/shim-cli
 ```
 
 Then add the plugin folder to your user `settings.json` (Command Palette,
@@ -936,6 +936,7 @@ In a script, `shim ledger purge --yes` skips the question.
 - [Architecture](https://github.com/GetSHIM/shim-cli/blob/main/docs/architecture.md)
 - [Compatibility](https://github.com/GetSHIM/shim-cli/blob/main/docs/compatibility.md)
 - [Privacy](https://github.com/GetSHIM/shim-cli/blob/main/docs/privacy.md)
+- [1.2.3 release notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/1.2.3.md)
 - [1.2.2 release notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/1.2.2.md)
 - [1.2.1 release notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/1.2.1.md)
 - [1.2.0 release notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/1.2.0.md)
