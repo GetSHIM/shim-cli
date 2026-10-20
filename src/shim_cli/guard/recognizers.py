@@ -94,8 +94,19 @@ def _compile(
 
 
 def deduplicate(results: list[Match]) -> list[Match]:
+    unique = set(results)
+    if len({(item.entity_type, item.score, item.label) for item in unique}) == 1:
+        # One type and one score: the order is by start, longest first, and a
+        # span is dropped when one before it reaches as far, as below.
+        kept: list[Match] = []
+        furthest = -1
+        for item in sorted(unique, key=lambda item: (item.start, -item.end)):
+            if item.end > furthest:
+                kept.append(item)
+                furthest = item.end
+        return kept
     ordered = sorted(
-        set(results),
+        unique,
         key=lambda item: (
             -item.score,
             item.start,
@@ -112,7 +123,7 @@ def deduplicate(results: list[Match]) -> list[Match]:
     }
     # Prefix-maximum Fenwick trees preserve score order in O(n log n).
     trees = {entity: [-1] * (len(offsets) + 1) for entity, offsets in starts.items()}
-    kept: list[Match] = []
+    kept = []
     for item in ordered:
         tree = trees[item.entity_type]
         index = indices[item.entity_type][item.start]
@@ -224,7 +235,9 @@ def _validate_card(text: str) -> bool:
 
 
 # Each pattern's first character is a hex digit or a colon: the lookahead lets
-# the engine pass any other position in one test; see `_SECRET_WORD`.
+# the engine pass any other position in one test; see `_SECRET_WORD`. The two
+# IPv6 patterns start with a colon, or up to four hex digits and a colon: a
+# second lookahead passes a run of digits, a date or a dotted address there.
 _IP_PATTERNS = _compile(
     (
         (
@@ -235,7 +248,8 @@ _IP_PATTERNS = _compile(
             0.6,
         ),
         (
-            r"(?=[0-9A-Fa-f])(?<![\w:])(?:(?:[0-9A-Fa-f]{1,4}:){1,5}:(?:[0-9A-Fa-f]{1,4}:){0,4}"
+            r"(?=[0-9A-Fa-f])(?=[0-9A-Fa-f]{1,4}:)(?<![\w:])"
+            r"(?:(?:[0-9A-Fa-f]{1,4}:){1,5}:(?:[0-9A-Fa-f]{1,4}:){0,4}"
             r"|(?:[0-9A-Fa-f]{1,4}:){6})"
             r"(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}"
             r"(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)"
@@ -251,7 +265,8 @@ _IP_PATTERNS = _compile(
             0.6,
         ),
         (
-            r"(?=[0-9A-Fa-f:])(?<![\w:])(?:(?:[0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}"
+            r"(?=[0-9A-Fa-f:])(?=[0-9A-Fa-f]{0,4}:)(?<![\w:])"
+            r"(?:(?:[0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}"
             r"|(?:[0-9A-Fa-f]{1,4}:){1,7}:"
             r"|:(?::[0-9A-Fa-f]{1,4}){1,7}"
             r"|(?:[0-9A-Fa-f]{1,4}:){1,6}:[0-9A-Fa-f]{1,4}"
@@ -282,16 +297,21 @@ _VERSION_CUE = re.compile(
     re.IGNORECASE,
 )
 _VERSION_CUE_WINDOW = 16
+# Every cue holds a "v", a "ü" or an "=", in either case: a window without one
+# is passed in one scan.
+_VERSION_CUE_MARK = re.compile("[vVüÜ=]")
 
 
 def _scan_ip(text: str) -> list[Match]:
-    return [
-        found
-        for found in _scan(text, "IP_ADDRESS", _IP_PATTERNS, invalidate=_invalidate_ip)
-        if not _VERSION_CUE.search(
-            text, max(0, found.start - _VERSION_CUE_WINDOW), found.start
-        )
-    ]
+    kept = []
+    for found in _scan(text, "IP_ADDRESS", _IP_PATTERNS, invalidate=_invalidate_ip):
+        window = max(0, found.start - _VERSION_CUE_WINDOW), found.start
+        if not (
+            _VERSION_CUE_MARK.search(text, *window)
+            and _VERSION_CUE.search(text, *window)
+        ):
+            kept.append(found)
+    return kept
 
 
 def _invalidate_ip(text: str) -> bool:
@@ -525,6 +545,13 @@ _BACK_REFERENCE = re.compile(r"\\\d")
 # The shortest number of every region has four digits; prefixes only add more.
 _FEWEST_PHONE_DIGITS = 4
 _ENOUGH_DIGITS = re.compile(rf"(?:\D*\d){{{_FEWEST_PHONE_DIGITS}}}")
+# A candidate whose parts all read "": no "/", "(", space or wide hyphen, which
+# the library's inner patterns (`_INNER_MATCHES`) break on, so every part is
+# free of dots, and fewer than four digits between dots. With no newline, a
+# candidate `_SPELLED` passes has fewer than three letters, and so has a part.
+_NOT_A_BREAK = r"[^\d./(\s\u2012-\u2015\uff0d]*"
+_FEW_DIGITS = rf"(?:{_NOT_A_BREAK}\d){{0,3}}{_NOT_A_BREAK}"
+_FEW_DIGITS_A_PART = re.compile(rf"{_FEW_DIGITS}(?:\.{_FEW_DIGITS})*")
 # A `+` and a known country code read the same from every region.
 _ANY_REGION = "*"
 # Characters the library's candidate pattern cannot hold (it reads only digits,
@@ -558,18 +585,32 @@ _NUMBER_TYPES = (
 
 
 class _Memo(dict):
-    """A dict emptied once what it holds passes `budget` bytes."""
+    """A dict of recent entries and `older`, the ones before them, at most
+    `budget` bytes together. Once the recent entries pass half of it they
+    become `older` and the older ones are dropped, so a text read after
+    another keeps what it repeats: emptied whole when full, the memo lost them
+    every time, and a 1 MB phone list read after another took a third
+    longer."""
 
     def __init__(self, budget: int) -> None:
         super().__init__()
         self.budget = budget
         self.held = 0
+        self.older: dict = {}
+
+    def recall(self, key: str) -> Any:
+        """What was kept under `key`, or None."""
+        known = self.get(key)
+        return self.older.get(key) if known is None else known
 
     def keep(self, key: str, value: object, size: int) -> None:
         """Remember `value`, of `size` bytes, under `key`."""
         size += sys.getsizeof(key) + _PHONE_MEMO_ENTRY
-        if self.held + size > self.budget:
-            # ponytail: emptied when full, not least-recently-used.
+        if self.held + size > self.budget // 2:
+            # ponytail: two halves, not least-recently-used. The oldest go
+            # first, so the copy never sits beside them.
+            self.older.clear()
+            self.older = dict(self)
             self.clear()
             self.held = 0
         self.held += size
@@ -689,6 +730,10 @@ class _PhoneRegion:
 @functools.lru_cache(maxsize=64)
 def _written_digits(written: str) -> str:
     """The same text is asked of each region that needs its prefix."""
+    if written.isascii():
+        # The library keeps a character with a Unicode digit value: in ASCII,
+        # "0" to "9" alone.
+        return _NOT_DIGIT.sub("", written)
     import phonenumbers
 
     return phonenumbers.normalize_digits_only(written)
@@ -712,7 +757,7 @@ def _phone_walk() -> Any:
     outcomes = _Memo(_PHONE_MEMO_BYTES - readings.budget)
 
     def reading(candidate: str) -> str:
-        known = readings.get(candidate)
+        known = readings.recall(candidate)
         if known is None:
             known = reading_of(candidate)
             readings.keep(candidate, known, sys.getsizeof(known))
@@ -817,7 +862,7 @@ def _phone_walk() -> Any:
                     candidate,
                 )
             )
-            known = outcomes.get(key)
+            known = outcomes.recall(key)
             if known is None:
                 self.open, self.waiting, self.found = names, None, {}
                 self._extract_match(candidate, start)
@@ -829,6 +874,15 @@ def _phone_walk() -> Any:
                     key, known, sys.getsizeof(known) + sum(map(sys.getsizeof, known))
                 )
             return known
+
+        def _extract_inner_match(self, candidate, offset):
+            if _FEW_DIGITS_A_PART.fullmatch(candidate) and not _SPELLED.match(
+                candidate
+            ):
+                # Every part the library would try reads "", so none changes
+                # anything: see `_FEW_DIGITS_A_PART`.
+                return None
+            return super()._extract_inner_match(candidate, offset)
 
         def _parse_and_verify(self, candidate, offset):
             part = offset, candidate, reading(candidate)
