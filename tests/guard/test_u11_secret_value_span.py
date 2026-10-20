@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import gc
 import json
+import math
 import random
 import string
 import time
@@ -13,7 +14,7 @@ from urllib.parse import quote
 
 import pytest
 
-from shim_cli.guard import ENTITY_TYPES, evaluate
+from shim_cli.guard import ENTITY_TYPES, MAX_SOURCE_CHARACTERS, evaluate
 
 # Generated passwords hold every printable character but the ones that end a
 # bare value as before this change (whitespace, `,`, `}`, `]` and quotes) and
@@ -645,42 +646,54 @@ def test_code_that_builds_an_escaped_value_is_no_secret(text: str) -> None:
     assert decision.redacted_text == text
 
 
-def _cpu(text: str) -> tuple[float, float]:
-    """Wall and CPU seconds of the fastest of three evaluations, each from a
-    collected heap. A full collection the earlier tests' objects bring due
-    mid-run scans all of them, and cost the larger run 0.16 s on its own; a
-    slower run is the machine's, as `timeit` reads it, not the detector's."""
-    best = (float("inf"), float("inf"))
-    for _ in range(3):
-        gc.collect()
-        wall, cpu = time.perf_counter(), time.process_time()
-        evaluate(text, ENTITY_TYPES)
-        run = (time.perf_counter() - wall, time.process_time() - cpu)
-        best = (min(best[0], run[0]), min(best[1], run[1]))
-    return best
+_LEAST = 0.4
+
+
+def _seconds(text: str) -> tuple[float, float]:
+    """Wall and CPU seconds of one evaluation of `text`: the fastest of three
+    runs of as many evaluations as fill `_LEAST` seconds, with the collector
+    off, as `timeit` reads it. A full collection the earlier tests' objects
+    bring due scans all of them: it cost one run 0.16 s on its own, and landed
+    in one size's runs and not the other's."""
+    gc.collect()
+    started = time.process_time()
+    evaluate(text, ENTITY_TYPES)
+    repeats = math.ceil(_LEAST / max(time.process_time() - started, 0.001))
+    best = (math.inf, math.inf)
+    gc.disable()
+    try:
+        for _ in range(3):
+            wall, cpu = time.perf_counter(), time.process_time()
+            for _ in range(repeats):
+                evaluate(text, ENTITY_TYPES)
+            run = (time.perf_counter() - wall, time.process_time() - cpu)
+            best = (min(best[0], run[0]), min(best[1], run[1]))
+    finally:
+        gc.enable()
+    return best[0] / repeats, best[1] / repeats
 
 
 @pytest.mark.parametrize(
     ("shape", "count"),
     [
-        (lambda count: "token=" * count + ")" * count, 8_000),
-        (lambda count: ("token=" * 150 + "x(" + ")" * 50 + " ") * count, 40),
-        (lambda count: "(token=abcdef" + ")" * count, 40_000),
-        (lambda count: ("(" * 500 + "token=abcdef" + ")" * 500 + " ") * count, 40),
-        (lambda count: "token=abcdef" + ";a" * count, 40_000),
-        (lambda count: "password=a;" * count, 10_000),
-        (lambda count: ";password=a" * count, 10_000),
-        (lambda count: ";password=" + ";" * count, 40_000),
-        (lambda count: 'name="password" ' * count, 10_000),
-        (lambda count: '<add key="Password" a="b"' * count, 5_000),
-        (lambda count: '<a value="x"' + " b" * count, 20_000),
-        (lambda count: '\\"password\\":\\"' * count, 10_000),
-        (lambda count: "password='" + '\\"' * count, 40_000),
-        (lambda count: 'password="' + "\\" * count, 80_000),
-        (lambda count: 'password=\\"' + "\\\\" * count, 40_000),
-        (lambda count: "value=" * count, 10_000),
-        (lambda count: 'value="' * count, 10_000),
-        (lambda count: 'password="abcdefg%22' * count, 10_000),
+        (lambda count: "token=" * count + ")" * count, 14_000),
+        (lambda count: ("token=" * 150 + "x(" + ")" * 50 + " ") * count, 104),
+        (lambda count: "(token=abcdef" + ")" * count, 96_000),
+        (lambda count: ("(" * 500 + "token=abcdef" + ")" * 500 + " ") * count, 96),
+        (lambda count: "token=abcdef" + ";a" * count, 48_000),
+        (lambda count: "password=a;" * count, 9_000),
+        (lambda count: ";password=a" * count, 9_000),
+        (lambda count: ";password=" + ";" * count, 96_000),
+        (lambda count: 'name="password" ' * count, 6_000),
+        (lambda count: '<add key="Password" a="b"' * count, 4_000),
+        (lambda count: '<a value="x"' + " b" * count, 48_000),
+        (lambda count: '\\"password\\":\\"' * count, 6_400),
+        (lambda count: "password='" + '\\"' * count, 48_000),
+        (lambda count: 'password="' + "\\" * count, 96_000),
+        (lambda count: 'password=\\"' + "\\\\" * count, 48_000),
+        (lambda count: "value=" * count, 16_000),
+        (lambda count: 'value="' * count, 14_000),
+        (lambda count: 'password="abcdefg%22' * count, 4_800),
     ],
     ids=[
         "nested-values-closing-marks",
@@ -704,8 +717,22 @@ def _cpu(text: str) -> tuple[float, float]:
     ],
 )
 def test_the_value_bounds_are_read_in_linear_time(shape, count: int) -> None:
-    half = _cpu(shape(count // 2))[1]
-    wall, full = _cpu(shape(count))
+    """A text four times as long takes four times as long to read, and a
+    scan that rereads the text for each key, value or mark takes sixteen: the
+    bound, eight, is twice the first and half the second, so neither runner
+    noise nor a quadratic scan can be mistaken for the other. Eight for four
+    times the text is a time growing as its length to the power 1.5.
+
+    Both texts are one analysis: past `MAX_SOURCE_CHARACTERS` the text is cut
+    into pieces, and a cost that grows with a piece's length grows only with
+    their number. Each time is read over at least `_LEAST` seconds: two
+    evaluations of 0.1 s, which the bound used to compare, differ by more than
+    a slow runner's noise allows."""
+    text = shape(count)
+    assert len(text) <= MAX_SOURCE_CHARACTERS
+
+    quarter = _seconds(shape(count // 4))[1]
+    wall, whole = _seconds(text)
 
     assert wall < 2
-    assert full <= 2.5 * half + 0.05, (half, full)
+    assert whole <= 8 * quarter, (quarter, whole)

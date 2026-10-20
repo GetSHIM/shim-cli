@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import time
 
 import pytest
@@ -155,9 +156,19 @@ def test_a_turkish_marker_never_returns_text() -> None:
 
 
 def _per_megabyte(text: str) -> float:
-    started = time.perf_counter()
+    """CPU seconds a megabyte of `text` takes: the fastest of three runs of as
+    many scans as fill 0.4 s. One scan of a megabyte takes 0.1 to 0.2 s, of
+    which a slow runner's noise is a large share."""
+    started = time.process_time()
     injection.scan(text)
-    return (time.perf_counter() - started) * 1_000_000 / len(text)
+    repeats = math.ceil(0.4 / max(time.process_time() - started, 0.001))
+    best = math.inf
+    for _ in range(3):
+        started = time.process_time()
+        for _ in range(repeats):
+            injection.scan(text)
+        best = min(best, time.process_time() - started)
+    return best / repeats * 1_000_000 / len(text)
 
 
 def test_dense_turkish_costs_a_bounded_multiple_of_plain_prose() -> None:
@@ -166,8 +177,6 @@ def test_dense_turkish_costs_a_bounded_multiple_of_plain_prose() -> None:
     )
     dense = "eski kural " * 90_000
 
-    ratio = min(_per_megabyte(dense) for _ in range(3)) / min(
-        _per_megabyte(plain) for _ in range(3)
-    )
+    ratio = _per_megabyte(dense) / _per_megabyte(plain)
 
     assert ratio < 2.5, f"dense input took {ratio:.1f}x the time of prose"
