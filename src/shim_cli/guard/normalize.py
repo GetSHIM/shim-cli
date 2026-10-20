@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import re
 import unicodedata
 from dataclasses import dataclass
@@ -65,6 +66,8 @@ def _decode_percent(text: str) -> tuple[str, list[_SourceSpan]]:
     return "".join(output), spans
 
 
+# A text repeats its pairs: three NFC calls each were a tenth of normalizing.
+@functools.lru_cache(maxsize=4_096)
 def _normalization_continues(previous: str, current: str) -> bool:
     previous_code = ord(previous)
     current_code = ord(current)

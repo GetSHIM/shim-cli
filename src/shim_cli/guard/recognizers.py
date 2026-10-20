@@ -193,7 +193,8 @@ def _validate_email(text: str) -> bool:
 _CARD_PATTERNS = _compile(
     (
         (
-            r"\b(?!1\d{12}(?!\d))((4\d{3})|(5[0-5]\d{2})|(6\d{3})|(1\d{3})"
+            # A lookahead of its first digits; see `_SECRET_WORD`.
+            r"(?=[13-6])\b(?!1\d{12}(?!\d))((4\d{3})|(5[0-5]\d{2})|(6\d{3})|(1\d{3})"
             r"|(3\d{3}))[- ]?(\d{3,4})[- ]?(\d{3,4})[- ]?(\d{3,5})\b",
             0.3,
         ),
@@ -392,7 +393,9 @@ def _validate_tckn(text: str) -> bool:
     return sum(digits[:10]) % 10 == digits[10]
 
 
-_VKN_PATTERNS = _compile(((r"(?<!\d)\d{10}(?!\d)", 0.4),))
+# Ten digits ahead before the lookbehind, so a position in a shorter number or
+# in prose fails at once; see `_SECRET_WORD`.
+_VKN_PATTERNS = _compile(((r"(?=\d{10})(?<!\d)\d{10}(?!\d)", 0.4),))
 _VKN_CONTEXT = re.compile(
     r"(?=[tv])"
     + _CUE_START
@@ -430,8 +433,9 @@ def _scan_vkn(text: str) -> list[Match]:
     ]
 
 
+# Both open with a lookahead of their first letter; see `_SECRET_WORD`.
 _IBAN_PATTERN = re.compile(
-    r"(?<![A-Z0-9])([A-Z]{2}[0-9]{2}(?:[ -]?[A-Z0-9]{4}){2,6})"
+    r"(?=[A-Z])(?<![A-Z0-9])([A-Z]{2}[0-9]{2}(?:[ -]?[A-Z0-9]{4}){2,6})"
     r"((?:[ -]?[A-Z0-9]{4})?)((?:[ -]?[A-Z0-9]{1,3})?)(?![A-Z0-9])",
     _IBAN_FLAGS,
 )
@@ -439,7 +443,7 @@ _IBAN_PATTERN = re.compile(
 # every other IBAN: this one alone can pull a following word into the match.
 _IBAN_SEPARATOR = r"(?:[ -]|[ ]*\r?\n[ ]*)?"
 _IBAN_LOOSE_PATTERN = re.compile(
-    rf"(?<![A-Z0-9])([A-Z]{{2}}[0-9]{{2}}(?:{_IBAN_SEPARATOR}[A-Z0-9]{{4}}){{2,6}})"
+    rf"(?=[A-Z])(?<![A-Z0-9])([A-Z]{{2}}[0-9]{{2}}(?:{_IBAN_SEPARATOR}[A-Z0-9]{{4}}){{2,6}})"
     rf"((?:{_IBAN_SEPARATOR}[A-Z0-9]{{4}})?)((?:{_IBAN_SEPARATOR}[A-Z0-9]{{1,3}})?)"
     r"(?![A-Z0-9])",
     _IBAN_FLAGS | re.IGNORECASE,
@@ -1158,8 +1162,9 @@ _PATH_VALUE = re.compile(
 _URL_VALUE = re.compile(r"https?://", re.IGNORECASE)
 _URL_USERINFO = re.compile(r"(?i)\b(?:https?|ftp|wss?)://(?P<userinfo>[^\s/?#'\"<>]+)@")
 # A `+driver` suffix is SQLAlchemy's (`postgresql+asyncpg`) or MongoDB's `+srv`.
+# The lookahead holds each scheme's first letter; see `_SECRET_WORD`.
 _DB_URI = re.compile(
-    r"(?i)\b(?:postgres(?:ql)?|mysql|mariadb|mongodb|redis(?:s)?|mssql|sqlserver"
+    r"(?i)(?=[pmrsc])\b(?:postgres(?:ql)?|mysql|mariadb|mongodb|redis(?:s)?|mssql|sqlserver"
     r"|clickhouse)(?:\+\w+)?://([^\s'\"<>]*)"
 )
 # A password in the userinfo of a URI of any other scheme (amqp, smtp, ssh...).
@@ -1225,8 +1230,9 @@ _AUTHORITY_END = re.compile(r"[/?#]")
 # ends words (benchmark_test_..., network_test_...), so a Stripe restricted key
 # glued to a letter is left; a secret key `sk_` is read anywhere, as in 1.2.2.
 _AFTER_ESCAPE = r"(?<=\\[nrtfbv])|"
+# The lookahead holds each token's first letter; see `_SECRET_WORD`.
 _VENDOR_TOKEN = re.compile(
-    r"(?:AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{20,}|"
+    r"(?=[AgrsSxnh])(?:AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{20,}|"
     r"sk_(?:live|test)_[A-Za-z0-9]{16,}|"
     rf"(?:{_AFTER_ESCAPE}(?<![A-Za-z]))rk_(?:live|test)_[A-Za-z0-9]{{16,}}|"
     r"sk-(?:proj-)?[A-Za-z0-9_-]{16,}|"
@@ -1339,7 +1345,8 @@ _SECRET_PATTERNS: tuple[
     ),
     (
         re.compile(
-            r"(?<![\w-])AccountKey=(?P<value>[A-Za-z0-9+/]{64,}={0,2})",
+            # Each opens with a lookahead of its first character; see `_SECRET_WORD`.
+            r"(?=a)(?<![\w-])AccountKey=(?P<value>[A-Za-z0-9+/]{64,}={0,2})",
             re.IGNORECASE,
         ),
         "value",
@@ -1348,7 +1355,7 @@ _SECRET_PATTERNS: tuple[
     ),
     (
         re.compile(
-            r"(?<![\w-])[\"']?(?:proxy-)?authorization[\"']?\s*:\s*[\"']?(?:basic|bearer)\s+"
+            r"(?=[\"'pa])(?<![\w-])[\"']?(?:proxy-)?authorization[\"']?\s*:\s*[\"']?(?:basic|bearer)\s+"
             r"(?P<value>[A-Za-z0-9._~+/=-]{6,})",
             re.IGNORECASE,
         ),
@@ -1691,8 +1698,12 @@ def _scan_db_uri(text: str, as_written: bool = False) -> list[Match]:
     return results
 
 
+# The lookahead asks for the 24 characters a line needs, so a position in prose
+# or a number fails before the assertions; see `_SECRET_WORD`. One character
+# would let every letter and digit through to them.
 _BASE64_LINE = re.compile(
-    r"(?:(?<![\w+/\\])|(?<=\\[nrt]))[A-Za-z0-9+/]{24,}={0,2}(?![\w+/=])"
+    r"(?=[A-Za-z0-9+/]{24})(?:(?<![\w+/\\])|(?<=\\[nrt]))[A-Za-z0-9+/]{24,}={0,2}"
+    r"(?![\w+/=])"
 )
 _BASE64_RUN = r"[ \t]*([A-Za-z0-9+/]{4,}={0,2})[ \t]*(?=[\r\n\"']|\\[rn]|$)"
 _BASE64_NEXT = re.compile(
@@ -1701,10 +1712,11 @@ _BASE64_NEXT = re.compile(
 )
 _DIFF_NEXT = re.compile(r"[ \t]*(?:\r\n?|\n)\+" + _BASE64_RUN)
 _WRAP_WIDTHS = (60, 64, 76)
+# The lookahead holds each form's first character; see `_SECRET_WORD`.
 _BASIC_AUTH = re.compile(
-    r'"auth"\s*:\s*"(?P<value>[A-Za-z0-9+/]{8,}={0,2})"'
+    r'(?=["n_])(?:"auth"\s*:\s*"(?P<value>[A-Za-z0-9+/]{8,}={0,2})"'
     r"|(?<![\w-])(?:npm_config_)?_auth\s*=\s*(?P<quote>[\"']?)"
-    r"(?P<bare>[A-Za-z0-9+/]{8,}={0,2})(?P=quote)(?![\w+/=])",
+    r"(?P<bare>[A-Za-z0-9+/]{8,}={0,2})(?P=quote)(?![\w+/=]))",
     re.IGNORECASE,
 )
 
