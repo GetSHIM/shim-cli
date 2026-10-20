@@ -135,10 +135,10 @@ def test_a_captured_call_that_cannot_be_inspected_is_denied_in_any_mode(
     raw = _raw("PreToolUse-run_in_terminal")
     command = json.loads(raw)["tool_input"]["command"]
 
-    def failing(text, *args):
+    def failing(text, *args, **kwargs):
         if text == command:
             raise ValueError("Guard analysis failed safely.")
-        return evaluate(text, *args)
+        return evaluate(text, *args, **kwargs)
 
     outcome = process(TOOL_EVENTS["PreToolUse"], raw, lambda *_: mode, failing)
 

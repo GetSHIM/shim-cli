@@ -8,12 +8,14 @@ from pathlib import Path
 
 from shim_cli import json_bytes
 
-from . import _files
+from . import _files, spool
 
 RETENTION_DAYS = 30
 MAX_LEDGER_BYTES = 5_000_000
 FILE_PREFIX = "ledger-"
 FILE_SUFFIX = ".jsonl"
+# An empty file beside a month, left when an event could not be appended to it.
+_LOST_SUFFIX = ".lost"
 
 
 class LedgerError(RuntimeError):
@@ -90,6 +92,7 @@ def prune(now: datetime.datetime | None = None) -> int:
         if end is None or end + datetime.timedelta(days=RETENTION_DAYS) > moment:
             continue
         with contextlib.suppress(OSError):
+            path.with_suffix(_LOST_SUFFIX).unlink(missing_ok=True)
             path.unlink()
             removed += 1
     return removed
@@ -103,9 +106,49 @@ def append(entry: dict, now: datetime.datetime | None = None) -> bool:
     try:
         return _files.append(root, _month(moment), line, MAX_LEDGER_BYTES)
     except OSError as error:
+        _files.mark_lost(root, Path(_month(moment)).with_suffix(_LOST_SUFFIX).name)
         raise LedgerError("ledger could not be written") from error
     finally:
         os.close(root)
+
+
+def probe(now: datetime.datetime | None = None) -> None:
+    """Raise `LedgerError` unless an event could be appended now: the folder
+    opens (and is created), and this month's file, if there, is private and
+    regular. Writes nothing."""
+    root = _open_root()
+    try:
+        descriptor = os.open(
+            _month(now or datetime.datetime.now(datetime.timezone.utc)),
+            os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+            dir_fd=root,
+        )
+        try:
+            _files.validate(descriptor)
+        finally:
+            os.close(descriptor)
+    except FileNotFoundError:
+        pass
+    except OSError as error:
+        raise LedgerError("ledger file is not private and regular") from error
+    finally:
+        os.close(root)
+
+
+def capped() -> bool:
+    """True when a retained month is known to be short: it holds no room for
+    another record, or an event could not be appended. What the ledger shows
+    ends before the events do, and it reads every retained month."""
+    for path in files():
+        if path.with_suffix(_LOST_SUFFIX).exists():
+            return True
+        try:
+            size = path.stat().st_size
+        except OSError as error:
+            raise LedgerError("ledger could not be read") from error
+        if size + spool.MAX_ENTRY_BYTES > MAX_LEDGER_BYTES:
+            return True
+    return False
 
 
 def entries(since: datetime.datetime | None = None) -> list:
@@ -143,6 +186,7 @@ def purge() -> int:
     removed = 0
     for path in files():
         with contextlib.suppress(OSError):
+            path.with_suffix(_LOST_SUFFIX).unlink(missing_ok=True)
             path.unlink()
             removed += 1
     return removed
@@ -153,8 +197,10 @@ __all__ = [
     "RETENTION_DAYS",
     "LedgerError",
     "append",
+    "capped",
     "entries",
     "files",
+    "probe",
     "prune",
     "purge",
     "root_path",

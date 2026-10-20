@@ -2,11 +2,17 @@ from __future__ import annotations
 
 import bisect
 import contextlib
+import re
 import signal
 import threading
 from collections.abc import Iterable, Iterator
 
-from .entities import DEFAULT_ENTITIES, normalize_entities
+from .entities import (
+    DEFAULT_ENTITIES,
+    ENTITY_TYPES,
+    MAX_REVEAL_DIGITS,
+    normalize_entities,
+)
 from .models import Finding
 from .normalize import normalize
 from .recognizers import BARE_NUMBER, ENTITY_MAP, Match, analyze_text
@@ -121,6 +127,7 @@ def _resolve_overlaps(items: Iterable[Finding]) -> list[Finding]:
                 max(item.end for item in component),
                 winner.score,
                 winner.label,
+                winner.value or (winner.start, winner.end),
             )
         )
 
@@ -156,10 +163,54 @@ def _source_findings(
             ):
                 raise ValueError("Guard normalization returned an invalid span.")
             previous = (start, end)
+        value = None
+        if item.value is not None:
+            value = (source_spans[item.value[0]][0], source_spans[item.value[1] - 1][1])
         mapped.append(
-            Finding(item.entity_type, spans[0][0], spans[-1][1], item.score, item.label)
+            Finding(
+                item.entity_type,
+                spans[0][0],
+                spans[-1][1],
+                item.score,
+                item.label,
+                value,
+            )
         )
     return _resolve_overlaps(mapped)
+
+
+# The placeholders shim writes, and no other: `<ADMIN_2024>` may hold a value.
+# A number counts the values of one type in one event, and six digits are more
+# than a 1 MB event holds.
+_OWN_PLACEHOLDER = re.compile(
+    rf"<(?:{'|'.join(ENTITY_TYPES)})_[0-9]{{1,6}}"
+    rf"(?::[0-9]{{1,{MAX_REVEAL_DIGITS}}})?>"
+)
+# What a percent escape can break: see `analyze_counting`.
+_READ_AS_WRITTEN = frozenset({"EMAIL_ADDRESS", "DB_URI"})
+
+
+def _not_placeholders(findings: list[Finding], text: str) -> list[Finding]:
+    """`findings` without those that are only shim's own placeholders.
+
+    Masked text is scanned again: by the Stop count, by `shim audit`, when the
+    model reads back what it was given. `--password=<SECRET_1>` and a custom
+    `[A-Z]+_[0-9]+` read a value in it, and a credential shim had masked was
+    reported as reaching the model. A match with a letter or a digit outside
+    every placeholder is kept whole: it may be a credential written against
+    one.
+    """
+    blanked = _OWN_PLACEHOLDER.sub(lambda match: " " * len(match.group()), text)
+    if blanked == text:
+        return findings
+    kept = []
+    for finding in findings:
+        outside = blanked[finding.start : finding.end]
+        if outside == text[finding.start : finding.end] or any(
+            character.isalnum() for character in outside
+        ):
+            kept.append(finding)
+    return kept
 
 
 def _unclaimed(bare: list[Match], findings: list[Finding]) -> int:
@@ -196,11 +247,36 @@ def analyze_counting(
     )
     try:
         with _deadline():
-            raw = analyze_text(normalized.text, source_entities, custom)
+            raw = analyze_text(
+                normalized.text, source_entities, custom, normalized.literal
+            )
+            # A value that decoding breaks is one as the model reads it:
+            # `alice%C3%28@example.com` decodes to `alice%C3(@example.com`. A
+            # secret's value ends only where its source writes a mark, so the
+            # decoded reading has it whole; an address and a database URI's
+            # user-info are read in the source too.
+            written = (
+                analyze_text(
+                    text,
+                    tuple(e for e in source_entities if e in _READ_AS_WRITTEN),
+                    as_written=True,
+                )
+                if normalized.text != text
+                else []
+            )
         bare = [item for item in raw if item.entity_type == BARE_NUMBER]
         claimed = [item for item in raw if item.entity_type != BARE_NUMBER]
         normalized_findings = _resolve_overlaps(
-            _validated(claimed, len(normalized.text))
+            _not_placeholders(
+                _validated(claimed, len(normalized.text)), normalized.text
+            )
+        )
+        written_findings = _not_placeholders(
+            _validated(
+                [item for item in written if item.entity_type != BARE_NUMBER],
+                len(text),
+            ),
+            text,
         )
     except _AnalysisTimeout as error:
         raise ValueError("Guard analysis exceeded its runtime limit.") from error
@@ -214,4 +290,6 @@ def analyze_counting(
         if normalized.text is text
         else _source_findings(normalized_findings, normalized.source_spans)
     )
+    if written_findings:
+        findings = _resolve_overlaps(findings + written_findings)
     return tuple(findings), _unclaimed(bare, normalized_findings)

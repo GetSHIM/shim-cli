@@ -19,6 +19,7 @@ from shim_cli.cli.output import (
 )
 from shim_cli.config import (
     MAX_CONFIG_BYTES,
+    SettingsPathInvalid,
     SettingsRefused,
     config_path,
     describe_settings_error,
@@ -37,6 +38,7 @@ from shim_cli.guard.entities import (
 from shim_cli.settings_files import (
     Action,
     InstallationError,
+    StateKind,
     apply,
     ensure_parent,
     inspect_file,
@@ -130,7 +132,9 @@ def _show(
     )
     if custom:
         names = ", ".join(str(entry.get("name")) for entry in custom)
-        output.print(Text(f"Custom: {names}", style="dim"))
+        # A pattern runs only while CUSTOM is on; saying otherwise is a promise.
+        label = "Custom" if CUSTOM in selected else "Custom (off)"
+        output.print(Text(f"{label}: {names}", style="dim"))
     if reveal:
         shown = ", ".join(f"{name} {count}" for name, count in reveal.items())
         output.print(Text(f"Reveal: last {shown} digits", style="dim"))
@@ -143,11 +147,21 @@ _INVALID = (
     "review unsafe paths manually."
 )
 FIX_SETTINGS_INVALID = "Edit the settings file the error names until it parses."
+FIX_PATH_INVALID = "Unset SHIM_CONFIG or set it to an absolute path."
 
 
 def refusal_fix(reason: str, target: Path) -> str:
     """chmod mends a mode; a link, an owner or a shape needs something else."""
     path, folder = shlex.quote(str(target)), shlex.quote(str(target.parent))
+    if "broken link" in reason:
+        return (
+            "Restore the folder the link on the settings path points to, or "
+            "remove the link; or set SHIM_CONFIG to a file you own."
+        )
+    if "does not exist" in reason:
+        return (
+            f"Create {path}, or unset SHIM_CONFIG, or point it at the file you meant."
+        )
     if "symlink" in reason:
         return (
             f"Replace the link {path} with the file it points to, or set "
@@ -177,7 +191,15 @@ def settings_check(error: BaseException) -> Check:
             "FAIL",
             detail,
             code="SETTINGS_REFUSED",
-            fix=refusal_fix(error.reason, config_path()),
+            fix=refusal_fix(error.reason, error.path or config_path()),
+        )
+    if isinstance(error, SettingsPathInvalid):
+        return Check(
+            "entity_settings",
+            "FAIL",
+            detail,
+            code="SETTINGS_INVALID",
+            fix=FIX_PATH_INVALID,
         )
     return Check(
         "entity_settings",
@@ -225,7 +247,7 @@ def configure(
             "config",
             "SETTINGS_PATH_INVALID",
             "Entity settings path is invalid.",
-            "Unset SHIM_CONFIG or set it to an absolute path.",
+            FIX_PATH_INVALID,
             as_json=as_json,
         )
     options = bool(
@@ -370,7 +392,10 @@ def configure(
             keep_reveal,
             keep_markers,
         )
-        emit("PASS", f"File: {target}")
+        if state.kind is StateKind.ABSENT:
+            emit("WARN", f"no settings file at {target}; shipped defaults apply")
+        else:
+            emit("PASS", f"File: {target}")
         return
 
     plan = plan_change(
@@ -388,7 +413,7 @@ def configure(
         ),
     )
     if plan.action is Action.REFUSE:
-        refusal = SettingsRefused(plan.message)
+        refusal = SettingsRefused(plan.message, target)
         emit_error(
             "config",
             "SETTINGS_REFUSED",

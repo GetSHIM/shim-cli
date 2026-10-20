@@ -249,7 +249,7 @@ def parse_input(raw):
     noisy("parse")
     return "safe"
 
-def evaluate(prompt, enabled_entities, custom=(), reveal=None):
+def evaluate(prompt, enabled_entities, custom=(), reveal=None, numbering=None):
     noisy("evaluate")
     return types.SimpleNamespace(blocked=False, partial=False)
 
@@ -434,8 +434,12 @@ runner.main()
 
 
 def test_hook_deadline_includes_waiting_for_stdin_eof() -> None:
+    # The deadline counts from the process's start, and a slow machine can
+    # spend 0.05 s starting Python: a hook started past its deadline reads
+    # stdin until the answer is due (test_u26_deadline_margin). Counted from
+    # `main`, this one starts in time.
     code = (
-        "from shim_cli import hook as runner; "
+        "from shim_cli import hook as runner; runner._process_age = lambda: 0.0; "
         "runner.HOOK_DEADLINE_SECONDS = 0.05; runner.main()"
     )
     with subprocess.Popen(
@@ -495,7 +499,7 @@ def test_hook_persists_only_the_redacted_prompt_in_os_temp(tmp_path: Path) -> No
     result = _run(_payload(prompt), cwd=work, env=env)
     path = _suggestion_path(result, "shim blocked this prompt: EMAIL (1).")
     written = {item for item in tmp_path.rglob("*") if item.is_file()} - before
-    spools = {item for item in written if item.suffix in (".jsonl", ".mark")}
+    spools = {item for item in written if item.suffix in (".jsonl", ".mark", ".names")}
 
     assert prompt.encode() not in result.stdout
     assert written == {path} | spools

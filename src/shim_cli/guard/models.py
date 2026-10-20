@@ -1,22 +1,25 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .entities import ENTITY_TYPES
 
 _ENTITY_TYPES = frozenset(ENTITY_TYPES)
 
 
+# No `__slots__`: the one optional field needs a class-level default.
 @dataclass(frozen=True)
 class Finding:
-    __slots__ = ("end", "entity_type", "label", "score", "start")
-
     entity_type: str
     start: int
     end: int
     score: float
     label: str
+    # The value's own span, when matches of other types that overlapped it
+    # were united into [start, end): a revealed tail is read from the value
+    # alone, never from a neighbour masked with it.
+    value: tuple[int, int] | None = field(default=None, compare=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.entity_type not in _ENTITY_TYPES:
@@ -39,6 +42,10 @@ class Finding:
             raise ValueError("Invalid Guard finding score.")
         if not isinstance(self.label, str) or len(self.label) > 32:
             raise ValueError("Invalid Guard finding label.")
+        if self.value is not None and not (
+            self.start <= self.value[0] < self.value[1] <= self.end
+        ):
+            raise ValueError("Invalid Guard finding value span.")
         object.__setattr__(self, "score", float(self.score))
 
 

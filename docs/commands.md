@@ -88,14 +88,14 @@ the detector is broken.
 | `SETTINGS_PATH_INVALID` | `SHIM_CONFIG` is not an absolute path | `config` | `2` | `Unset SHIM_CONFIG or set it to an absolute path.` |
 | `SETTINGS_PATH_UNSAFE` | The settings folder is writable by someone else or cannot be created safely | `config` | `2` | As for `SETTINGS_REFUSED`, or for `SETTINGS_UNWRITABLE` when the system refused to create the folder |
 | `SETTINGS_INVALID` | The settings file does not parse or holds a value shim does not accept | `config`, `audit`, `doctor`, `watch` | `2` | `Edit the settings file the error names until it parses.` The error names `shim config --reset` as the last resort: it discards every setting |
-| `SETTINGS_REFUSED` | The settings file was refused: a link, someone else's, or writable by another user | `config`, `audit`, `doctor`, `watch` | `2` | `chmod 700 <folder> && chmod 600 <path>` with the real paths (`SHIM_CONFIG`, or `$XDG_CONFIG_HOME/shim`); a link, a file that belongs to another user, a hard link or an oversized file gets its own fix instead |
+| `SETTINGS_REFUSED` | The settings file was refused: a link, someone else's, or writable by another user; a file `SHIM_CONFIG` names that does not exist; or a folder on the settings path that is a broken link | `config`, `audit`, `doctor`, `watch` | `2` | `chmod 700 <folder> && chmod 600 <path>` with the real paths of the file refused (`SHIM_CONFIG`, `$XDG_CONFIG_HOME/shim`, or the 0.2.0 file the hook falls back to); a link, a file that belongs to another user, a hard link, an oversized file, a missing `SHIM_CONFIG` file (`Create <path>, or unset SHIM_CONFIG, or point it at the file you meant.`) or a broken link gets its own fix instead |
 | `CUSTOM_PATTERN_INVALID` | A `--custom` or `--custom-literal` value is malformed or backtracks | `config` | `2` | `Change the pattern, or remove it with shim config --remove-custom NAME --yes.` |
 | `REVEAL_INVALID` | A `--reveal` names a type or length that is not allowed | `config` | `2` | `Use --reveal IBAN=N, CREDIT_CARD=N or PHONE=N with N from 1 to 4.` |
 | `SETTINGS_CHANGED` | The settings file changed, or became unsafe, while shim was writing it | `config` | `2` | `Run the command again.` |
 | `SETTINGS_UNWRITABLE` | The settings file cannot be written, and trying again will not help: permission denied, a read-only file system, a full disk | `config` | `2` | Names the folder and what to change: `chmod u+rwx <folder>`, a writable file system, or free space |
 | `CLIENT_SETTINGS_UNREADABLE` | The client's settings file could not be inspected | `install`, `status`, `revert`, `doctor` | `2` | `Run shim doctor <client>.`; in doctor, make the file and its folder readable |
-| `CLIENT_SETTINGS_MALFORMED` | The client's settings file does not parse, so shim will not change it | `install`, `status`, `revert`, `doctor` | `2` | `Fix <path> by hand so it parses, then run the command again.` |
-| `CLIENT_SETTINGS_UNSAFE` | The client's settings file is a link, someone else's, or otherwise unsafe | `install`, `status`, `revert`, `doctor` | `2` | `Make <path> a regular file owned by you, then run the command again.` |
+| `CLIENT_SETTINGS_MALFORMED` | The client's settings file does not parse, or holds hooks shim will not change, such as a group where shim's hook sits beside another, so shim will not change it | `install`, `status`, `revert`, `doctor` | `2` | `Fix <path> by hand so it parses, then run the command again.`; for a file that parses, `Resolve <path> by hand (<reason>), then run the command again.` |
+| `CLIENT_SETTINGS_UNSAFE` | The client's settings file, or a folder above it, is a link, someone else's, writable by another user, or not at an absolute path | `install`, `status`, `revert`, `doctor` | `2` | For a file or folder others can write to, `Run chmod g-w,o-w <path>, then run the command again.` with the path that needs it; for a relative client folder, an absolute `CLAUDE_CONFIG_DIR`, `CODEX_HOME` or `COPILOT_HOME`; otherwise `Make <path> a regular file owned by you, then run the command again.` |
 | `CLIENT_SETTINGS_CHANGED` | The client's settings file changed while shim was writing it | `install`, `revert` | `2` | `Run the command again.` |
 | `CLIENT_SETTINGS_UNWRITABLE` | The client's settings file cannot be written, and trying again will not help: permission denied, a read-only file system, a full disk | `install`, `revert` | `2` | As for `SETTINGS_UNWRITABLE`, with the client's folder |
 | `DETECTOR_UNAVAILABLE` | The exact command the client would run (`<python> -I -B -m shim_cli.hook <client>`) did not pass doctor's safe and sensitive fixtures, for example because `-I` cannot import a `pip install --user` or `PYTHONPATH` install, so the hook would let everything through | `install`, `status` | `2` | `Install shim with uv tool install --reinstall shim or pipx install --force shim, not pip --user, then run shim install <client>: the hook runs Python with -I, which ignores the user site and PYTHONPATH.` |
@@ -103,9 +103,10 @@ the detector is broken.
 | `HISTORY_NOT_FOUND` | There is no Claude Code history folder to read | `audit` | `2` | `null` |
 | `HISTORY_UNREADABLE` | The Claude Code history could not be read | `audit` | `2` | `null` |
 | `RECORDS_UNREADABLE` | The session records could not be read | `report` | `2` | `Run shim doctor claude (or codex, copilot); its session_record line names the cause.` |
-| `LEDGER_UNREADABLE` | The ledger could not be read | `ledger show`, `ledger purge` | `2` | `Run shim doctor claude (or codex, copilot).` |
+| `LEDGER_UNREADABLE` | The ledger could not be read | `ledger show`, `ledger purge` | `2` | `Run shim doctor claude (or codex, copilot); its ledger line names the folder and the chmod 700 that fixes it.` |
 | `FILE_NOT_FOUND` | The path does not exist | `keys` | `2` | `null` |
 | `NOT_A_FILE` | The path is not a regular file | `keys` | `2` | `null` |
+| `FILE_UNREADABLE` | The file exists but could not be read, for example for lack of permission | `keys` | `2` | `null` |
 | `FILE_TOO_LARGE` | The file is larger than 1 MB | `keys` | `2` | `null` |
 | `NOT_UTF8` | The file is not UTF-8 text | `keys` | `2` | `null` |
 | `STDIN_UNPROCESSABLE` | Stdin could not be read or scanned in full, or the settings file is refused or invalid | `scan`, `redact`, `demo` | `1` | `Pipe UTF-8 text; if the settings file is refused, shim config prints why.` |
@@ -128,16 +129,20 @@ and `fix`; `code` and `fix` are `null` on a `PASS`. A `FAIL` makes doctor exit
 | `CLIENT_NEWER_THAN_TESTED` | The client is newer than the version shim was tested against | `WARN` | Check shim once by hand: a prompt holding `ops@example.com` must be reported |
 | `CODEX_HOOKS_DISABLED` | `codex features list` says hooks are off | `FAIL` | Set `hooks = true` under `[features]` in Codex's `config.toml`, or delete that line |
 | `CODEX_HOOKS_UNCHECKED` | `codex features list` could not be run | `FAIL` | `Run codex features list; it must show hooks as true.` |
-| `LEGACY_NAMES_PRESENT` | A 0.2.0 hook, settings file or ledger is still on disk | `FAIL` for a 0.2.0 hook, else `WARN` | The `shim install`, `shim config` or `shim report` the detail names |
+| `LEGACY_NAMES_PRESENT` | A 0.2.0 hook, settings file or ledger is still on disk | `FAIL` for a 0.2.0 hook, else `WARN` | The `shim install`, `shim config` or `shim report` the detail names; for a 0.2.0 settings file left beside a current one, which nothing reads or moves, `rm <path>` |
 | `HOOK_NOT_INSTALLED` | The client's settings file does not hold exactly this installation's hook: none at all, or another installation's | `WARN`; `FAIL` when the other installation's interpreter cannot be run | `Run shim install <client>.` |
 | `DETECTION_DISABLED` | Every entity type is turned off | `WARN` | `Turn types back on with shim config --enable ENTITY --yes.` |
 | `CUSTOM_PATTERN_UNSAFE` | A custom pattern already in the file backtracks | `FAIL` | `Simplify the pattern, or remove it with shim config --remove-custom NAME --yes.` |
+| `SETTINGS_FILE_ABSENT` | There is no settings file, not even a 0.2.0 one, so the shipped defaults apply | `WARN` | Nothing is wrong if the defaults suit you; the first change saved with `shim config` creates the file |
+| `CUSTOM_PATTERNS_INACTIVE` | Custom patterns are in the settings file but `CUSTOM` is off, so none runs | `WARN` | `Turn them on with shim config --enable CUSTOM --yes.` |
+| `MODE_DEFAULT_WEAKENS` | `[mode] default` is below `enforce` and replaces the shipped `enforce` for `inbound` and `outbound`, so tool results and the tool inputs that leave the machine are not masked | `WARN` | Add `inbound = "enforce"` and `outbound = "enforce"` under `[mode]`, or remove `default` |
 | `HOOK_RUNNER_FAILED` | The exact command `shim install` writes did not pass the safe and sensitive fixtures; the detail names the command | `FAIL` | `Install shim with uv tool install --reinstall shim or pipx install --force shim, not pip --user, then run shim install <client>: the hook runs Python with -I, which ignores the user site and PYTHONPATH.` |
 | `HOOK_RESOLUTION_FAILED` | No hook is runnable: no `shim-hook` on `PATH`, no plugin archive, and no settings hook that passed the runner check. A settings hook that cannot run lets prompts through uninspected; the plugin launcher withholds them | `FAIL` | `Run shim install <client>.` |
 | `ARCHIVE_VERSION_SKEW` | The plugin's bundled archive and the package are different versions | `WARN` | `Run claude plugin update shim-cli@shim-cli and restart Claude Code; in a cloned plugin folder, check out the newest release tag.` |
 | `PLUGIN_NOT_DISCOVERABLE` | shim cannot see whether the client also has the plugin installed | `WARN` | Remove the plugin if `shim install` is also in use |
 | `DUPLICATE_HOOKS` | shim is registered twice, so every event is inspected twice: the plugin beside a settings hook, or the settings file holding shim more than once, such as two installations' hooks (the detail lists each interpreter and its entry count) | `FAIL` | `Run shim install <client>.` for a settings file holding shim twice; beside the plugin, the uninstall or `shim revert claude` the detail names |
 | `SESSION_RECORDS_UNWRITABLE` | Session records cannot be written; masking still works | `WARN` | Set `TMPDIR` to a folder you own, or make the `shim-session` folder in it yours with mode 700 |
+| `LEDGER_FOLDER_UNSAFE` | The ledger is on but its folder cannot be created or opened as private and yours, or this month's file is not private or is a symlink, so the hook retains nothing; masking still works. Checked only while the ledger is on | `WARN` | `Run chmod 700 <folder> and chmod 600 on the ledger files in it, or remove a ledger file that is a symlink.` with the folder the detail names; for an unusable `XDG_STATE_HOME`, set it to an absolute folder you own |
 | `HOOK_EVENTS_MISSING` | Fewer events are installed than shim can cover | `WARN` | `Run shim install <client>.` |
 | `HOOK_ACTIVATION_UNVERIFIED` | Whether the client runs the hook is client UI state shim cannot read | `WARN` | Open `/hooks` in the client and check that shim is listed (and, in Codex, enabled) |
 
@@ -164,8 +169,14 @@ WARN Would create Claude Code hooks at /home/you/.claude/settings.json with
 this fragment:
 WARN Would add 6 hook entries (UserPromptSubmit, PostToolUse,
 PostToolUseFailure, PreToolUse, SessionEnd, Stop), each running
-/usr/bin/python3 -m shim_cli.hook claude. Nothing else in the file changes.
+/usr/bin/python3 -m shim_cli.hook claude. The file is rewritten with 2-space
+indentation; no value in it changes.
 ```
+
+The verb is `create` for a new file, `append to` for a file that already holds
+other hooks, and `update` otherwise; the question `install` asks follows it
+(`Create shim's Claude Code hook?`, `Append shim after existing Claude Code
+hooks?`, `Add shim's Claude Code hook?`).
 
 Installing is additive and surgical: your other hooks stay, and shim appends
 itself last. A hook counts as shim's when it runs exactly what a release wrote,
@@ -178,8 +189,8 @@ development clone) is replaced rather than duplicated, with `WARN shim's hook
 from another installation (<path>) will be replaced by this one.`, which
 `--json` also carries in `warnings`; a 0.2.0-shaped fragment or a duplicate is
 replaced the same way. A hook group in which shim's hook sits beside another
-hook is refused with `CLIENT_SETTINGS_MALFORMED`, whose `fix` asks you to make
-the file parse although it does: split that group by hand. The file is written
+hook is refused with `CLIENT_SETTINGS_MALFORMED`, and the message and `fix`
+name the reason: split that group by hand. The file is written
 back as 2-space JSON, so a file you formatted by hand keeps its content but not
 its layout.
 
@@ -230,6 +241,10 @@ or `env`, is still refused.
 
 For Claude Code, register the hook one way, `shim install claude` or the
 marketplace plugin, not both: `shim doctor claude` fails when it finds two.
+It reads the plugin list where Claude Code keeps it, under `CLAUDE_CONFIG_DIR`
+when that is set, and skips a plugin your settings switch off in
+`enabledPlugins`. Two shim plugin keys (a fork beside `shim-cli@shim-cli`) are
+named together, with the `claude plugin uninstall` for every key but one.
 You need the package either way for `shim audit`, `shim keys`, `shim report`
 and `shim config`. The VS Code plugin together with `shim install copilot` is
 the intended pairing: the plugin stands down in GitHub Copilot CLI, so nothing
@@ -345,8 +360,11 @@ fully:
 - A refused settings file gives the reason, such as `target is writable by
   another user`, and no command; `--json` carries the fix for that reason. For
   a mode it is `chmod 700 ~/.config/shim && chmod 600
-  ~/.config/shim/config.toml`, with your real paths; `shim config --reset
-  --yes` does not repair permissions.
+  ~/.config/shim/config.toml`, with the real paths of the file that was
+  refused, the 0.2.0 one included; `shim config --reset --yes` does not repair
+  permissions. A relative `SHIM_CONFIG` is named as such, with
+  `Unset SHIM_CONFIG or set it to an absolute path.`; a relative
+  `XDG_CONFIG_HOME` is ignored, as the XDG Base Directory specification asks.
 - `FAIL Codex hook support is not enabled.` comes from `codex features list`,
   and usually means Codex's own `config.toml` (in `~/.codex`, or
   `$CODEX_HOME`) turns hooks off. Set `hooks = true` under `[features]`, or
@@ -458,8 +476,13 @@ shim ledger — 4 events over 2 day(s), kept for 30 days
   2026-09-08   3 events   1 IBAN, 1 SECRET
 ```
 
-`--json` returns every entry. Entries hold entity names, counts, tool names and
-timestamps — never the values that were found.
+`--json` returns every entry and `capped`. Entries hold entity names, counts,
+tool names and timestamps — never the values that were found.
+
+A month's file stops at 5 MB. When a retained month has no room for another
+record, or an event could not be written because another process held the file
+past the 100 ms wait, `ledger show` and the `shim report` fallback print a
+`WARN` that some events were not kept, and `capped` is `true`.
 
 ### `shim ledger purge`
 
@@ -636,30 +659,41 @@ scanned 3 sessions, 5 KB, in 0.0 s. Nothing was changed, written or sent.
 It reads the prompts you typed or queued, tool results (a failed call is
 `failed <tool>`), files attached with `@`, edited-file snippets, and what the
 model wrote (`text` and `thinking`), each counted under the way it came in.
-Model output is its own line and never added to the rest. Placeholders shim
-already wrote into tool results are counted as `already masked by shim`.
+Model output is its own line and never added to the rest. `already masked by
+shim` counts what shim's own records say it masked in each session: the
+session's log while the session is open, and the ledger after, if it is on,
+from the same `--since`. Without the ledger an ended session counts nothing
+there, and the line ends `(without the ledger, live sessions only)`.
+Placeholder-shaped text in a transcript is not counted, since a doc, a fixture
+or a file can hold it, and text shim already masked is not counted again as a
+value that reached the model.
 Sub-agent transcripts count under their session; the task prompt a parent agent
 wrote into one, compaction summaries and the client's own state records are
 skipped. A line over 8 MB or not JSON, and a text the detector cannot analyse,
 are counted as skipped and said so. It looks for the types your settings enable
 and your custom patterns; a per-tool `[entities]` rule does not apply.
 
-Exits `0` when nothing reached the model, `1` when something did, `2` when the
-history is missing or unreadable. `--json` uses the same codes; for a missing
-or unreadable history it writes an object with `"status": "error"` and the
-reason in `error`.
+Exits `0` only when every line was read, every text inspected and nothing
+reached the model; `1` when something did, or when nothing was found but lines
+were skipped or texts left uninspected, since those may hold what the scan
+missed; `2` when the history is missing or unreadable. `--json` uses the same
+codes, with `"status"` `"findings"`, `"incomplete"` (nothing found, something
+skipped) or `"safe"`; for a missing or unreadable history it writes an object
+with `"status": "error"` and the reason in `error`.
 
 `--json` carries `sessions`, `projects`, `first`, `last`, `reached` (per
 entity: `total`, `sessions`, `doors`), `by_project` (`counts`, `last`),
 `by_session` (`project`, `last`, `reached`, `model_output`, `masked`), `masked`
-(`values`, `sessions`), `model_output`, and `scanned` (`sessions`, `bytes`,
+(`values`, `sessions`, `ledger`), `model_output`, and `scanned` (`sessions`,
+`bytes`,
 `seconds`, `skipped_lines`, `uninspected_texts`).
 
 **`--purge`** needs a terminal and cannot be combined with `--json`. It prints
 the report, lists the sessions with at least one value under "reached the
 model", and asks you to type `delete N`; anything else deletes nothing. It
 first removes the listed sessions' lines from `history.jsonl`; if that file
-cannot be rewritten, or changes meanwhile, nothing is deleted. Then, for each
+cannot be rewritten, is a link or not a regular file, or changes meanwhile,
+nothing is deleted. Then, for each
 session, it deletes the folder of the same name beside the transcript
 (sub-agent transcripts and whatever else Claude Code keeps there) and last the
 transcript, so a session whose folder cannot be fully deleted keeps its
@@ -675,7 +709,10 @@ in `file-history/`. Close Claude Code first.
 ### `shim config`
 
 With no arguments, prints a table of every entity type and its state, the
-ledger and diet settings, and the file it all lives in:
+ledger and diet settings, and the file it all lives in. Custom patterns are
+listed as `Custom (off)` while `CUSTOM` is off, because none of them runs then,
+and with no settings file the last line is `WARN no settings file at <path>;
+shipped defaults apply`:
 
 ```console
 $ shim config
@@ -741,6 +778,15 @@ A pattern that backtracks badly is refused before it is saved:
 ```
 FAIL pattern BAD backtracks on repeated input; simplify it
 ```
+
+It is tried on runs of digits, letters, spaces and separators, on pairs of them
+alternating and on the pattern's own words. `shim doctor` checks the patterns
+already in the file the same way, with each entry's `ignore_case`, and fails
+with `CUSTOM_PATTERN_UNSAFE`. An unanchored greedy pattern such as
+`\w+@\w+\.internal`, `[A-Z]+_TOKEN` or `.*@corp` is refused, so a pattern 1.2.2
+accepted can now fail doctor; bound it
+(`\b\w{1,64}@\w{1,64}\.internal\b`). [The privacy
+notes](privacy.md#patterns-you-named-yourself) say what the check cannot see.
 
 Matches appear as `<CUSTOM_1>`, `<CUSTOM_2>` in the text and are named in the
 summary's `custom` line.
@@ -925,8 +971,12 @@ umask, then edit it.
 
 **shim checks the file before reading it**, and refuses it if it is a symlink,
 a hard link, not a regular file, owned by someone else, writable by another
-user, larger than the inspection limit, or changed while being read. The
-message names which check refused it:
+user, larger than the inspection limit, or changed while being read. It also
+refuses a file `SHIM_CONFIG` names that does not exist, and a settings path
+through a folder link that dangles, as when a dotfiles folder is unmounted: in
+both, running on the shipped defaults would drop every setting without a word.
+With no settings file at all, the defaults apply and `shim config` and
+`shim doctor` say so. The message names which check refused it:
 
 ```
 FAIL Settings at ~/.config/shim/config.toml were refused: target must not be
@@ -983,12 +1033,19 @@ outbound = "enforce"        # mask a web tool's input; refuse an MCP call. The d
 local-tool = "warn"         # report what Read, Grep and the like are given. The default.
 model-output = "observe"    # count it, change nothing. The default.
 Bash = "enforce"            # by tool name
-default = "warn"            # fallback for anything unlisted
+default = "warn"            # replaces every shipped default above it; see below
 
 # Narrow which types apply to one tool or event.
 [entities]
 Bash = ["SECRET", "DB_URI"]
 ```
+
+**`default` outranks the shipped defaults.** The order is tool name, event
+name, direction, then `default`, and only then the shipped mode for the
+direction. So `default = "warn"` without an `inbound` and `outbound` line turns
+off the masking of tool results and of the tool inputs that leave the machine.
+`shim doctor` warns with `MODE_DEFAULT_WEAKENS` when it does; keep
+`inbound = "enforce"` and `outbound = "enforce"` beside it, or drop `default`.
 
 **Modes** are `observe` (count it), `warn` (say so, change nothing) and
 `enforce` (mask or block); `model-output` accepts only `observe`.
@@ -1008,7 +1065,7 @@ Which direction a tool call takes depends on the client and the tool's name:
 A tool result is `inbound`, except the answer you type to `AskUserQuestion` or
 `vscode_askQuestions`, which is `local-tool`. A key naming one tool overrides
 its direction, so `"mcp__crm__lookup" = "warn"` reports that MCP tool's
-findings instead of refusing the call. A tool shim does not know, such as one a
+findings instead of refusing the call, and a refusal names that key. A tool shim does not know, such as one a
 newer client adds or a host adds beside the built-ins, is treated as
 `outbound` until it is classified. The full lists are `TOOLS` in
 `src/shim_cli/policy.py`, read from Claude Code 2.1.286 and Copilot Chat
@@ -1025,7 +1082,15 @@ prompt, so it was withheld.`) until it is fixed.
 
 A per-tool `[entities]` list replaces the full set for that tool: types left
 out are neither masked nor reported in that tool's events and reach the model
-unchanged.
+unchanged. A key naming an event narrows that event, prompts included: the key
+resolves as `[mode]` does, by the event name the client sends, or
+`UserPromptSubmit` when it sends none, and covers the files attached with `@`
+too. So `UserPromptSubmit = ["EMAIL"]` turns off everything the list leaves
+out, `SECRET` and `CUSTOM` (your `[[custom]]` patterns) among them, and an AWS
+key or a card typed into a prompt then passes without a word. A Copilot prompt
+arrives as `userPromptTransformed` and is not narrowed by a `UserPromptSubmit`
+key. What a session record keeps of a path or a tool name is still scrubbed
+with every type.
 
 The defaults are deliberate: your prompt is `warn`, because shim reports what
 you typed rather than rewriting it under you; tool results are `enforce`,
@@ -1051,8 +1116,8 @@ and an agent's change to shim's own settings or hooks is refused
 
 | Variable | What it does |
 | --- | --- |
-| `SHIM_CONFIG` | Use this settings file instead of the default path. |
-| `XDG_CONFIG_HOME` | Where `shim/config.toml` lives. |
+| `SHIM_CONFIG` | Use this settings file instead of the default path. It must be absolute, and a file it names that does not exist is refused, never read as the defaults: the hook withholds prompts, refuses tool calls and withholds tool results as for any refused file, until the file exists or the variable is unset. |
+| `XDG_CONFIG_HOME` | Where `shim/config.toml` lives. A relative one is ignored. |
 | `XDG_STATE_HOME` | Where the ledger lives. |
 | `TMPDIR` | Where session records and withheld prompts are written. |
 | `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `COPILOT_HOME` | Where each client keeps its settings; shim follows them, and `shim audit` reads Claude Code's history there. |
@@ -1063,11 +1128,13 @@ and an agent's change to shim's own settings or hooks is refused
 | --- | --- |
 | Settings | `~/.config/shim/config.toml` |
 | Ledger, when enabled | `~/.local/state/shim/ledger-YYYY-MM.jsonl`, or under `$XDG_STATE_HOME/shim` |
-| Session records | a private directory under your temp dir, `$TMPDIR/shim-session-<uid>`. Claude Code's `SessionEnd` deletes a session's record; Codex, GitHub Copilot CLI and VS Code send no session-end event, so theirs stay until the operating system clears the temp dir |
+| Session records | a private directory under your temp dir, `$TMPDIR/shim-session-<uid>`: a log per session, and beside it the names of the placeholders shim issued in it. Claude Code's `SessionEnd` deletes both; Codex, GitHub Copilot CLI and VS Code send no session-end event, so theirs stay until the operating system clears the temp dir |
 | Withheld prompts | a private file under your temp dir, `$TMPDIR/shim-redacted-*.txt`, named in the message. Claude Code's `SessionEnd` deletes those older than 24 hours |
 
 Session records and the ledger hold entity **names and counts**, tool names and
-timestamps. They never hold the values that were found. What is recorded, and
+timestamps; beside a session's log, shim keeps the names of the placeholders it
+issued (`EMAIL 1 3`). None of them holds the values that were found. What is
+recorded, and
 what is not, is spelled out in [privacy.md](privacy.md).
 
 ## See also

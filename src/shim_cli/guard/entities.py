@@ -1,9 +1,17 @@
 from __future__ import annotations
 
+import itertools
 import re
+import sys
 import time
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from typing import NamedTuple
+
+# The parser `re` compiles with, to measure a pattern; 3.11 renamed it.
+if sys.version_info >= (3, 11):
+    from re import _parser as _regex_parser  # ty: ignore[unresolved-import]
+else:
+    import sre_parse as _regex_parser
 
 BUILT_IN_TYPES = (
     "EMAIL",
@@ -143,30 +151,90 @@ def compile_custom(entries: Iterable[object]) -> tuple[CustomPattern, ...]:
     return tuple(compiled)
 
 
-def _probes(source: str) -> tuple[str, ...]:
-    letters = [character for character in source if character.isalnum()]
-    common = max(set(letters), key=letters.count) if letters else "a"
+# A member of each character class a pattern may name: digits, letters, space,
+# line breaks and the usual separators.
+_CLASS_MEMBERS = "1aA _\n\t.-:/,;@"
+_PROBE_WORD = re.compile(r"[^\W_]{2,}")
+
+
+# Past 1,024 characters the runs grow by a quarter at a time, so a count that
+# only starts to backtrack past one length (`\d{1025}\d*\d*;`) is met just
+# after it, while one search is still short.
+_PROBE_LENGTHS = (
+    *range(2, 65, 2),
+    256,
+    *(int(1_024 * 1.25**step) for step in range(11)),
+    PROBE_LENGTH,
+)
+_EXTRAPOLATE_FROM = 1_024
+
+
+def _reach(source: str, flags: int) -> int:
+    """The most characters any part of the pattern needs, lookarounds included:
+    no run shorter than this shows how the pattern grows past it."""
+    widest = 0
+    parts: list[object] = [_regex_parser.parse(source, flags)]
+    while parts:
+        part = parts.pop()
+        if isinstance(part, _regex_parser.SubPattern):
+            widest = max(widest, part.getwidth()[0])
+            parts.extend(part.data)
+        elif isinstance(part, (tuple, list)):
+            parts.extend(part)
+    return widest
+
+
+def _ramp(unit: str, trailing: str) -> Iterator[tuple[int, str]]:
+    for length in _PROBE_LENGTHS:
+        yield length, (unit * (length // len(unit) + 1))[:length] + trailing
+
+
+def _probes(source: str) -> Iterator[Iterator[tuple[int, str]]]:
+    """Repeated input the pattern may meet: runs of each character it can name
+    or writes, of two of them alternating, and of each word it writes. Each run
+    grows from a few characters to `PROBE_LENGTH`, so an exponential pattern is
+    stopped while it is still fast and a quadratic one is met at full length."""
+    singles = sorted(set(_CLASS_MEMBERS + source))
+    units = [
+        *singles,
+        *map("".join, itertools.combinations(singles, 2)),
+        *sorted(set(_PROBE_WORD.findall(source))),
+    ]
     trailing = next(
         (character for character in "!#~" if character not in source), "\x00"
     )
-    return (common * PROBE_LENGTH + trailing, "\n" * PROBE_LENGTH)
+    for unit in units:
+        yield _ramp(unit, trailing)
 
 
-def unsafe_pattern(name: str, source: str) -> str:
+def unsafe_pattern(name: str, source: str, flags: int = 0) -> str:
     """The reason this pattern must not reach the hook, or an empty string.
 
     The hook has a deadline and `re` has no per-match timeout, so a pattern is
-    checked when it is written rather than when it runs.
+    checked when it is written rather than when it runs, compiled with the
+    `flags` the hook gives it: `(?:id|ID)*` is linear until case is ignored.
     """
     if _BACKREFERENCE.search(source) or _NESTED_QUANTIFIER.search(source):
         return f"pattern {name} backtracks on repeated input; simplify it"
     try:
-        regex = re.compile(source)
+        regex = re.compile(source, flags)
     except re.error:
         return f"pattern {name} is not a valid regular expression"
-    for probe in _probes(source):
-        started = time.perf_counter()
-        regex.search(probe)
-        if (time.perf_counter() - started) * 1000 > PROBE_MILLISECONDS:
-            return f"pattern {name} backtracks on repeated input; simplify it"
+    # A run stops early once it is far under the limit at twice the reach: time
+    # that grows by at most the cube of the length past the reach cannot reach
+    # the limit at full length, and a steeper one is already slow here.
+    reach = _reach(source, flags)
+    for ramp in _probes(source):
+        for length, probe in ramp:
+            started = time.perf_counter()
+            regex.search(probe)
+            elapsed = (time.perf_counter() - started) * 1000
+            if elapsed > PROBE_MILLISECONDS:
+                return f"pattern {name} backtracks on repeated input; simplify it"
+            if (
+                length >= max(_EXTRAPOLATE_FROM, 2 * reach)
+                and elapsed * ((PROBE_LENGTH - reach) / (length - reach)) ** 3
+                <= PROBE_MILLISECONDS
+            ):
+                break
     return ""

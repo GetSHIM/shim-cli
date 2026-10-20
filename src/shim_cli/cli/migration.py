@@ -18,6 +18,8 @@ from shim_cli import config
 from shim_cli.cli.output import emit
 from shim_cli.session import _files, ledger
 
+FAILED = "could not "
+
 
 def _move(source: Path, target: Path) -> None:
     try:
@@ -79,8 +81,11 @@ def settings() -> tuple[str, ...]:
         return ()
     if target.exists():
         return ()
-    target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    _move(legacy, target)
+    try:
+        target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        _move(legacy, target)
+    except OSError as error:
+        return (f"{FAILED}move settings to {target}: {error.strerror}",)
     return (f"moved settings to {target}",)
 
 
@@ -93,24 +98,29 @@ def ledger_files() -> tuple[str, ...]:
     except ledger.LedgerError:
         return ()
     moved = 0
+    failed: tuple[str, ...] = ()
     for path in sorted(legacy.glob(f"{ledger.FILE_PREFIX}*{ledger.FILE_SUFFIX}")):
         destination = target / path.name
-        target.mkdir(mode=0o700, parents=True, exist_ok=True)
-        if destination.exists():
-            if not _merge_ledger(path, destination):
-                continue
-        else:
-            _move(path, destination)
+        try:
+            target.mkdir(mode=0o700, parents=True, exist_ok=True)
+            if destination.exists():
+                if not _merge_ledger(path, destination):
+                    continue
+            else:
+                _move(path, destination)
+        except OSError as error:
+            failed = (f"{FAILED}move ledger files to {target}: {error.strerror}",)
+            break
         moved += 1
     with contextlib.suppress(OSError):
         legacy.rmdir()
     if not moved:
-        return ()
+        return failed
     plural = "" if moved == 1 else "s"
-    return (f"moved {moved} ledger file{plural} to {target}",)
+    return (f"moved {moved} ledger file{plural} to {target}", *failed)
 
 
 def announce(notes: Sequence[str], *, as_json: bool) -> None:
     """JSON output owns stdout, so a move is reported on stderr in that mode."""
     for note in notes:
-        emit("PASS", note, error=as_json)
+        emit("WARN" if note.startswith(FAILED) else "PASS", note, error=as_json)

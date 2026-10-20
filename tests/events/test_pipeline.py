@@ -136,7 +136,9 @@ def test_a_read_result_is_masked_in_place_under_enforce() -> None:
 UNROUTED = (
     "shim: blocked EMAIL (1) in mcp__probe__probe_echo. shim cannot tell where "
     "this tool sends its input, so it refuses the call rather than rewrite it. "
-    "Leave these values out, or ask the user how to continue."
+    "Leave these values out, or ask the user how to continue. The user can allow "
+    'this tool with "mcp__probe__probe_echo" = "warn" under [mode] in shim\'s '
+    "settings."
 )
 
 
@@ -391,8 +393,7 @@ def test_a_target_always_uses_the_full_entity_scope() -> None:
         entities_for=lambda tool, event: ("SECRET",),
     )
 
-    assert "<EMAIL_1>" in outcome.record.target
-    assert outcome.record.target.endswith("/notes.txt")
+    assert outcome.record.target == "/work/<EMAIL_1>/notes.txt"
     assert address not in repr(outcome.record)
     assert address not in json.dumps(outcome.record.as_dict())
 
@@ -739,10 +740,10 @@ def test_a_per_tool_entity_scope_narrows_only_that_tool() -> None:
 BAD = "a field the detector cannot analyse"
 
 
-def _failing_on_bad(text, *args):
+def _failing_on_bad(text, *args, **kwargs):
     if text == BAD:
         raise ValueError("Guard analysis failed safely.")
-    return evaluate(text, *args)
+    return evaluate(text, *args, **kwargs)
 
 
 def _uninspectable(raw: bytes, mode: str):
@@ -823,8 +824,12 @@ def test_a_failed_piece_leaves_nothing_partly_masked_to_emit() -> None:
     from shim_cli.events.payload import inspect
     from shim_cli.guard.models import Finding, GuardDecision
 
-    def evaluate(text: str) -> GuardDecision:
-        found = (Finding("SECRET", 2, 8, 0.9, ""),)
+    def evaluate(text: str, **_numbering) -> GuardDecision:
+        # A detector whose one piece failed in the text that holds "secret".
+        start = text.find("secret")
+        if start < 0:
+            return GuardDecision((), text, False, 0)
+        found = (Finding("SECRET", start, start + 6, 0.9, ""),)
         return GuardDecision(found, text.replace("secret", "<SECRET_1>"), True, 0)
 
     result = inspect({"tool_response": "a secret here"}, evaluate)
@@ -845,8 +850,10 @@ def test_the_walk_budget_still_reports_a_leaf_it_cannot_afford() -> None:
 
     result = inspect({"tool_response": "x" * (MAX_TEXT_CHARACTERS + 1)}, evaluate)
 
-    assert result.status == "not-inspected"
+    # Its key was read; the text under it was not.
+    assert (result.status, result.skipped) == ("partial", 1)
     assert result.reasons == ("size-limit",)
+    assert (result.value, result.changed) == (None, False)
 
 
 def test_a_sibling_past_the_detectors_single_pass_limit_is_now_masked() -> None:
@@ -1077,8 +1084,8 @@ def test_an_observed_page_is_never_converted() -> None:
 def test_a_value_the_markup_hid_is_masked_once_the_page_is_text(
     hidden: str, entity: str
 ) -> None:
-    # Entities decode and tags close up only in conversion, so the first pass
-    # cannot see these; the text the model will read is scanned again.
+    # Entities decode and tags close up only in conversion, so only a scan of
+    # the text the model will read finds these.
     page = PAGE.replace("Contact ops@example.com", f"Contact {hidden}")
 
     outcome = _process(_fetched_page(page), ENFORCE, diet=("json", "html"))
@@ -1092,11 +1099,11 @@ def test_a_value_the_markup_hid_is_masked_once_the_page_is_text(
     assert outcome.record.transforms == ("html",)
 
 
-def test_a_page_whose_text_cannot_be_scanned_again_is_not_converted() -> None:
-    def fails_on_text(text, *args):
+def test_a_page_whose_text_cannot_be_scanned_is_not_converted() -> None:
+    def fails_on_text(text, *args, **kwargs):
         if text.startswith(HEADER):
             raise ValueError("Guard analysis failed safely.")
-        return evaluate(text, *args)
+        return evaluate(text, *args, **kwargs)
 
     outcome = process(
         TOOL_EVENTS["PostToolUse"],

@@ -10,6 +10,7 @@ ACTION_LABELS = (
     ("report", "warned"),
 )
 FAILED_EVENT = "PostToolUseFailure"
+KNOWN_ACTIONS = ("allow", *(action for action, _label in ACTION_LABELS))
 MAX_SOURCES = 3
 BYTES_PER_TOKEN = 4
 MODEL_OUTPUT = "model-output"
@@ -124,13 +125,19 @@ def _carrying(records: list, marker: str) -> list:
 
 
 def uninspected(records: list) -> list:
+    """Records that say shim did not finish inspecting, and records that hold
+    findings but no action shim knows: what happened to those is not recorded,
+    so they are shown rather than dropped."""
     from .record import NOT_INSPECTED
 
     return [
         record
         for record in records
-        if isinstance(record.get("note"), str)
-        and record["note"].startswith((NOT_INSPECTED, "not-inspected:"))
+        if (
+            isinstance(record.get("note"), str)
+            and record["note"].startswith((NOT_INSPECTED, "not-inspected:"))
+        )
+        or (record.get("entities") and action_of(record) not in KNOWN_ACTIONS)
     ]
 
 
@@ -264,13 +271,15 @@ def render(records: list, capped: bool = False) -> str:
             f"  {'shrank':<9} {saved} bytes of tool results "
             f"(~{saved // BYTES_PER_TOKEN} tokens)"
         )
-    if not lines:
+    if not lines and not capped:
         return ""
-    median, p95 = _overhead(records)
-    lines.append(f"  {'overhead':<9} {median} ms median, {p95} ms p95")
+    if lines:
+        median, p95 = _overhead(records)
+        lines.append(f"  {'overhead':<9} {median} ms median, {p95} ms p95")
     if capped:
         lines.append(
-            "  (session log reached its size cap; later events are not counted)"
+            "  (session log is incomplete: it reached its size cap or a record "
+            "could not be written; some events are not counted)"
         )
     return "\n".join(["shim — this session", *lines])
 

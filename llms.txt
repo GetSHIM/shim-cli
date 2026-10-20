@@ -4,7 +4,7 @@
 
 What it cannot do: a prompt typed into Claude Code or Codex cannot be masked, because neither client lets a hook rewrite it; shim reports it, or blocks it with `user-prompt = "enforce"` under `[mode]` in the settings file. GitHub Copilot CLI replaces the prompt the model sees. Windows is not supported; use WSL, macOS or Linux.
 
-What it does when it cannot inspect: from 1.2.2 it fails closed in every mode. The prompt is withheld, a tool call refused, and a Claude Code tool result withheld; where the client allows neither, the user and the model are told. An agent's attempt to change shim's settings or hooks, or to run `shim config` or `shim revert`, is refused; run those yourself.
+What it does when it cannot inspect: from 1.2.2 it fails closed in every mode. The prompt is withheld, a tool call refused, and a Claude Code tool result withheld; where the client allows neither, the user and the model are told. An agent's attempt to change shim's settings or hooks, or to run `shim config` or `shim revert`, is refused; run those yourself. From 1.2.3 a write or MCP call that would put back a placeholder shim issued in the session (such as `<SECRET_1>`) is refused in every mode.
 
 ## Docs
 
@@ -18,4 +18,4 @@ What it does when it cannot inspect: from 1.2.2 it fails closed in every mode. T
 
 ## Optional
 
-- [1.2.2 release notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/1.2.2.md): the newest release
+- [1.2.3 release notes](https://github.com/GetSHIM/shim-cli/blob/main/docs/releases/1.2.3.md): the newest release

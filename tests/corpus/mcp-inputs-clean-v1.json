@@ -1,0 +1,649 @@
+{
+  "version": 1,
+  "claim_scope": "Synthetic, hand-written MCP tool inputs with no personal data and no credentials; fixture-bound evidence only, not a real-world statistical claim.",
+  "output_rule": "Each case runs as a Claude Code PreToolUse event for its tool through the installed hook, with no settings file. Every case must be allowed with no finding: under the default enforce an MCP or unknown tool's call carrying a finding is refused, so a detector false positive here is a refused call. Each of `known_false_positives` is ordinary code as well, and is refused: it reads as code only by a shape a password has too, a call under a bare key word (`password = pass.word()`), one holding a digit (`DB_PASSWORD=summer2024.winter.go(1)`) or one with a call among its arguments, so reading it as code would miss a credential.",
+  "cases": [
+    {
+      "id": "python-module",
+      "tool": "mcp__filesystem__write_file",
+      "tool_input": {
+        "path": "/work/orders/src/orders/settings.py",
+        "content": "\"\"\"Order service settings and password checks.\"\"\"\n\nfrom __future__ import annotations\n\nimport hashlib\nimport hmac\nimport os\nfrom dataclasses import dataclass\n\nfrom pydantic import Field, SecretStr\nfrom pydantic_settings import BaseSettings\n\nPASSWORD_MIN_LENGTH = 12\nTOKEN_TTL_SECONDS = 3600\nMAX_ORDER_CENTS = 10_000_000\n\n\nclass Settings(BaseSettings):\n    database_url: str = Field(default=\"sqlite:///./dev.db\")\n    db_password: SecretStr | None = None\n    api_key: str = Field(default=\"\", alias=\"ORDERS_API_KEY\")\n    jwt_secret: SecretStr = Field(..., env=\"JWT_SECRET\")\n    redis_password: str | None = None\n    secret_key: str = os.environ.get(\"SECRET_KEY\", \"\")\n    token_header: str = \"Authorization\"\n\n\n@dataclass(frozen=True)\nclass Credentials:\n    username: str\n    password: str\n\n\ndef verify_password(plain: str, hashed: str) -> bool:\n    candidate = hashlib.sha256(plain.encode()).hexdigest()\n    return hmac.compare_digest(candidate, hashed)\n\n\ndef token_from(headers: dict[str, str]) -> str | None:\n    value = headers.get(\"Authorization\", \"\")\n    return token if scheme.lower() == \"bearer\" else None\n\n\ndef connect(settings: Settings) -> None:\n    client = make_client(user=\"orders\", password=password, timeout=30)\n    client.ping()\n"
+      }
+    },
+    {
+      "id": "typescript-module",
+      "tool": "mcp__filesystem__write_file",
+      "tool_input": {
+        "path": "/work/web/src/auth/login.ts",
+        "content": "import { z } from \"zod\";\nimport { randomUUID } from \"node:crypto\";\n\nexport interface LoginRequest {\n  username: string;\n  password: string;\n  rememberMe?: boolean;\n}\n\nexport const loginSchema = z.object({\n  username: z.string().min(3).max(64),\n});\n\nexport const config = {\n  apiBaseUrl: process.env.API_BASE_URL ?? \"https://api.example.invalid/v2\",\n  apiKey: process.env.API_KEY ?? \"\",\n  clientSecret: process.env.OAUTH_CLIENT_SECRET,\n  timeoutMs: 15_000,\n  retries: 3,\n};\n\nexport async function login(body: LoginRequest): Promise<string> {\n  const requestId = randomUUID();\n  const token = await auth.signIn(body.username, body.password);\n  const expiresAt = Date.parse(\"2026-10-19T08:30:00Z\") + 3_600_000;\n  logger.info({ requestId, expiresAt }, \"signed in\");\n  return token;\n}\n\nexport const DEFAULT_ORDER_ID = \"7b4f90ea-ba0c-5862-9511-57b0ba70c162\";\nexport const BUILD_SHA = \"ab27ba80d4d89cb5a3fac2d661127efa88f0cd59\";\n"
+      }
+    },
+    {
+      "id": "go-module",
+      "tool": "mcp__filesystem__write_file",
+      "tool_input": {
+        "path": "/work/ingest/store/db.go",
+        "content": "package store\n\nimport (\n\t\"context\"\n\t\"database/sql\"\n\t\"os\"\n\t\"time\"\n)\n\nconst (\n\tdefaultTimeout = 30 * time.Second\n\tmaxOpenConns   = 25\n\tlistenAddr     = \":8080\"\n)\n\ntype Config struct {\n\tDSN      string `json:\"dsn\" env:\"DATABASE_URL\"`\n\tPassword string `json:\"password\" env:\"DB_PASSWORD\"`\n\tAPIKey   string `json:\"api_key\" env:\"API_KEY\"`\n}\n\nfunc Load() Config {\n\treturn Config{\n\t\tDSN:      os.Getenv(\"DATABASE_URL\"),\n\t\tPassword: os.Getenv(\"DB_PASSWORD\"),\n\t\tAPIKey:   os.Getenv(\"API_KEY\"),\n\t}\n}\n\nfunc Open(ctx context.Context, cfg Config) (*sql.DB, error) {\n\tdb, err := sql.Open(\"pgx\", cfg.DSN)\n\tif err != nil {\n\t\treturn nil, err\n\t}\n\tdb.SetMaxOpenConns(maxOpenConns)\n\tdb.SetConnMaxLifetime(5 * time.Minute)\n\tctx, cancel := context.WithTimeout(ctx, defaultTimeout)\n\tdefer cancel()\n\treturn db, db.PingContext(ctx)\n}\n"
+      }
+    },
+    {
+      "id": "java-class",
+      "tool": "mcp__filesystem__write_file",
+      "tool_input": {
+        "path": "/work/orders/src/main/java/com/example/orders/DataSourceSettings.java",
+        "content": "package com.example.orders;\n\nimport java.io.Serializable;\nimport org.springframework.beans.factory.annotation.Value;\nimport org.springframework.stereotype.Component;\n\n@Component\npublic class DataSourceSettings implements Serializable {\n    private static final long serialVersionUID = -3527563876431263488L;\n    private static final int MAX_POOL_SIZE = 20;\n\n    @Value(\"${spring.datasource.url}\")\n    private String url;\n\n    @Value(\"${spring.datasource.username}\")\n    private String username;\n\n    @Value(\"${spring.datasource.password}\")\n    private String password;\n\n    public String getPassword() {\n        return password;\n    }\n\n    public void setPassword(String password) {\n        this.password = password;\n    }\n}\n"
+      }
+    },
+    {
+      "id": "sql-migration",
+      "tool": "mcp__filesystem__write_file",
+      "tool_input": {
+        "path": "/work/orders/migrations/20261019083000_create_accounts.sql",
+        "content": "-- 20261019083000_create_accounts.sql\nCREATE TABLE accounts (\n    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),\n    email text NOT NULL UNIQUE,\n    password_hash text NOT NULL,\n    phone text,\n    tax_number text,\n    api_token_digest bytea,\n    created_at timestamptz NOT NULL DEFAULT now(),\n    updated_at timestamptz NOT NULL DEFAULT now()\n);\n\nCREATE INDEX accounts_created_at_idx ON accounts (created_at DESC);\n\nINSERT INTO plans (code, price_cents, currency, seats) VALUES\n    ('starter', 900, 'EUR', 1),\n    ('team', 4900, 'EUR', 10),\n    ('business', 19900, 'EUR', 50);\n\nALTER TABLE orders ADD COLUMN external_ref varchar(32);\nUPDATE orders SET status = 'archived' WHERE created_at < '2025-01-01T00:00:00Z';\n"
+      }
+    },
+    {
+      "id": "alembic-revision",
+      "tool": "mcp__filesystem__write_file",
+      "tool_input": {
+        "path": "/work/orders/alembic/versions/c6bf1ec40802_invoice_number.py",
+        "content": "\"\"\"add invoice number sequence\n\nRevision ID: c6bf1ec40802\nRevises: 3f9a2d7e1b44\nCreate Date: 2026-10-19 08:30:00.123456\n\"\"\"\n\nimport sqlalchemy as sa\nfrom alembic import op\n\nrevision = \"c6bf1ec40802\"\ndown_revision = \"3f9a2d7e1b44\"\nbranch_labels = None\ndepends_on = None\n\n\ndef upgrade() -> None:\n    op.execute(\"CREATE SEQUENCE invoice_number_seq START 100000001\")\n    op.add_column(\"invoices\", sa.Column(\"number\", sa.BigInteger(), nullable=True))\n\n\ndef downgrade() -> None:\n    op.drop_column(\"invoices\", \"number\")\n    op.execute(\"DROP SEQUENCE invoice_number_seq\")\n"
+      }
+    },
+    {
+      "id": "compose-yaml",
+      "tool": "mcp__filesystem__write_file",
+      "tool_input": {
+        "path": "/work/orders/compose.yaml",
+        "content": "services:\n  db:\n    image: postgres:16.4@sha256:2c94c2c89a961b0be16e38c30f4a0d959b6407ee4d2f9d42acbd1fd1be087cf7\n    environment:\n      POSTGRES_USER: app\n      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}\n      POSTGRES_DB: app\n    ports:\n      - \"5432:5432\"\n    healthcheck:\n      test: [\"CMD-SHELL\", \"pg_isready -U app\"]\n      interval: 10s\n      retries: 5\n  api:\n    build: .\n    environment:\n      DATABASE_URL: ${DATABASE_URL}\n      SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY}\n      LOG_LEVEL: info\n    ports:\n      - \"127.0.0.1:8080:8080\"\n    depends_on:\n      db:\n        condition: service_healthy\n"
+      }
+    },
+    {
+      "id": "actions-workflow",
+      "tool": "mcp__github__create_or_update_file",
+      "tool_input": {
+        "owner": "example",
+        "repo": "orders-api",
+        "path": ".github/workflows/test.yml",
+        "content": "name: test\non:\n  pull_request:\n  push:\n    branches: [main]\npermissions:\n  contents: read\njobs:\n  test:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 20\n    steps:\n      - uses: actions/checkout@ab27ba80d4d89cb5a3fac2d661127efa88f0cd59 # v4.2.2\n      - uses: actions/setup-python@ab27ba80d4d89cb5a3fac2d661127efa88f0cd59 # v5.3.0\n        with:\n          python-version: \"3.13\"\n      - run: uv sync --locked\n      - run: uv run pytest -q\n        env:\n          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}\n          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}\n          DATABASE_PASSWORD: ${{ secrets.DATABASE_PASSWORD }}\n",
+        "message": "ci: pin actions by commit",
+        "branch": "ci/pin-actions",
+        "sha": "ab27ba80d4d89cb5a3fac2d661127efa88f0cd59"
+      }
+    },
+    {
+      "id": "kubernetes-deployment",
+      "tool": "mcp__filesystem__write_file",
+      "tool_input": {
+        "path": "/work/orders/deploy/deployment.yaml",
+        "content": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: orders-api\n  labels:\n    app.kubernetes.io/version: \"2.3.1\"\nspec:\n  replicas: 3\n  template:\n    spec:\n      containers:\n        - name: api\n          image: ghcr.io/example/orders-api:2.3.1@sha256:2c94c2c89a961b0be16e38c30f4a0d959b6407ee4d2f9d42acbd1fd1be087cf7\n          ports:\n            - containerPort: 8080\n          env:\n            - name: DB_PASSWORD\n              valueFrom:\n                secretKeyRef:\n                  name: orders-db\n                  key: password\n            - name: API_TOKEN\n              valueFrom:\n                secretKeyRef:\n                  name: orders-api\n                  key: token\n          resources:\n            limits:\n              cpu: 500m\n              memory: 512Mi\n"
+      }
+    },
+    {
+      "id": "pyproject-toml",
+      "tool": "mcp__filesystem__write_file",
+      "tool_input": {
+        "path": "/work/orders/pyproject.toml",
+        "content": "[project]\nname = \"orders-api\"\nversion = \"2.3.1\"\nrequires-python = \">=3.12\"\ndependencies = [\n    \"fastapi>=0.115,<1\",\n    \"pydantic-settings==2.6.1\",\n    \"sqlalchemy[asyncio]==2.0.36\",\n]\n\n[tool.ruff]\nline-length = 88\ntarget-version = \"py312\"\n\n[tool.pytest.ini_options]\naddopts = \"-q --strict-markers\"\ntimeout = 120\n"
+      }
+    },
+    {
+      "id": "cargo-toml",
+      "tool": "mcp__filesystem__write_file",
+      "tool_input": {
+        "path": "/work/ingest/Cargo.toml",
+        "content": "[package]\nname = \"ingest\"\nversion = \"0.14.2\"\nedition = \"2021\"\nrust-version = \"1.82\"\n\n[dependencies]\nserde = { version = \"1.0.214\", features = [\"derive\"] }\ntokio = { version = \"1.41.0\", features = [\"rt-multi-thread\", \"macros\"] }\nsha2 = \"0.10.8\"\n\n[profile.release]\nlto = true\ncodegen-units = 1\n"
+      }
+    },
+    {
+      "id": "package-json",
+      "tool": "mcp__filesystem__write_file",
+      "tool_input": {
+        "path": "/work/web/package.json",
+        "content": "{\n  \"name\": \"@example/web\",\n  \"version\": \"4.12.0\",\n  \"private\": true,\n  \"engines\": { \"node\": \">=20.11.1\" },\n  \"scripts\": {\n    \"dev\": \"next dev --port 3000\",\n    \"build\": \"next build\",\n    \"test\": \"vitest run --reporter=dot\"\n  },\n  \"dependencies\": {\n    \"next\": \"15.0.3\",\n    \"react\": \"19.0.0\",\n    \"zod\": \"^3.23.8\"\n  }\n}\n"
+      }
+    },
+    {
+      "id": "csproj",
+      "tool": "mcp__filesystem__write_file",
+      "tool_input": {
+        "path": "/work/desk/Desk.csproj",
+        "content": "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <TargetFramework>net8.0</TargetFramework>\n    <AssemblyVersion>1.0.0.0</AssemblyVersion>\n    <FileVersion>2.3.1.0</FileVersion>\n    <UserSecretsId>7b4f90ea-ba0c-5862-9511-57b0ba70c162</UserSecretsId>\n  </PropertyGroup>\n</Project>\n"
+      }
+    },
+    {
+      "id": "package-lock",
+      "tool": "mcp__filesystem__write_file",
+      "tool_input": {
+        "path": "/work/web/package-lock.json",
+        "content": "{\n  \"name\": \"@example/web\",\n  \"lockfileVersion\": 3,\n  \"packages\": {\n    \"node_modules/left-pad\": {\n      \"version\": \"1.3.0\",\n      \"resolved\": \"https://registry.npmjs.org/left-pad/-/left-pad-1.3.0.tgz\",\n      \"integrity\": \"sha512-5M53BsOqcReBM10CEzSaGC4lddbxUMy9v+iLQ8GPQl2d27nb8yuN8GHr8JhtKZe3H3AIIBvsdZDfCqO8lqGa6Q==\",\n      \"license\": \"WTFPL\"\n    }\n  }\n}\n"
+      }
+    },
+    {
+      "id": "uv-lock",
+      "tool": "mcp__filesystem__write_file",
+      "tool_input": {
+        "path": "/work/orders/uv.lock",
+        "content": "[[package]]\nname = \"idna\"\nversion = \"3.10\"\nsource = { registry = \"https://pypi.org/simple\" }\nsdist = { url = \"https://files.pythonhosted.org/packages/source/i/idna/idna-3.10.tar.gz\", hash = \"sha256:2c94c2c89a961b0be16e38c30f4a0d959b6407ee4d2f9d42acbd1fd1be087cf7\", size = 190490, upload-time = \"2024-09-15T18:07:39.745Z\" }\nwheels = [\n    { url = \"https://files.pythonhosted.org/packages/py3/i/idna/idna-3.10-py3-none-any.whl\", hash = \"sha256:2c94c2c89a961b0be16e38c30f4a0d959b6407ee4d2f9d42acbd1fd1be087cf7\", size = 70442, upload-time = \"2024-09-15T18:07:37.964Z\" },\n]\n"
+      }
+    },
+    {
+      "id": "go-sum",
+      "tool": "mcp__filesystem__write_file",
+      "tool_input": {
+        "path": "/work/ingest/go.sum",
+        "content": "golang.org/x/text v0.14.0 h1:PkUkTmt3rSnz9kGSJESH358Mq8/VT6hm8H2i/1i819k=\ngolang.org/x/text v0.14.0/go.mod h1:PkUkTmt3rSnz9kGSJESH358Mq8/VT6hm8H2i/1i819k=\ngithub.com/google/uuid v1.6.0 h1:PkUkTmt3rSnz9kGSJESH358Mq8/VT6hm8H2i/1i819k=\n"
+      }
+    },
+    {
+      "id": "yarn-lock",
+      "tool": "mcp__filesystem__write_file",
+      "tool_input": {
+        "path": "/work/web/yarn.lock",
+        "content": "left-pad@^1.3.0:\n  version \"1.3.0\"\n  resolved \"https://registry.yarnpkg.com/left-pad/-/left-pad-1.3.0.tgz#ab27ba80d4d89cb5a3fac2d661127efa88f0cd59\"\n  integrity sha512-5M53BsOqcReBM10CEzSaGC4lddbxUMy9v+iLQ8GPQl2d27nb8yuN8GHr8JhtKZe3H3AIIBvsdZDfCqO8lqGa6Q==\n"
+      }
+    },
+    {
+      "id": "test-fixture",
+      "tool": "mcp__filesystem__write_file",
+      "tool_input": {
+        "path": "/work/orders/tests/conftest.py",
+        "content": "import pytest\n\nBASE_URL = \"https://api.example.invalid\"\n\n\n@pytest.fixture\ndef account() -> dict:\n    return {\n        \"id\": \"7b4f90ea-ba0c-5862-9511-57b0ba70c162\",\n        \"name\": \"Test Account\",\n        \"plan\": \"team\",\n        \"seats\": 10,\n        \"created_at\": \"2026-01-01T00:00:00Z\",\n    }\n\n\n@pytest.fixture\ndef client(httpx_mock):\n    httpx_mock.add_response(url=f\"{BASE_URL}/v1/orders/1001\", json={\"status\": \"paid\"})\n    return Client(base_url=BASE_URL, api_key=\"test\", timeout=5)\n\n\ndef test_order_total(account, client) -> None:\n    order = client.get_order(1001)\n    assert order.total_cents == 4900\n    assert order.reference == \"ORD-2026-000123\"\n"
+      }
+    },
+    {
+      "id": "edit-file",
+      "tool": "mcp__filesystem__edit_file",
+      "tool_input": {
+        "path": "/work/orders/src/orders/limits.py",
+        "edits": [
+          {
+            "oldText": "TIMEOUT_SECONDS = 30",
+            "newText": "TIMEOUT_SECONDS = 45"
+          }
+        ],
+        "dryRun": false
+      }
+    },
+    {
+      "id": "push-files",
+      "tool": "mcp__github__push_files",
+      "tool_input": {
+        "owner": "example",
+        "repo": "orders-api",
+        "branch": "fix/export-timeout",
+        "message": "Raise the export batch timeout to 45 s",
+        "files": [
+          {
+            "path": "src/orders/limits.py",
+            "content": "TIMEOUT_SECONDS = 45\nMAX_ITEMS = 500\n"
+          },
+          {
+            "path": "CHANGELOG.md",
+            "content": "## 2.3.2 - 2026-10-20\n\n- Export batches time out after 45 s.\n"
+          }
+        ]
+      }
+    },
+    {
+      "id": "github-issue",
+      "tool": "mcp__github__create_issue",
+      "tool_input": {
+        "owner": "example",
+        "repo": "orders-api",
+        "title": "Export fails after 2.3.1 for large accounts",
+        "body": "### What happened\n\nAfter upgrading from 2.3.0 to 2.3.1 the export job fails for large accounts.\n\n```\nTraceback (most recent call last):\n  File \"/app/orders/export.py\", line 214, in run\n    rows = await fetch_batch(cursor, size=5000)\n  File \"/app/orders/db.py\", line 88, in fetch_batch\n    raise TimeoutError(\"batch 17 of 42 exceeded 30000 ms\")\nTimeoutError: batch 17 of 42 exceeded 30000 ms\n```\n\n- Version: 2.3.1 (commit ab27ba8)\n- Request id: 7b4f90ea-ba0c-5862-9511-57b0ba70c162\n- Started: 2026-10-19T08:30:00.123Z, failed 2026-10-19T08:31:12.481Z\n- Build: 20261019.3, image digest sha256:2c94c2c89a961b0be16e38c30f4a0d959b6407ee4d2f9d42acbd1fd1be087cf7\n- Rows: 1,284,551 across 42 batches\n\n### Expected\n\nThe export finishes, as it did on 2.3.0 (build 20261012.7).\n",
+        "labels": [
+          "bug",
+          "export"
+        ]
+      }
+    },
+    {
+      "id": "github-pull-request",
+      "tool": "mcp__github__create_pull_request",
+      "tool_input": {
+        "owner": "example",
+        "repo": "web",
+        "title": "Bump lodash from 4.17.20 to 4.17.21",
+        "head": "dependabot/npm_and_yarn/lodash-4.17.21",
+        "base": "main",
+        "body": "Bumps [lodash](https://github.com/lodash/lodash) from 4.17.20 to 4.17.21.\n\nCommits\n- ab27ba80d4d89cb5a3fac2d661127efa88f0cd59 Bump to v4.17.21\n- ab27ba8 Improve performance of `toNumber`, `trim` and `trimEnd`\n\nFixes #1234. Closes ENG-1423.\n\n| Benchmark | Before | After |\n| --- | --- | --- |\n| p50 | 8.8 ms | 7.9 ms |\n| p95 | 10.6 ms | 9.2 ms |\n\nTested on Node 20.11.1 and 22.11.0, 342 tests passed in 41.7 s.\n",
+        "draft": false
+      }
+    },
+    {
+      "id": "github-review-diff",
+      "tool": "mcp__github__create_pull_request_review",
+      "tool_input": {
+        "owner": "example",
+        "repo": "orders-api",
+        "pull_number": 1287,
+        "commit_id": "ab27ba80d4d89cb5a3fac2d661127efa88f0cd59",
+        "event": "COMMENT",
+        "body": "Looks right; the diff below is what I would keep.\n\n```diff\n--- a/src/orders/limits.py\n+++ b/src/orders/limits.py\n@@ -12,7 +12,7 @@ MAX_ITEMS = 500\n-TIMEOUT_SECONDS = 30\n+TIMEOUT_SECONDS = 45\n RETRY_BACKOFF = (0.5, 1.0, 2.0, 4.0)\n```\n"
+      }
+    },
+    {
+      "id": "slack-message",
+      "tool": "mcp__slack__slack_post_message",
+      "tool_input": {
+        "channel_id": "C0123456789",
+        "text": "Deploy of orders-api v2.3.1 (ab27ba8) to staging finished at 14:05 UTC. 342 tests passed, p95 latency 118 ms, error rate 0.02%. Rollback target is revision orders-api-00042-xyz. Next window: 2026-10-21 09:00-10:00 CET."
+      }
+    },
+    {
+      "id": "slack-thread-reply",
+      "tool": "mcp__slack__slack_reply_to_thread",
+      "tool_input": {
+        "channel_id": "C0123456789",
+        "thread_ts": "1760860800.123456",
+        "text": "Fixed in 2.3.2, build 20261020.1. Thanks for the report."
+      }
+    },
+    {
+      "id": "linear-issue",
+      "tool": "mcp__linear__create_issue",
+      "tool_input": {
+        "title": "Duplicate invoice after checkout retry",
+        "teamId": "7b4f90ea-ba0c-5862-9511-57b0ba70c162",
+        "description": "Customers on the team plan see invoice INV-2026-000123 twice in the billing page after a retry. Seen on build 20261019.3, release 2.3.1. Estimate 3 points. Related: ENG-1401, ENG-1423. Repro rate about 1 in 250 checkouts since 2026-10-17 11:20 UTC.",
+        "priority": 2,
+        "estimate": 3
+      }
+    },
+    {
+      "id": "postgres-select",
+      "tool": "mcp__postgres__query",
+      "tool_input": {
+        "sql": "SELECT id, status, total_cents, created_at FROM orders WHERE created_at >= '2026-10-01T00:00:00Z' AND total_cents > 10000 ORDER BY id DESC LIMIT 50"
+      }
+    },
+    {
+      "id": "postgres-update-by-uuid",
+      "tool": "mcp__postgres__query",
+      "tool_input": {
+        "sql": "UPDATE jobs SET attempts = attempts + 1, last_error = NULL WHERE id = '7b4f90ea-ba0c-5862-9511-57b0ba70c162' RETURNING id, attempts"
+      }
+    },
+    {
+      "id": "sqlite-write",
+      "tool": "mcp__sqlite__write_query",
+      "tool_input": {
+        "query": "INSERT INTO builds (number, sha, started_at, duration_ms) VALUES (20261019003, 'ab27ba80d4d89cb5a3fac2d661127efa88f0cd59', 1760860800, 41712)"
+      }
+    },
+    {
+      "id": "sqlite-join",
+      "tool": "mcp__sqlite__read_query",
+      "tool_input": {
+        "query": "SELECT b.number, count(t.id) AS tests FROM builds b JOIN tests t ON t.build_id = b.id WHERE b.started_at BETWEEN 1760774400 AND 1760860800 GROUP BY b.number HAVING count(t.id) > 300"
+      }
+    },
+    {
+      "id": "memory-entities",
+      "tool": "mcp__memory__create_entities",
+      "tool_input": {
+        "entities": [
+          {
+            "name": "orders-api",
+            "entityType": "service",
+            "observations": [
+              "Runs 2.3.1 since 2026-10-19",
+              "Image digest sha256:2c94c2c89a961b0be16e38c30f4a0d959b6407ee4d2f9d42acbd1fd1be087cf7",
+              "Owned by the payments team",
+              "Listens on port 8080"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "docs-query",
+      "tool": "mcp__context7__query-docs",
+      "tool_input": {
+        "libraryId": "/fastapi/fastapi",
+        "query": "How do I read a SecretStr password from settings with pydantic-settings 2.6?",
+        "tokens": 5000
+      }
+    },
+    {
+      "id": "sentry-issue",
+      "tool": "mcp__sentry__get_issue_details",
+      "tool_input": {
+        "organizationSlug": "example",
+        "issueId": "ORDERS-API-3F2",
+        "eventId": "d4303738430954bd93157379810957a2"
+      }
+    },
+    {
+      "id": "browser-navigate",
+      "tool": "mcp__playwright__browser_navigate",
+      "tool_input": {
+        "url": "https://app.example.invalid/orders?page=3&sort=-created_at&since=2026-10-01"
+      }
+    },
+    {
+      "id": "browser-type",
+      "tool": "mcp__playwright__browser_type",
+      "tool_input": {
+        "element": "Search orders",
+        "ref": "e42",
+        "text": "ORD-2026-000123",
+        "submit": true
+      }
+    },
+    {
+      "id": "content-hashes",
+      "tool": "mcp__artifacts__record_build",
+      "tool_input": {
+        "build": "20261019.3",
+        "version": "2.3.1",
+        "git_sha": "ab27ba80d4d89cb5a3fac2d661127efa88f0cd59",
+        "tree_sha": "ab27ba80d4d89cb5a3fac2d661127efa88f0cd59",
+        "sha256": "2c94c2c89a961b0be16e38c30f4a0d959b6407ee4d2f9d42acbd1fd1be087cf7",
+        "etag": "\"d4303738430954bd93157379810957a2\"",
+        "started": "2026-10-19T08:30:00Z",
+        "finished": "2026-10-19T08:41:42.517+00:00",
+        "duration_ms": 701517,
+        "artifact_id": "7b4f90ea-ba0c-5862-9511-57b0ba70c162"
+      }
+    },
+    {
+      "id": "semver-and-ranges",
+      "tool": "mcp__deps__check_updates",
+      "tool_input": {
+        "packages": {
+          "fastapi": "0.115.4",
+          "pydantic": "2.9.2",
+          "next": "15.0.3",
+          "react": "19.0.0-rc.1",
+          "lodash": "4.17.21"
+        },
+        "range": ">=1.2.3 <2.0.0-0"
+      }
+    },
+    {
+      "id": "order-and-build-numbers",
+      "tool": "mcp__shop__list_orders",
+      "tool_input": {
+        "order_ids": [
+          100234567,
+          100234568,
+          100234569
+        ],
+        "invoice": "INV-2026-000123",
+        "build": 20261019003,
+        "page": 3,
+        "per_page": 50,
+        "since_epoch_ms": 1760860800000
+      }
+    },
+    {
+      "id": "base64-thumbnail",
+      "tool": "mcp__cms__upload_media",
+      "tool_input": {
+        "filename": "thumb.png",
+        "mime_type": "image/png",
+        "data": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAIAAABvFaqvAAABxUlEQVR42u3UQRWlIQiGYSIYwQhGMAIRjGCENwIRiGAEIhCBCEaY++/H3SzH9XM8wMdBRGhCF4YwBRWWsAUEE1w4QggplHCFlxdptEZvjMZsaGM1doOGNbxxGtHIRjVu4+VFOq3TO6MzO9pZnd2hYx3vnE50slOd23l5kUEb9MEYzIEO1mAPGNjAB2cQgxzU4A5eXmTSJn0yJnOikzXZEyY28cmZxCQnNbmTlxdRmtKVoUxFlaVsBcUUV44SSiqlXOXlRRZt0RdjMRe6WIu9YGELX5xFLHJRi7t4eZFN2/TN2MyNbtZmb9jYxjdnE5vc1OZuXv63Fr+gfxH9hvsby6+hXym/T75n4HAgIKHgfuv1dy9iNKMbw5iGGsvY9n1jhhvHCCONMq7x8iJOc7oznOmos5ztXzHmuHOccNIp5zovL3Joh34Yh3nQwzrs87VkBz+cQxzyUId7eHmRoAU9GMEMNFjBjm8wFnhwgggyqOAGLy+StKQnI5mJJivZ+Y3XEk9OEkkmldzk5UWKVvRiFLPQYhW7vpCs8OIUUWRRxS1eXuTSLv0yLvOil3XZ94vaLn45l7jkpS738vLy/x79v0f/4B79AQhX3B9qjaP5AAAAAElFTkSuQmCC",
+        "alt": "Order status icon"
+      }
+    },
+    {
+      "id": "python-auth",
+      "tool": "mcp__filesystem__write_file",
+      "tool_input": {
+        "path": "/work/orders/src/orders/accounts.py",
+        "content": "import base64\nimport getpass\nimport secrets\n\nimport bcrypt\nimport boto3\nimport jwt\n\n\nclass AccountService:\n    def __init__(self, repository, api_key: str, password: str) -> None:\n        self.repository = repository\n        self.api_key = api_key\n        self.password = password\n\n    def register(self, form) -> None:\n        self.repository.save(email=form.cleaned_data[\"email\"], password_hash=password_hash)\n\n    def issue(self, request, payload: dict, key: str) -> str:\n        return token\n\n    def reset(self) -> str:\n        return token\n\n\ndef prompt_password() -> str:\n    return password\n\n\ndef client(settings):\n\n\ndef login(session, username: str, password: str):\n    return session.post(\"/login\", json={\"username\": username}, auth=(username, password), password=password)\n"
+      }
+    },
+    {
+      "id": "java-client",
+      "tool": "mcp__filesystem__write_file",
+      "tool_input": {
+        "path": "/work/orders/src/main/java/com/example/orders/GatewayClient.java",
+        "content": "package com.example.orders;\n\npublic final class GatewayClient {\n    private final String apiKey = System.getenv(\"API_KEY\");\n    private String password;\n    private String token;\n\n    public GatewayClient(String token) {\n        this.token = token;\n        String password = System.getenv(\"DB_PASSWORD\");\n        this.password = password;\n    }\n\n    public void rotate(User user, String hashedPassword) {\n        user.password = hashedPassword;\n    }\n}\n"
+      }
+    },
+    {
+      "id": "rust-config",
+      "tool": "mcp__filesystem__write_file",
+      "tool_input": {
+        "path": "/work/ingest/src/config.rs",
+        "content": "use std::env;\n\npub struct Config {\n    pub token: String,\n    pub password: String,\n}\n\npub fn load() -> Result<Config, env::VarError> {\n    let token = std::env::var(\"GITHUB_TOKEN\")?;\n    let password = env::var(\"DB_PASSWORD\").unwrap_or_default();\n    Ok(Config { token, password })\n}\n"
+      }
+    },
+    {
+      "id": "csharp-settings",
+      "tool": "mcp__filesystem__write_file",
+      "tool_input": {
+        "path": "/work/desk/DbSettings.cs",
+        "content": "namespace Example.Orders;\n\npublic sealed class DbSettings\n{\n    public string Password { get; init; } = \"\";\n\n    public static DbSettings FromEnvironment()\n    {\n        var password = Environment.GetEnvironmentVariable(\"DB_PASSWORD\");\n        return new DbSettings { Password = password ?? \"\" };\n    }\n}\n"
+      }
+    },
+    {
+      "id": "typescript-env",
+      "tool": "mcp__filesystem__write_file",
+      "tool_input": {
+        "path": "/work/web/src/env.ts",
+        "content": "import { z } from \"zod\";\n\nconst apiKey = import.meta.env.VITE_API_KEY;\nconst token = process.env[\"GITHUB_TOKEN\"];\n\nexport const resetSchema = z.object({\n});\n\nexport class Session {\n  constructor(private token: string) {}\n\n  refresh(token: string): void {\n    this.token = token;\n  }\n}\n"
+      }
+    },
+    {
+      "id": "shell-entrypoint",
+      "tool": "mcp__filesystem__write_file",
+      "tool_input": {
+        "path": "/work/orders/docker-entrypoint.sh",
+        "content": "#!/bin/sh\nset -eu\n: \"${DATABASE_URL:?DATABASE_URL is required}\"\nAPI_TOKEN=${API_TOKEN:?API_TOKEN is required}\nSECRET_KEY=\"${SECRET_KEY?set SECRET_KEY}\"\nexec gunicorn orders.app:app --bind 0.0.0.0:8080 --workers 4\n"
+      }
+    },
+    {
+      "id": "adr-markdown",
+      "tool": "mcp__github__create_or_update_file",
+      "tool_input": {
+        "owner": "example",
+        "repo": "orders-api",
+        "path": "docs/adr/0007-session-tokens.md",
+        "content": "# ADR 0007: Session tokens\n\nThe reset link expires before the password changes. Rotate the token weekly.\nWe store the token encrypted; see below. Is the api key optional? No: the\ngateway rejects a call without one. Never log the password field.\n\nThe desktop client ships as assembly version 1.0.0.0 until the installer moves.\n",
+        "message": "docs: ADR 0007",
+        "branch": "main"
+      }
+    },
+    {
+      "id": "assembly-info",
+      "tool": "mcp__filesystem__write_file",
+      "tool_input": {
+        "path": "/work/desk/Properties/AssemblyInfo.cs",
+        "content": "[assembly: AssemblyVersion(\"1.0.0.0\")]\n[assembly: AssemblyFileVersion(\"2.3.1.0\")]\n"
+      }
+    },
+    {
+      "id": "python-version",
+      "tool": "mcp__filesystem__write_file",
+      "tool_input": {
+        "path": "/work/orders/src/orders/_version.py",
+        "content": "__version__ = \"4.0.0.1\"\nAPP_VERSION = \"2.3.1.0\"\n"
+      }
+    },
+    {
+      "id": "unknown-tool",
+      "tool": "SomeToolANewerClientAdds",
+      "tool_input": {
+        "note": "Refactor the export job: split batches of 5000 rows, retry 3 times with backoff 0.5/1/2 s.",
+        "ticket": "ENG-1423",
+        "commit": "ab27ba80d4d89cb5a3fac2d661127efa88f0cd59"
+      }
+    },
+    {
+      "id": "devops-variable-names",
+      "tool": "mcp__filesystem__write_file",
+      "tool_input": {
+        "path": "/work/deploy/release.sh",
+        "content": "#!/bin/sh\nset -eu\naws secretsmanager get-secret-value --secret-id ${SECRET_PREFIX}-database\ndocker tag app ${REGISTRY}/app:${GIT_TOKEN_SHA}-build\ncp app.key ${SECRET_KEY}_backup_file\nTAG=${API_TOKEN_VERSION}release\n"
+      }
+    },
+    {
+      "id": "python-env-arguments",
+      "tool": "mcp__filesystem__write_file",
+      "tool_input": {
+        "path": "/work/orders/src/orders/clients.py",
+        "content": "import os\n\nheaders = {\"Authorization\": \"Bearer \" + os.getenv(\"API_TOKEN\"), \"Content-Type\": \"application/json\"}\nheaders = {\"X-Api-Key\": os.getenv(\"API_KEY\"), \"Accept\": \"application/json\"}\nheaders = {\n    \"X-Api-Key\": os.environ.get(\"API_KEY\"),\n    \"User-Agent\": \"shim-client/1.0\",\n}\nargs = [os.getenv(\"API_TOKEN\"), \"--verbose-mode\"]\nassert os.getenv(\"API_TOKEN\"), \"API_TOKEN is required\"\nconn = connect(os.getenv(\"DB_PASSWORD\"), \"dbname=app\")\nclient = make_client(os.getenv(\"API_TOKEN\"),\n    \"application/json\")\nclient = Client(token=os.getenv(\"API_TOKEN\"),\n    default=\"fallback-v1\")\n"
+      }
+    },
+    {
+      "id": "typescript-env-arguments",
+      "tool": "mcp__filesystem__write_file",
+      "tool_input": {
+        "path": "/work/web/src/api.ts",
+        "content": "const response = await fetch(url, { headers: { Authorization: process.env.API_TOKEN, \"Content-Type\": \"application/json\" } });\nconst headers = {\n  \"x-api-key\": process.env.API_KEY,\n  \"content-type\": \"application/json\",\n};\n"
+      }
+    },
+    {
+      "id": "go-env-arguments",
+      "tool": "mcp__filesystem__write_file",
+      "tool_input": {
+        "path": "/work/svc/client.go",
+        "content": "package svc\n\nimport \"os\"\n\nfunc newClient() *Client {\n\treturn NewClient(os.Getenv(\"API_TOKEN\"), \"eu-central-1\")\n}\n"
+      }
+    },
+    {
+      "id": "java-env-arguments",
+      "tool": "mcp__filesystem__write_file",
+      "tool_input": {
+        "path": "/work/svc/src/main/java/example/Wiring.java",
+        "content": "package example;\n\nfinal class Wiring {\n    Client client() {\n        return new Client(System.getenv(\"API_TOKEN\"), \"application/json\");\n    }\n}\n"
+      }
+    },
+    {
+      "id": "ruby-php-env-arguments",
+      "tool": "mcp__filesystem__write_file",
+      "tool_input": {
+        "path": "/work/legacy/README.md",
+        "content": "Ruby: `Client.new(ENV[\"API_KEY\"], \"application/json\")`\n\nPHP: `$client = new Client($_ENV['API_KEY'], 'application/json');`\n"
+      }
+    }
+  ],
+  "known_false_positives": [
+    {
+      "id": "python-tuple-target",
+      "tool": "mcp__filesystem__write_file",
+      "tool_input": {
+        "path": "/work/orders/src/orders/settings.py",
+        "content": "scheme, _, token = value.partition(\" \")\n"
+      }
+    },
+    {
+      "id": "python-conditional-call",
+      "tool": "mcp__filesystem__write_file",
+      "tool_input": {
+        "path": "/work/orders/src/orders/settings.py",
+        "content": "password = settings.db_password.get_secret_value() if settings.db_password else None\n"
+      }
+    },
+    {
+      "id": "zod-password-min",
+      "tool": "mcp__filesystem__write_file",
+      "tool_input": {
+        "path": "/work/web/src/auth/login.ts",
+        "content": "password: z.string().min(12),\n"
+      }
+    },
+    {
+      "id": "python-form-lookup",
+      "tool": "mcp__filesystem__write_file",
+      "tool_input": {
+        "path": "/work/orders/src/orders/accounts.py",
+        "content": "password = form.cleaned_data[\"password\"]\n"
+      }
+    },
+    {
+      "id": "python-hash-call",
+      "tool": "mcp__filesystem__write_file",
+      "tool_input": {
+        "path": "/work/orders/src/orders/accounts.py",
+        "content": "password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt())\n"
+      }
+    },
+    {
+      "id": "python-header-lookup",
+      "tool": "mcp__filesystem__write_file",
+      "tool_input": {
+        "path": "/work/orders/src/orders/accounts.py",
+        "content": "token = request.headers[\"Authorization\"]\n"
+      }
+    },
+    {
+      "id": "python-jwt-encode",
+      "tool": "mcp__filesystem__write_file",
+      "tool_input": {
+        "path": "/work/orders/src/orders/accounts.py",
+        "content": "token = jwt.encode(payload, key, algorithm=\"HS256\")\n"
+      }
+    },
+    {
+      "id": "python-token-urlsafe",
+      "tool": "mcp__filesystem__write_file",
+      "tool_input": {
+        "path": "/work/orders/src/orders/accounts.py",
+        "content": "token = secrets.token_urlsafe(32)\n"
+      }
+    },
+    {
+      "id": "python-getpass",
+      "tool": "mcp__filesystem__write_file",
+      "tool_input": {
+        "path": "/work/orders/src/orders/accounts.py",
+        "content": "password = getpass.getpass()\n"
+      }
+    },
+    {
+      "id": "python-hash-function",
+      "tool": "mcp__filesystem__write_file",
+      "tool_input": {
+        "path": "/work/orders/src/orders/accounts.py",
+        "content": "password = hash_password(password)\n"
+      }
+    },
+    {
+      "id": "python-key-function",
+      "tool": "mcp__filesystem__write_file",
+      "tool_input": {
+        "path": "/work/orders/src/orders/accounts.py",
+        "content": "api_key = get_api_key()\n"
+      }
+    },
+    {
+      "id": "python-boto3-client",
+      "tool": "mcp__filesystem__write_file",
+      "tool_input": {
+        "path": "/work/orders/src/orders/accounts.py",
+        "content": "secret = boto3.client(\"secretsmanager\").get_secret_value(SecretId=settings.name)\n"
+      }
+    },
+    {
+      "id": "python-member-argument",
+      "tool": "mcp__filesystem__write_file",
+      "tool_input": {
+        "path": "/work/orders/src/orders/accounts.py",
+        "content": "return Client(api_key=api_key, password=settings.password, timeout=10)\n"
+      }
+    },
+    {
+      "id": "zod-token-uuid",
+      "tool": "mcp__filesystem__write_file",
+      "tool_input": {
+        "path": "/work/web/src/env.ts",
+        "content": "token: z.string().uuid(),\n"
+      }
+    },
+    {
+      "id": "zod-password-range",
+      "tool": "mcp__filesystem__write_file",
+      "tool_input": {
+        "path": "/work/web/src/env.ts",
+        "content": "password: z.string().min(12).max(128),\n"
+      }
+    }
+  ]
+}

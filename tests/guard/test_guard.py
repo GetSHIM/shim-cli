@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import base64
+import gc
 import importlib
 import json
+import math
 import os
 import random
 import signal
@@ -97,7 +99,7 @@ def test_invalid_or_incomplete_analyzer_spans_fail_safely(
 ) -> None:
     module = importlib.import_module("shim_cli.guard.analyze")
 
-    def out_of_range(_text: str, _entities: tuple[str, ...], _custom=()) -> list[Match]:
+    def out_of_range(_text: str, *_rest) -> list[Match]:
         return [Match("EMAIL_ADDRESS", 0, 999, 0.9)]
 
     monkeypatch.setattr(module, "analyze_text", out_of_range)
@@ -110,7 +112,7 @@ def test_shared_analysis_deadline_fails_safely(
 ) -> None:
     module = importlib.import_module("shim_cli.guard.analyze")
 
-    def slow(_text: str, _entities: tuple[str, ...], _custom=()) -> list[Match]:
+    def slow(_text: str, *_rest) -> list[Match]:
         time.sleep(1)
         return []
 
@@ -630,7 +632,7 @@ def test_scanning_resumes_inside_a_value_it_dropped() -> None:
     text = "TOKEN_URL=https://x.example.com/?a=1&api_key=0123456789abcdef&b=2"
 
     assert evaluate(text).redacted_text == (
-        "TOKEN_URL=https://x.example.com/?a=1&api_key=<SECRET_1>"
+        "TOKEN_URL=https://x.example.com/?a=1&api_key=<SECRET_1>&b=2"
     )
 
 
@@ -793,21 +795,29 @@ def test_a_value_that_only_resembles_code_is_still_a_secret(text: str) -> None:
     assert evaluate(text).counts == (("SECRET", 1),)
 
 
-def test_a_random_password_under_a_named_key_is_masked() -> None:
+@pytest.mark.parametrize("key", ["DB_PASSWORD", "SMTP_PASS", "PGPASSWORD"])
+@pytest.mark.parametrize("seed", [5, 6, 14, 16, 24, 33])
+def test_a_random_password_under_a_named_key_is_masked(key: str, seed: int) -> None:
+    """Every one but a value that is `$` and an identifier: that is a variable
+    reference under every key (`$DB_PASS`), as the generated passwords of
+    `test_u11_secret_value_span.py` have it. The seeds draw passwords that read
+    as `a.b` (5, 14, 16, 24), as a path (33) and as `$NAME` (6, 16)."""
     symbols = "!#$&()*+-./:;<=>?@[^_`{|~"
     alphabet = string.ascii_letters + string.digits + symbols
-    generator = random.Random(33)
+    generator = random.Random(seed)
     passwords = [
         "".join(generator.choice(alphabet) for _ in range(16)) for _ in range(2_000)
     ]
 
     missed = [
-        password
-        for password in passwords
-        if not evaluate(f"DB_PASSWORD={password}").counts
+        password for password in passwords if not evaluate(f"{key}={password}").counts
     ]
 
-    assert len(missed) <= 2, missed
+    assert missed == [
+        password
+        for password in passwords
+        if password.startswith("$") and password[1:].isidentifier()
+    ]
 
 
 def test_a_value_too_long_to_be_code_or_a_path_is_still_a_secret() -> None:
@@ -920,8 +930,9 @@ def test_a_short_query_password_in_a_connection_string_is_masked(
     ("text", "expected"),
     (
         (
+            # Read as written too, the escape no longer cuts the password.
             "postgres://user:synth%20etic@db:5432/app",
-            "postgres://<DB_URI_1>%20etic@db:5432/app",
+            "postgres://<DB_URI_1>@db:5432/app",
         ),
         (
             "postgres://user:synth'etic@db:5432/app",
@@ -961,10 +972,10 @@ def test_the_hook_deadline_ends_the_scan_of_later_fields(
     real = analyze_module.analyze_text
     calls = []
 
-    def slow(text, entities, custom):
+    def slow(text, *rest):
         calls.append(len(text))
         time.sleep(2)
-        return real(text, entities, custom)
+        return real(text, *rest)
 
     monkeypatch.setattr(hook, "HOOK_DEADLINE_SECONDS", 0.3)
     monkeypatch.setattr(analyze_module, "ANALYSIS_DEADLINE_SECONDS", 0.5)
@@ -1088,7 +1099,10 @@ def test_a_secret_sent_as_base64_is_masked_as_a_whole(width: int) -> None:
 
     decision = evaluate(f"$ base64 .env\n{encoded}\n")
 
-    assert decision.redacted_text == "$ base64 .env\n<SECRET_1>\n"
+    # One placeholder, then the line breaks of the lines it was wrapped over.
+    assert decision.redacted_text == (
+        "$ base64 .env\n<SECRET_1>" + "\n" * encoded.count("\n") + "\n"
+    )
 
 
 @pytest.mark.parametrize(
@@ -1096,11 +1110,11 @@ def test_a_secret_sent_as_base64_is_masked_as_a_whole(width: int) -> None:
     (
         (
             f"data:\n  .env: |\n    {_wrapped(STRADDLING, 76, chr(10) + '    ')}\n",
-            "data:\n  .env: |\n    <SECRET_1>\n",
+            "data:\n  .env: |\n    <SECRET_1>\n\n",
         ),
-        (f"{_wrapped(STRADDLING, 76, '   ' + chr(10))}   \n", "<SECRET_1>   \n"),
-        (f"{_wrapped(STRADDLING, 76, chr(13) + chr(10))}\r\n", "<SECRET_1>\r\n"),
-        (f"{_wrapped(STRADDLING, 76, chr(13))}\r", "<SECRET_1>\r"),
+        (f"{_wrapped(STRADDLING, 76, '   ' + chr(10))}   \n", "<SECRET_1>\n   \n"),
+        (f"{_wrapped(STRADDLING, 76, chr(13) + chr(10))}\r\n", "<SECRET_1>\r\n\r\n"),
+        (f"{_wrapped(STRADDLING, 76, chr(13))}\r", "<SECRET_1>\r\r"),
         (
             '{"content": "' + _wrapped(STRADDLING, 60, "\\n") + '\\n"}',
             '{"content": "<SECRET_1>\\n"}',
@@ -1112,33 +1126,33 @@ def test_a_secret_sent_as_base64_is_masked_as_a_whole(width: int) -> None:
         (
             f"helm/values.yaml:5:    {STRADDLING[:76]}\n"
             f"helm/values.yaml:6:    {STRADDLING[76:]}\n",
-            "helm/values.yaml:5:    <SECRET_1>\n",
+            "helm/values.yaml:5:    <SECRET_1>\n\n",
         ),
         (
             f"     5\t    {STRADDLING[:76]}\n     6\t    {STRADDLING[76:]}\n",
-            "     5\t    <SECRET_1>\n",
+            "     5\t    <SECRET_1>\n\n",
         ),
         (
             f"2:envFile: |\n3-    {STRADDLING[:76]}\n4-    {STRADDLING[76:]}\n5-x: 1\n",
-            "2:envFile: |\n3-    <SECRET_1>\n5-x: 1\n",
+            "2:envFile: |\n3-    <SECRET_1>\n\n5-x: 1\n",
         ),
         (
             f"helm/values.yaml-3-    {STRADDLING[:76]}\n"
             f"helm/values.yaml-4-    {STRADDLING[76:]}\n",
-            "helm/values.yaml-3-    <SECRET_1>\n",
+            "helm/values.yaml-3-    <SECRET_1>\n\n",
         ),
         (
             f"My Project/values.yaml:3:    {STRADDLING[:76]}\n"
             f"My Project/values.yaml:4:    {STRADDLING[76:]}\n",
-            "My Project/values.yaml:3:    <SECRET_1>\n",
+            "My Project/values.yaml:3:    <SECRET_1>\n\n",
         ),
         (f"@@ -0,0 +1 @@\n+{STRADDLING}\n", "@@ -0,0 +1 @@\n+<SECRET_1>\n"),
-        (f"+{STRADDLING[:76]}\n+{STRADDLING[76:]}\n", "+<SECRET_1>\n"),
+        (f"+{STRADDLING[:76]}\n+{STRADDLING[76:]}\n", "+<SECRET_1>\n\n"),
         (
             f"+  envFile: |\n+    {STRADDLING[:76]}\n+    {STRADDLING[76:]}\n",
-            "+  envFile: |\n+    <SECRET_1>\n",
+            "+  envFile: |\n+    <SECRET_1>\n\n",
         ),
-        (f"-    {STRADDLING[:76]}\n-    {STRADDLING[76:]}\n", "-    <SECRET_1>\n"),
+        (f"-    {STRADDLING[:76]}\n-    {STRADDLING[76:]}\n", "-    <SECRET_1>\n\n"),
         ('{"row": "id\\t' + STRADDLING + '"}', '{"row": "id\\t<SECRET_1>"}'),
         (
             '{"content": "' + _wrapped(STRADDLING, 76, "\\r\\n") + '\\r\\n"}',
@@ -1182,7 +1196,15 @@ def test_a_secret_sent_as_base64_is_masked_as_a_whole(width: int) -> None:
 def test_a_secret_split_across_wrapped_lines_is_masked(
     text: str, expected: str
 ) -> None:
-    assert evaluate(text).redacted_text == expected
+    redacted = evaluate(text).redacted_text
+
+    assert redacted == expected
+    # The placeholder is followed by the line breaks it covered, so every line
+    # after it keeps its number.
+    assert (redacted.count("\n"), redacted.count("\r")) == (
+        text.count("\n"),
+        text.count("\r"),
+    )
 
 
 @pytest.mark.parametrize(
@@ -1404,31 +1426,54 @@ def _address_lines(count: int) -> str:
     )
 
 
+_LEAST = 0.4
+
+
 def _seconds(text: str) -> tuple[float, float]:
-    """Wall and CPU seconds of one evaluation. The CPU time is the detector's
-    own work, so the ratio of two holds on a machine busy with other things."""
-    wall, cpu = time.perf_counter(), time.process_time()
+    """Wall and CPU seconds of one evaluation of `text`: the fastest of three
+    runs of as many evaluations as fill `_LEAST` seconds, with the collector
+    off, as `timeit` reads it. The CPU time is the detector's own work, so the
+    ratio of two holds on a machine busy with other things."""
+    gc.collect()
+    started = time.process_time()
     evaluate(text, ENTITY_TYPES)
-    return time.perf_counter() - wall, time.process_time() - cpu
+    repeats = math.ceil(_LEAST / max(time.process_time() - started, 0.001))
+    best = (math.inf, math.inf)
+    gc.disable()
+    try:
+        for _ in range(3):
+            wall, cpu = time.perf_counter(), time.process_time()
+            for _ in range(repeats):
+                evaluate(text, ENTITY_TYPES)
+            run = (time.perf_counter() - wall, time.process_time() - cpu)
+            best = (min(best[0], run[0]), min(best[1], run[1]))
+    finally:
+        gc.enable()
+    return best[0] / repeats, best[1] / repeats
 
 
 @pytest.mark.parametrize(
     ("shape", "count"),
     [
-        (lambda count: ("a." * count + "[at]") * 3, 20_000),
-        (lambda count: "x@" + "a." * count + "com", 20_000),
+        (lambda count: ("a." * count + "[at]") * 3, 16_000),
+        (lambda count: "x@" + "a." * count + "com", 48_000),
         (lambda count: "[at]" * count, 25_000),
-        (lambda count: "tr12 " + "abcd " * count, 20_000),
-        (lambda count: "34 " * count + "ABC", 30_000),
+        (lambda count: "tr12 " + "abcd " * count, 19_000),
+        (lambda count: "34 " * count + "ABC", 32_000),
         (lambda count: "Tr12-" * count, 20_000),
-        (lambda count: "a." * count + "@", 20_000),
-        (lambda count: ("a." * count + "@ ") * 10, 4_000),
-        (lambda count: "postgres://x" + "?" * count, 40_000),
-        (lambda count: "eyJ" * count, 13_334),
-        (lambda count: "ZXlK" * count, 10_000),
-        (lambda count: "1 " * count, 20_000),
-        (_numeric_rows, 1_200),
-        (_address_lines, 2_900),
+        (lambda count: "a." * count + "@", 48_000),
+        (lambda count: ("a." * count + "@ ") * 10, 4_800),
+        (lambda count: "postgres://x" + "?" * count, 96_000),
+        (lambda count: "a." * count + "://", 48_000),
+        (lambda count: "x://" + "a:" * count, 48_000),
+        (lambda count: "postgres+" * count + "x://", 10_400),
+        (lambda count: "-a" * count + "://", 48_000),
+        (lambda count: "a%3A%2F%2F" * count, 9_600),
+        (lambda count: "eyJ" * count, 32_000),
+        (lambda count: "ZXlK" * count, 24_000),
+        (lambda count: "1 " * count, 48_000),
+        (_numeric_rows, 2_800),
+        (_address_lines, 6_800),
     ],
     ids=[
         "written-at",
@@ -1440,6 +1485,11 @@ def _seconds(text: str) -> tuple[float, float]:
         "email-local-part",
         "email-local-parts",
         "query-marks",
+        "scheme-dots",
+        "userinfo-colons",
+        "driver-suffixes",
+        "scheme-dashes",
+        "encoded-schemes",
         "jwt-prefixes",
         "base64-of-jwt-prefixes",
         "spaced-digits",
@@ -1449,10 +1499,21 @@ def _seconds(text: str) -> tuple[float, float]:
 )
 def test_the_ported_shapes_scan_in_linear_time(shape, count: int) -> None:
     """Every recogniser at once, on the shape that once made one of them
-    quadratic: `a.` repeated before an `@` took 9 s at 40 KB. Doubling the
-    input may double the time, with room for noise, and never quadruple it."""
-    half = _seconds(shape(count // 2))[1]
-    wall, full = _seconds(shape(count))
+    quadratic: `a.` repeated before an `@` took 9 s at 40 KB. A text four
+    times as long takes four times as long to read, and a quadratic scan
+    sixteen: the bound, eight, is twice the first and half the second, so
+    neither runner noise nor a quadratic scan can be mistaken for the other.
+
+    Both texts are one analysis: past `MAX_SOURCE_CHARACTERS` the text is cut
+    into pieces, and a cost that grows with a piece's length grows only with
+    their number. Each time is read over at least `_LEAST` seconds: two
+    evaluations of 0.06 and 0.27 s, which the bound used to compare, differ
+    by more than a slow runner's noise allows."""
+    text = shape(count)
+    assert len(text) <= MAX_SOURCE_CHARACTERS
+
+    quarter = _seconds(shape(count // 4))[1]
+    wall, whole = _seconds(text)
 
     assert wall < 2
-    assert full <= 2.5 * half + 0.05, (half, full)
+    assert whole <= 8 * quarter, (quarter, whole)

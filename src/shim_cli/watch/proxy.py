@@ -176,7 +176,13 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             nonlocal pending
             deadline = time.monotonic() + DOWNSTREAM_TIMEOUT_SECONDS
             remaining = length
+            # Each chunk is forwarded once the next is read, and the last once
+            # the body is counted in flight: upstream cannot answer a request,
+            # and let it leave, before a copy sent with it is counted too.
+            chunk = b""
             while remaining:
+                if chunk:
+                    yield chunk
                 timeout = deadline - time.monotonic()
                 if timeout <= 0:
                     raise TimeoutError("request body deadline exceeded")
@@ -189,10 +195,11 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                     capture.extend(chunk)
                 if digest is not None:
                     digest.update(chunk)
-                yield chunk
             if digest is not None:
                 pending = (exchange.path, digest.hexdigest())
                 exchange.duplicate_in_flight = self.session.entered(pending)
+            if chunk:
+                yield chunk
 
         connection = None
         responded = False

@@ -8,6 +8,7 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from shim_cli.clients.claude import settings as claude_settings
 from shim_cli.clients.claude.settings import PLUGIN_NAMES
 
 ARCHIVE_RELATIVE = Path("bin") / "shim.pyz"
@@ -43,9 +44,26 @@ def archive_version(archive: Path) -> str | None:
     return found.group("version") if found else None
 
 
+def _switched_off(settings: Path) -> set[str]:
+    """Plugins the user's settings file turns off; they run no hook."""
+    try:
+        if settings.stat().st_size > MAX_MANIFEST_BYTES:
+            return set()
+        enabled = json.loads(settings.read_text(encoding="utf-8")).get("enabledPlugins")
+    except (OSError, ValueError, UnicodeDecodeError, AttributeError):
+        return set()
+    if not isinstance(enabled, dict):
+        return set()
+    return {key for key, value in enabled.items() if value is False}
+
+
 def installed_plugins(home: Path | None = None) -> list[dict]:
-    root = Path(home) if home is not None else Path.home()
-    manifest = root / ".claude" / "plugins" / "installed_plugins.json"
+    # Where Claude Code keeps plugins follows CLAUDE_CONFIG_DIR, as install does.
+    try:
+        folder = claude_settings.target_path(home).parent
+    except ValueError:
+        return []
+    manifest = folder / "plugins" / "installed_plugins.json"
     try:
         if manifest.stat().st_size > MAX_MANIFEST_BYTES:
             return []
@@ -56,8 +74,11 @@ def installed_plugins(home: Path | None = None) -> list[dict]:
     if not isinstance(plugins, dict):
         return []
     found = []
+    off = _switched_off(folder / "settings.json")
     for key, entries in plugins.items():
         if key.split("@", 1)[0] not in PLUGIN_NAMES or not isinstance(entries, list):
+            continue
+        if key in off:
             continue
         for entry in entries:
             if isinstance(entry, dict):
@@ -94,7 +115,8 @@ def resolve(plugin_root: Path | None = None, which=shutil.which) -> Resolution:
         )
     return Resolution(
         "none",
-        "No hook is runnable; prompts are passing through uninspected.",
+        "No hook is runnable from this installation; unless the plugin runs its own "
+        "launcher, prompts pass through uninspected.",
         None,
         None,
     )

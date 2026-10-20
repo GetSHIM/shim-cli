@@ -20,13 +20,23 @@ def display_label(text: str, fallback: str) -> str:
     return text
 
 
+def scrubbed_label(tool: str, scrub) -> str:
+    label = display_label(tool, UNKNOWN_TOOL_LABEL)
+    if label != UNKNOWN_TOOL_LABEL:
+        decision = scrub(label)
+        if decision.counts:
+            label = display_label(decision.redacted_text, UNKNOWN_TOOL_LABEL)
+    return label
+
+
 def scrubbed_target(value: str, evaluate) -> str:
     if not value:
         return ""
-    scanned = value[-MAX_TARGET_SCAN_CHARS:]
+    # Dropped before the scan, not after: the text stored is the text scanned,
+    # so no character the detector stopped at can join a value back together.
+    scanned = "".join(c for c in value[-MAX_TARGET_SCAN_CHARS:] if c.isprintable())
     decision = evaluate(scanned)
-    shown = decision.redacted_text if decision.counts else scanned
-    text = "".join(character for character in shown if character.isprintable())
+    text = decision.redacted_text if decision.counts else scanned
     if len(text) <= MAX_TARGET_CHARS:
         return text
     return "…" + text[-MAX_TARGET_CHARS:]

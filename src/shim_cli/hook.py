@@ -5,6 +5,7 @@ import os
 import signal
 import sys
 import tempfile
+import threading
 import time
 import warnings
 from collections.abc import Iterator
@@ -18,7 +19,13 @@ _PROMPT_EVENTS = frozenset({_PROMPT_EVENT, "userPromptTransformed"})
 _STOP_EVENT = "Stop"
 _SESSION_END_EVENT = "SessionEnd"
 _STARTED = time.perf_counter()
-HOOK_DEADLINE_SECONDS = 25
+# Counted from when the client started the hook process. Inspection stops at
+# the deadline and the event is refused or withheld; if even that refusal is
+# not out when the answer is due, a fixed one is. The shortest timeout shim
+# registers with a client is 30 s: the 5 s left are for the launcher, the
+# write and the exit (docs/privacy.md).
+HOOK_DEADLINE_SECONDS = 20
+HOOK_ANSWER_SECONDS = 25
 ATTACHMENT_SECONDS = 15
 WINDOWS_NOTICE = "shim: shim-cli does not support Windows yet; nothing was inspected.\n"
 _ERROR_OUTPUT = (
@@ -214,6 +221,18 @@ def _refusal_output(raw: bytes, client: str, reason: str = "") -> bytes:
     return _not_inspected(raw, client, event, session, reason)
 
 
+def _fixed_refusal(raw: bytes, client: str) -> bytes:
+    """`_refusal_output` for when it failed or is out of time: fixed bytes,
+    picked from as much of the event as a quick read finds, with neither the
+    detector nor the disk."""
+    found = _prefix_event(raw)
+    if client == "claude" and found["client"] == "vscode":
+        client = "vscode"
+    if not found["event"] or found["event"] in _PROMPT_EVENTS:
+        return _error_output(client)
+    return _fallback_output(raw, client, found["event"])
+
+
 def _flush_standard_streams() -> None:
     for stream in (sys.stdout, sys.stderr):
         if stream is not None:
@@ -248,17 +267,51 @@ def _silence_dependencies() -> Iterator[None]:
                 os.close(copy)
 
 
+def _process_age() -> float:
+    """Seconds since this process started, as the kernel tells it, or 0 where
+    it does not. A client's timeout runs from then, not from when Python, held
+    up by a busy CPU or a slow disk, reached `main`."""
+    try:
+        if sys.platform == "darwin":
+            import ctypes
+            import struct
+
+            # sysctl {CTL_KERN, KERN_PROC, KERN_PROC_PID, pid} fills a struct
+            # kinfo_proc, which opens with the start time, a struct timeval.
+            info = ctypes.create_string_buffer(1024)
+            size = ctypes.c_size_t(len(info))
+            name = (ctypes.c_int * 4)(1, 14, 1, os.getpid())
+            failed = ctypes.CDLL(None).sysctl(
+                name, 4, info, ctypes.byref(size), None, 0
+            )
+            if failed or size.value < 16:
+                return 0.0
+            seconds, microseconds = struct.unpack_from("@qi", info)
+            return max(0.0, time.time() - seconds - microseconds / 1e6)
+        with open("/proc/self/stat", "rb") as stat:
+            # Field 22, counted after the parenthesised name: ticks since boot.
+            ticks = int(stat.read().rsplit(b")", 1)[1].split()[19])
+        booted = time.clock_gettime(time.CLOCK_BOOTTIME)
+        return max(0.0, booted - ticks / os.sysconf("SC_CLK_TCK"))
+    except Exception:
+        return 0.0
+
+
 @contextlib.contextmanager
-def _deadline() -> Iterator[float]:
-    """Arm the hook's alarm, and hand back when it is due."""
+def _deadline(started: float | None = None) -> Iterator[float]:
+    """Arm the hook's alarm for HOOK_DEADLINE_SECONDS after `started`, a
+    `perf_counter` reading (now if not given), and hand back when it is due.
+    Already past it, arm nothing: the caller checks."""
 
     def expire(_signal_number: int, _frame: object) -> None:
         raise TimeoutError("shim hook deadline exceeded")
 
-    ends = time.perf_counter() + HOOK_DEADLINE_SECONDS
+    if started is None:
+        started = time.perf_counter()
+    ends = started + HOOK_DEADLINE_SECONDS
     previous = signal.signal(signal.SIGALRM, expire)
-    signal.setitimer(signal.ITIMER_REAL, HOOK_DEADLINE_SECONDS)
     try:
+        signal.setitimer(signal.ITIMER_REAL, max(0.0, ends - time.perf_counter()))
         yield ends
     finally:
         signal.setitimer(signal.ITIMER_REAL, 0)
@@ -324,13 +377,13 @@ def _elapsed_ms() -> int:
     return max(0, round((time.perf_counter() - _STARTED) * 1000))
 
 
-def _attachment_decision(text, policy):
+def _attachment_decision(text, policy, entities):
     from shim_cli.guard import evaluate
 
     if text is None or _elapsed_ms() > ATTACHMENT_SECONDS * 1000:
         return None
     try:
-        found = evaluate(text, policy.entities, policy.custom, policy.reveal)
+        found = evaluate(text, entities, policy.custom, policy.reveal)
     except Exception:
         return None
     return None if found.partial and not found.blocked else found
@@ -405,10 +458,14 @@ def _summary_output(session_id: str, stop_active: bool) -> bytes:
         from shim_cli.session import spool, summary
 
         records = spool.entries(session_id)
-        if len(records) <= spool.summarized(session_id):
+        capped = spool.capped(session_id)
+        shown, said = spool.summarized(session_id)
+        # An undercount is news even when no record landed since the last
+        # summary: the record it is about is the one that did not.
+        if len(records) <= shown and (said or not capped):
             return b""
-        text = summary.render(records, spool.capped(session_id))
-        spool.mark_summarized(session_id, len(records))
+        text = summary.render(records, capped)
+        spool.mark_summarized(session_id, len(records), capped)
         if not text:
             return b""
         return json_bytes.dumps({"systemMessage": text})
@@ -427,7 +484,7 @@ def _forget(session_id: str) -> bytes:
     return b""
 
 
-def _described(source: bytes | dict, root: str = "") -> tuple:
+def _described(source: bytes | dict, root: str = "", policy=None) -> tuple:
     """Tool label, target, the payload at `root` and the tool's own name,
     from as much as parses.
 
@@ -439,7 +496,7 @@ def _described(source: bytes | dict, root: str = "") -> tuple:
 
     from shim_cli.session.record import (
         UNKNOWN_TOOL_LABEL,
-        display_label,
+        scrubbed_label,
         scrubbed_target,
     )
 
@@ -469,15 +526,10 @@ def _described(source: bytes | dict, root: str = "") -> tuple:
         found = _prefix_event(source)
         tool = found["tool_name"]
         target = target or found["target"]
-    label = display_label(tool, UNKNOWN_TOOL_LABEL)
     try:
-        from shim_cli.guard import evaluate
-
-        if label != UNKNOWN_TOOL_LABEL:
-            decision = evaluate(label)
-            if decision.counts:
-                label = display_label(decision.redacted_text, UNKNOWN_TOOL_LABEL)
-        target = scrubbed_target(target, evaluate)
+        scrub = _record_scrub(policy)
+        label = scrubbed_label(tool, scrub)
+        target = scrubbed_target(target, scrub)
     except Exception:
         label, target = UNKNOWN_TOOL_LABEL, ""
     return label, target, payload, tool
@@ -491,6 +543,7 @@ def _uninspected(
     reason: str,
     action: str,
     described: tuple,
+    policy,
 ) -> None:
     try:
         from shim_cli.session import remember
@@ -500,7 +553,7 @@ def _uninspected(
             Record,
         )
 
-        tool, target, *_ = described or _described(source)
+        tool, target, *_ = described or _described(source, "", policy)
         remember(
             session_id,
             Record(
@@ -514,7 +567,7 @@ def _uninspected(
                 note=f"{NOT_INSPECTED}: {reason}",
             ),
             _elapsed_ms(),
-            _policy_ledger(),
+            policy is not None and policy.ledger,
         )
     except Exception:
         pass
@@ -556,11 +609,12 @@ def _not_inspected(
     answer or the record comes from the payload.
     """
     reason = reason or _ANALYSIS_FAILED
+    policy = _settings()
     try:
         from shim_cli.events.pipeline import UNINSPECTED
 
         entry = entry or _tool_entry(client, event)
-        described = _described(source, entry.root if entry else "")
+        described = _described(source, entry.root if entry else "", policy)
         label, _target, payload, name = described
         output = (
             entry.encode(UNINSPECTED, payload, reason, "", label, name)
@@ -584,6 +638,7 @@ def _not_inspected(
             reason,
             "deny" if withheld else "report",
             described,
+            policy,
         )
     return output
 
@@ -732,13 +787,45 @@ def _protected(document: dict):
     return protected
 
 
-def _policy_ledger() -> bool:
+def _issued(session_id: str) -> list:
+    """The placeholder names shim issued in this session (D3)."""
+    from shim_cli.session import spool
+
+    return spool.issued(session_id) if session_id else []
+
+
+def _issue(session_id: str, runs: tuple) -> None:
+    """Keep the names of placeholders shim hands the model. Without a session
+    there is nothing to keep them under, and nothing to check a write against."""
+    if session_id and runs:
+        from shim_cli.session import spool
+
+        spool.issue(session_id, runs)
+
+
+def _record_scrub(policy):
+    """The one scan for what a record keeps of a path or a tool name: every
+    type the settings name anywhere, every default type and the user's own
+    patterns, and never a revealed digit. Without settings, the defaults."""
+    from shim_cli.guard import evaluate
+    from shim_cli.guard.entities import DEFAULT_ENTITIES
+
+    if policy is None:
+        return evaluate
+    scoped = (name for names in policy.tool_entities.values() for name in names)
+    entities = tuple(dict.fromkeys((*DEFAULT_ENTITIES, *policy.entities, *scoped)))
+    return lambda text: evaluate(text, entities, policy.custom)
+
+
+def _settings():
+    """The settings, or None when they cannot be read. A record is scrubbed
+    with them, or with the defaults; it never keeps a value raw."""
     try:
         from shim_cli.config import load_policy
 
-        return load_policy().ledger
+        return load_policy()
     except Exception:
-        return False
+        return None
 
 
 def _tool_output(
@@ -769,10 +856,10 @@ def _tool_output(
     if ends is None:
         ends = time.perf_counter() + HOOK_DEADLINE_SECONDS
 
-    def scan(text: str, entities: tuple = DEFAULT_ENTITIES):
+    def scan(text: str, entities: tuple = DEFAULT_ENTITIES, numbering=None):
         if time.perf_counter() > ends:
             raise TimeoutError("shim hook deadline exceeded")
-        return evaluate(text, entities, policy.custom, policy.reveal)
+        return evaluate(text, entities, policy.custom, policy.reveal, numbering)
 
     def mode_for(direction: str, tool: str) -> str:
         mode = policy.mode_for(direction, tool, event)
@@ -798,6 +885,9 @@ def _tool_output(
         policy.diet,
         entities_for,
         _protected(raw),
+        lambda: _issued(session_id),
+        lambda runs: _issue(session_id, runs),
+        _record_scrub(policy),
     )
     remember(session_id, outcome.record, _elapsed_ms(), policy.ledger)
     if (
@@ -933,11 +1023,15 @@ def _output(raw: bytes, client: str = "codex", ends: float | None = None) -> byt
                 prompt = parse_input(document)
                 from shim_cli.config import load_policy
                 from shim_cli.guard import evaluate
+                from shim_cli.guard.evaluate import issued, numbering_for
                 from shim_cli.session import remember
 
                 policy = load_policy()
+                entities = policy.entities_for("", event or _PROMPT_EVENT)
+                # Held here only: the names the redacted prompt shows, for D3.
+                numbering = numbering_for((prompt,))
                 decision = evaluate(
-                    prompt, policy.entities, policy.custom, policy.reveal
+                    prompt, entities, policy.custom, policy.reveal, numbering
                 )
                 if decision.partial:
                     return error_output()
@@ -947,11 +1041,12 @@ def _output(raw: bytes, client: str = "codex", ends: float | None = None) -> byt
                     from shim_cli.clients.claude.hook import attached
                     from shim_cli.session.record import scrubbed_target
 
+                    scrub = _record_scrub(policy)
                     files = [
                         (
-                            scrubbed_target(name, evaluate),
+                            scrubbed_target(name, scrub),
                             text,
-                            _attachment_decision(text, policy),
+                            _attachment_decision(text, policy, entities),
                         )
                         for name, text in attached(prompt, document.get("cwd"))
                     ]
@@ -1000,6 +1095,8 @@ def _output(raw: bytes, client: str = "codex", ends: float | None = None) -> byt
                     keep("allow")
                     return b""
                 if client == "copilot":
+                    if decision.blocked:  # the model reads it rewritten
+                        _issue(session_id, issued(numbering))
                     keep("mask")
                     return warn_output(decision)
                 if mode != "enforce" or not (decision.blocked or held):
@@ -1011,11 +1108,10 @@ def _output(raw: bytes, client: str = "codex", ends: float | None = None) -> byt
                     )
 
                     return attached_report(decision, held, unread)
-                suggestion_path = (
-                    _write_redacted_prompt(decision.redacted_text)
-                    if decision.blocked
-                    else None
-                )
+                suggestion_path = None
+                if decision.blocked:  # the redacted copy may be sent on
+                    _issue(session_id, issued(numbering))
+                    suggestion_path = _write_redacted_prompt(decision.redacted_text)
                 try:
                     if held:
                         from shim_cli.clients.claude.hook import (
@@ -1046,15 +1142,52 @@ def main() -> None:
     client = "codex" if not arguments else arguments[0]
     if len(arguments) > 1:
         client = ""
+    started = time.perf_counter() - _process_age()
     raw = b""
+    # Whoever takes this gives the one answer: main, or the timer below once
+    # the answer is due. It is never released.
+    answered = threading.Lock()
+
+    def overdue(descriptor: int) -> None:
+        if answered.acquire(blocking=False):
+            try:
+                answer = memoryview(_fixed_refusal(raw, client))
+                while answer:
+                    answer = answer[os.write(descriptor, answer) :]
+            finally:
+                os._exit(0)
+
+    left = started + HOOK_ANSWER_SECONDS - time.perf_counter()
+    if left > 0:
+        with contextlib.suppress(OSError):
+            # On a copy of standard output: inspection points descriptor 1 at
+            # the null device.
+            # ponytail: the timer needs the GIL, so a C call that holds it
+            # delays the fixed answer by its length; the detector's calls on
+            # its 200,000-character pieces are short. A watchdog process if not.
+            timer = threading.Timer(left, overdue, (os.dup(1),))
+            timer.daemon = True
+            timer.start()
     try:
-        with _deadline() as ends:
+        with _deadline(started) as ends:
             raw = sys.stdin.buffer.read(MAX_INPUT_BYTES + 1)
+            if time.perf_counter() >= ends:
+                # Started past the deadline: read anyway, so the refusal fits
+                # the event (a prompt's block would let an MCP result through).
+                # The timer bounds that read; clients close stdin at once.
+                # ponytail: started past the answer too, only the client's
+                # kill bounds it; a start that late misses the timeout anyway.
+                raise TimeoutError("shim hook deadline exceeded")
             output = _output(raw, client, ends)
-        sys.stdout.buffer.write(output)
     except Exception as error:
-        with contextlib.suppress(Exception):
-            sys.stdout.buffer.write(_refusal_output(raw, client, _reason(error)))
+        try:
+            output = _refusal_output(raw, client, _reason(error))
+        except Exception:
+            output = _fixed_refusal(raw, client)
+    # Blocks for good if the timer has it: it is writing, and then exits.
+    answered.acquire()
+    with contextlib.suppress(Exception):
+        sys.stdout.buffer.write(output)
 
 
 if __name__ == "__main__":

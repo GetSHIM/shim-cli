@@ -139,6 +139,7 @@ _UNREADABLE = {
     "NOT_A_FILE": "is not a regular file",
     "FILE_TOO_LARGE": "is larger than 1 MB",
     "NOT_UTF8": "is not UTF-8 text",
+    "FILE_UNREADABLE": "could not be read",
 }
 
 
@@ -148,9 +149,14 @@ def _read(path: Path, as_json: bool) -> str:
     elif not path.is_file():
         code = "NOT_A_FILE"
     else:
-        with path.open("rb") as stream:
-            data = stream.read(MAX_FILE_BYTES + 1)
-        if len(data) > MAX_FILE_BYTES:
+        try:
+            with path.open("rb") as stream:
+                data = stream.read(MAX_FILE_BYTES + 1)
+        except OSError:
+            data = None
+        if data is None:
+            code = "FILE_UNREADABLE"
+        elif len(data) > MAX_FILE_BYTES:
             code = "FILE_TOO_LARGE"
         else:
             try:

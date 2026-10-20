@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import re
 import unicodedata
 from dataclasses import dataclass
@@ -18,10 +19,15 @@ _SourceSpan = tuple[int, int]
 
 @dataclass(frozen=True)
 class NormalizedText:
-    __slots__ = ("source_spans", "text")
+    """`literal` is `text` with NUL for each character the source does not
+    write as itself, as a `&` decoded from `%26` or folded from a fullwidth
+    ampersand. A value ends only at a mark its source writes."""
+
+    __slots__ = ("literal", "source_spans", "text")
 
     text: str
     source_spans: tuple[_SourceSpan, ...]
+    literal: str
 
 
 class InputTooLarge(ValueError):
@@ -60,6 +66,8 @@ def _decode_percent(text: str) -> tuple[str, list[_SourceSpan]]:
     return "".join(output), spans
 
 
+# A text repeats its pairs: three NFC calls each were a tenth of normalizing.
+@functools.lru_cache(maxsize=4_096)
 def _normalization_continues(previous: str, current: str) -> bool:
     previous_code = ord(previous)
     current_code = ord(current)
@@ -74,7 +82,7 @@ def _normalization_continues(previous: str, current: str) -> bool:
 
 def _normalize_unicode(
     text: str, spans: list[_SourceSpan]
-) -> tuple[str, tuple[_SourceSpan, ...]]:
+) -> tuple[str, tuple[_SourceSpan, ...], str]:
     if len(text) != len(spans):
         raise ValueError("Guard normalization failed safely.")
     # One entry per source character, not per character it decomposes into:
@@ -104,13 +112,19 @@ def _normalize_unicode(
     cuts.append(len(decomposed))
 
     output: list[str] = []
+    literal: list[str] = []
     normalized_spans: list[_SourceSpan] = []
     for start, end in zip(cuts, cuts[1:]):  # noqa: B905
         normalized = unicodedata.normalize("NFC", "".join(decomposed[start:end]))
         source_span = (spans[start][0], spans[end - 1][1])
         output.append(normalized)
+        # A one-character span is a source character written as itself. No
+        # character's normalization holds it beside others, so a run is
+        # literal whole or not at all.
+        written = source_span[1] - source_span[0] == 1 and normalized == text[start]
+        literal.append(normalized if written else "\0" * len(normalized))
         normalized_spans.extend([source_span] * len(normalized))
-    return "".join(output), tuple(normalized_spans)
+    return "".join(output), tuple(normalized_spans), "".join(literal)
 
 
 def normalize(text: str) -> NormalizedText:
@@ -122,6 +136,7 @@ def normalize(text: str) -> NormalizedText:
         return NormalizedText(
             text,
             tuple((index, index + 1) for index in range(len(text))),
+            text,
         )
 
     decoded, spans = _decode_percent(text)
@@ -134,7 +149,4 @@ def normalize(text: str) -> NormalizedText:
         if not _INVISIBLE.fullmatch(character):
             visible_text.append(character)
             visible_spans.append(span)
-    normalized, normalized_spans = _normalize_unicode(
-        "".join(visible_text), visible_spans
-    )
-    return NormalizedText(normalized, normalized_spans)
+    return NormalizedText(*_normalize_unicode("".join(visible_text), visible_spans))

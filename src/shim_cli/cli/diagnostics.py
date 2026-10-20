@@ -19,11 +19,13 @@ from rich.table import Table
 from shim_cli.cli.integrations import (
     client_name,
     client_plan,
+    conflict_fix,
     hook_argv,
     hooks_on_disk,
     other_installations,
     parse_error,
     plan_status,
+    unsafe_fix,
 )
 from shim_cli.cli.output import Check, console, emit, emit_json
 from shim_cli.cli.resolution import installed_plugins, resolve
@@ -174,7 +176,7 @@ def _codex_hooks_feature() -> Check:
 def _legacy_state(client: str, fragment: bool) -> Check:
     """R7: name every 0.2.0 shape that is still on disk. Changes nothing."""
     from shim_cli.clients.copilot import settings as copilot_settings
-    from shim_cli.config import legacy_config_path
+    from shim_cli.config import config_path, legacy_config_path
     from shim_cli.session import ledger
     from shim_cli.settings_files import StateKind, inspect_file
 
@@ -198,10 +200,23 @@ def _legacy_state(client: str, fragment: bool) -> Check:
         commands.append(f"shim install {client}")
     settings_file = legacy_config_path()
     if settings_file is not None and settings_file.is_file():
-        found.append(
-            f"Settings are still at {settings_file} and move on the next shim config"
-        )
-        commands.append("shim config")
+        try:
+            current = config_path()
+        except ValueError:
+            current = None
+        if current is not None and current.exists():
+            # `shim config` moves nothing while the new file exists.
+            found.append(
+                f"An unused 0.2.0 settings file remains at {settings_file}; "
+                f"the current file is {current}"
+            )
+            commands.append(f"rm {shlex.quote(str(settings_file))}")
+        else:
+            found.append(
+                f"Settings are still at {settings_file} and move on the next "
+                "shim config"
+            )
+            commands.append("shim config")
     try:
         directory = ledger.legacy_root_path()
     except ledger.LedgerError:
@@ -293,18 +308,17 @@ def _hook_state(client: str, on_disk: bool = False) -> Check | None:
         return Check(
             "hook_configuration",
             label,
-            f"{name} hook configuration needs manual review.{parse_error(plan)}",
+            f"{name} hook configuration needs manual review."
+            + (parse_error(plan) or f" {plan.message}."),
             code="CLIENT_SETTINGS_MALFORMED",
-            fix=f"Fix {plan.target} by hand so it parses; shim install will not "
-            "change it until then.",
+            fix=f"{conflict_fix(plan)}; shim install will not change it until then.",
         )
     return Check(
         "hook_configuration",
         label,
-        f"{name} hook configuration cannot be trusted safely.",
+        f"{name} hook configuration cannot be trusted safely: {plan.message}.",
         code="CLIENT_SETTINGS_UNSAFE",
-        fix=f"Make {plan.target} a regular file owned by you, then run shim "
-        f"install {client}.",
+        fix=f"{unsafe_fix(plan.message, plan.target)}, then run shim install {client}.",
     )
 
 
@@ -325,10 +339,29 @@ def _entity_settings() -> Check:
             code="DETECTION_DISABLED",
             fix="Turn types back on with shim config --enable ENTITY --yes.",
         )
-    return Check(
-        "entity_settings",
-        "PASS",
-        f"{len(enabled)}/{len(ENTITY_TYPES)} sensitive-data entities are enabled.",
+    count = f"{len(enabled)}/{len(ENTITY_TYPES)} sensitive-data entities are enabled"
+    if (absent := _absent_settings()) is not None:
+        return Check(
+            "entity_settings",
+            "WARN",
+            f"No settings file at {absent}; shipped defaults apply ({count}).",
+            code="SETTINGS_FILE_ABSENT",
+            fix="Nothing is wrong if the defaults suit you; the first change you "
+            "save with shim config creates the file.",
+        )
+    return Check("entity_settings", "PASS", f"{count}.")
+
+
+def _absent_settings() -> Path | None:
+    """The settings path when nothing, not even a 0.2.0 file, is there to read."""
+    from shim_cli.config import MAX_CONFIG_BYTES, config_path, legacy_config_path
+
+    path = config_path()
+    legacy = legacy_config_path()
+    if legacy is not None and legacy.is_file():
+        return None
+    return (
+        path if inspect_file(path, MAX_CONFIG_BYTES).kind is StateKind.ABSENT else None
     )
 
 
@@ -339,18 +372,23 @@ def _custom_patterns() -> Check | None:
     names that file and its fix.
     """
     from shim_cli.config import load_policy
-    from shim_cli.guard.entities import entry_source, unsafe_pattern
+    from shim_cli.guard.entities import CUSTOM, unsafe_pattern
 
     try:
-        patterns = load_policy().custom
+        loaded = load_policy()
     except (OSError, ValueError):
         return None
+    patterns = loaded.custom
     if not patterns:
         return Check("custom_patterns", "PASS", "No custom patterns are configured.")
     reasons = [
         reason
         for pattern in patterns
-        if (reason := unsafe_pattern(pattern.name, entry_source(pattern.entry)))
+        if (
+            reason := unsafe_pattern(
+                pattern.name, pattern.regex.pattern, pattern.regex.flags
+            )
+        )
     ]
     if reasons:
         return Check(
@@ -362,7 +400,43 @@ def _custom_patterns() -> Check | None:
             "shim config --remove-custom NAME --yes.",
         )
     named = ", ".join(pattern.name for pattern in patterns)
+    if CUSTOM not in loaded.entities:
+        return Check(
+            "custom_patterns",
+            "WARN",
+            f"{len(patterns)} custom patterns are in the settings file but CUSTOM "
+            f"is off, so none runs: {named}.",
+            code="CUSTOM_PATTERNS_INACTIVE",
+            fix="Turn them on with shim config --enable CUSTOM --yes.",
+        )
     return Check("custom_patterns", "PASS", f"{len(patterns)} custom: {named}.")
+
+
+def _mode_defaults() -> Check | None:
+    """`[mode] default` outranks the shipped per-direction defaults, so a
+    `default = "warn"` quietly turns masking off. None when it does not, or when
+    the settings file cannot be read: the entity check already says why.
+    """
+    from shim_cli.config import load_policy
+
+    try:
+        loaded = load_policy()
+    except (OSError, ValueError):
+        return None
+    if not (weakened := loaded.weakened_by_default()):
+        return None
+    fallback = loaded.modes["default"]
+    named = " and ".join(weakened)
+    return Check(
+        "mode_defaults",
+        "WARN",
+        f'[mode] default = "{fallback}" overrides the shipped enforce for {named}, '
+        "so tool results and the tool inputs that leave this machine are not masked.",
+        code="MODE_DEFAULT_WEAKENS",
+        fix="Add "
+        + ", ".join(f'{direction} = "enforce"' for direction in weakened)
+        + " under [mode] in your settings file, or remove default.",
+    )
 
 
 def _run_hook(
@@ -425,7 +499,10 @@ def _runner_check(client: str) -> Check:
     try:
         with tempfile.TemporaryDirectory(prefix="shim-doctor-") as directory:
             environment = os.environ.copy()
-            environment["SHIM_CONFIG"] = str(Path(directory).resolve() / "config.toml")
+            fixture = Path(directory).resolve() / "config.toml"
+            # SHIM_CONFIG naming a file that is not there is refused, not defaulted.
+            fixture.touch(mode=0o600)
+            environment["SHIM_CONFIG"] = str(fixture)
             environment["TMPDIR"] = directory
             safe_result = _run_hook(command, safe, environment, timeout)
             block_result = _run_hook(command, blocked, environment, timeout)
@@ -532,15 +609,17 @@ def _duplicate_check(client: str, installed: frozenset) -> Check:
         )
     plugins = installed_plugins()
     if len(plugins) > 1:
-        alias = next(p for p in plugins if p["key"].startswith("shim-guard@"))
+        keys = [plugin["key"] for plugin in plugins]
+        # Keep the current name, or the first of any other; the rest go.
+        keep = next((key for key in keys if not key.startswith("shim-guard@")), keys[0])
+        fix = "; ".join(f"claude plugin uninstall {key}" for key in keys if key != keep)
         return Check(
             "duplicate_hooks",
             "FAIL",
-            f"Both the {plugins[0]['key']} and {plugins[1]['key']} plugins are "
-            "installed; every event is inspected twice. Run "
-            f"`claude plugin uninstall {alias['key']}`.",
+            f"The {', '.join(keys)} plugins are all installed; every event is "
+            f"inspected twice. Run `{fix}`.",
             code="DUPLICATE_HOOKS",
-            fix=f"claude plugin uninstall {alias['key']}",
+            fix=fix,
         )
     if plugins and (installed or hooks):
         return Check(
@@ -596,6 +675,39 @@ def _session_record_check() -> Check:
         "PASS",
         f"Session records are writable at {spool.root_path()}.",
     )
+
+
+def _ledger_check() -> Check | None:
+    """The ledger folder is checked only when a write would reach it: the
+    hook swallows a refused folder, so `shim config --ledger` says on while
+    nothing is retained. None when the ledger is off or its settings cannot be
+    read: the entity check already says why."""
+    from shim_cli.config import load_policy
+    from shim_cli.session import ledger
+
+    try:
+        if not load_policy().ledger:
+            return None
+    except (OSError, ValueError):
+        return None
+    root = None
+    try:
+        root = ledger.root_path()
+        ledger.probe()
+    except (OSError, ledger.LedgerError):
+        return Check(
+            "ledger",
+            "WARN",
+            f"The ledger is on but {root or 'its folder'} is not a private folder "
+            "you own with private ledger files, so no event is retained; "
+            "masking still works.",
+            code="LEDGER_FOLDER_UNSAFE",
+            fix=f"Run chmod 700 {root} and chmod 600 on the ledger files in it, "
+            "or remove a ledger file that is a symlink."
+            if root
+            else "Set XDG_STATE_HOME to an absolute folder you own.",
+        )
+    return Check("ledger", "PASS", f"The ledger folder {root} is private.")
 
 
 def _installed_events(client: str, hook_state: Check | None) -> frozenset:
@@ -711,7 +823,9 @@ def doctor(*, client: str, as_json: bool) -> None:
             _legacy_state(client, legacy_fragment),
             _entity_settings(),
             _custom_patterns(),
+            _mode_defaults(),
             _session_record_check(),
+            _ledger_check(),
             runner,
             # The installed hook runs this package only if the runner ran it.
             _resolution_check(

@@ -29,6 +29,7 @@ prompt event -> client codec (+ Claude @ files read from disk) -> Policy -> dete
 
 verified tool event -> Claude or VS Code adapter -> shared event pipeline
                     -> direction (client, tool) -> self-protection
+                    -> placeholder write-back (session's issued names)
                     -> Policy -> detector, diet, markers
                     -> client response + session Record
                        (not inspected in full: deny, withhold or report)
@@ -66,7 +67,7 @@ not there is treated as an unknown tool.
 | `config.py` | Config path, TOML parsing/rendering, validation at file ingress, and loading a `Policy`. |
 | `events/` | Deterministic tool-payload traversal, context diet (`html_text` turns a whole HTML page into text when `html` is on), injection markers, and the shared tool-event pipeline. |
 | `clients/<client>/` | Native prompt codecs, verified tool codecs, settings fragments, capabilities, and coexistence rules for that client. |
-| `session/` | `Record`, timestamps, best-effort `remember()`, spool, ledger, cleanup, and summaries. |
+| `session/` | `Record`, timestamps, best-effort `remember()`, spool (with the session's issued placeholder names), ledger, cleanup, and summaries. |
 | `settings_files/` | Guarded inspection, pure change planning, parent creation, revalidation, and atomic publication. |
 | `watch/` | Proxy forwarding, wire measurement, and watch report values. |
 | `hook.py` | Deadline, bounded stdin, envelope dispatch, fail-closed answers for events it cannot inspect (including fixed fallbacks for when the adapters cannot load), which files a write may not change, temporary prompt-file lifecycle, and stdout. |
@@ -142,16 +143,30 @@ live in `guard/recognizers.py`; the public suffix table is compiled into
 the hook path. No detector input or lookup is sent over the network.
 
 `events/payload.inspect` walks a tool payload once, to a depth of 64 and with
-no field count, the 1 MB input bound being what bounds the work. Masking and
+no field count, the 1 MB input bound being what bounds the work. `walk` skips
+nothing by shape: object keys, strings and numbers are all leaves, a key's
+leaf tagged after its object's path so `replace` can rebuild the key. A value
+leaf is read alone and with its key (or its name/value sibling) as context,
+keeping only findings inside the value. The one exception to reading every
+leaf is inbound and in `inspect`, through `_picture()`: a file's bytes that are
+a real image (a readable header in `image_size`, which `watch` also uses, and
+base64 to the last character) are passed unread. A finding in a file's bytes
+or in keys that would collide cannot be masked, so the pipeline turns that
+mask into a withheld result or a refused call. Masking and
 context diet may rewrite eligible leaves; injection markers only report and can
 never reach a replacement. If any leaf was not read, because of depth, size,
 the deadline or a failed analysis, the inspection hands on no rewritten value
 at all, and the event is denied, withheld or reported as not inspected. Before
 every detector call the tool path compares the clock with the deadline `main`
-set before it read stdin, rather than relying on the alarm the detector
-re-arms. Diet runs only on rewrite-capable inbound results of network and MCP
-tools outside `observe`: never on a local tool's result or a command's output,
-whose exact bytes a later edit may need. Lossless JSON compaction is the default;
+set, rather than relying on the alarm the detector re-arms. `main` counts that
+deadline (20 s) from the kernel's start time for the process, and reads stdin
+even when it has already passed, so the refusal is shaped for the event it
+answers. A timer thread writes a fixed refusal, picked from the event as read,
+on a duplicate of standard output if no answer is out 25 s in; a lock that is
+never released lets exactly one of them answer. Diet runs only on
+rewrite-capable inbound results of network and MCP tools outside `observe`:
+never on a local tool's result or a command's output, whose exact bytes a
+later edit may need. Lossless JSON compaction is the default;
 trailing-whitespace removal is available only through explicit configuration
 because it can change Markdown hard breaks, and so is HTML-to-text, which drops
 markup; its parser, stdlib `html.parser`, is imported only when `html` is
@@ -169,9 +184,21 @@ overlap. A pattern is checked for catastrophic backtracking when `shim config`
 writes it and again by `shim doctor`, never on the hook path: `re` has no
 per-match timeout and the hook is what a user is waiting on.
 
+Placeholder numbers are per event. `guard/evaluate.py` takes a numbering, a
+map built once per prompt or tool event and shared by every leaf, every piece
+of a long field and the `html` diet's single scan of the converted page, so a
+value keeps one number and two values never share one. It keys values by
+their decoded, NFKC form, and for `_LAYOUT_FREE` types (accounts, cards,
+phones, national IDs, MAC addresses, plates) by their letters and digits alone
+in upper case; the map lives in memory for that event only. Numbering starts
+above the highest
+placeholder-shaped text the event already holds. A masked span keeps its line
+breaks after the placeholder.
+
 Substitution is the one place a policy setting changes the output text.
 `[reveal]` keeps the last one to four digits of an `IBAN`, `CREDIT_CARD` or
-`PHONE` span, separators skipped, as `<TYPE_n:tail>`; `guard/entities.py`
+`PHONE` span, read from the decoded value alone in ASCII digits, as
+`<TYPE_n:tail>`; `guard/entities.py`
 holds the single definition of what a placeholder looks like in either form,
 and the secret recognizer uses it to leave a value shim already masked alone.
 Detection, counting and spans are untouched, so with no table the output is
@@ -215,16 +242,33 @@ The refusal names only the file or the subcommand, and the record notes
 `self-protection`. The routes it does not see, the shell writing a file among
 them, are listed in [Privacy](privacy.md#an-agent-turning-shim-off).
 
+Next, in every mode, the pipeline refuses a local write or an MCP or unknown
+tool call whose new text holds a placeholder shim issued in this session (D3).
+`hook.py` passes `issued()` and `issue()` over `session/spool.py`'s `.names`
+file: a line per run of numbers per type, names only, capped apart from the log
+and cleared at `SessionEnd`. Every mask that hands the model placeholders
+issues their names first, the prompt's redacted copy and Copilot's rewrite
+included; if they cannot be kept, nothing masked is handed on, and if they
+cannot be read, a write with placeholder-shaped text is refused. The record
+notes `placeholder`.
+
 ## Session records
 
 `session.record` owns the bounded persisted schema and the best-effort
 `remember()` effect. Records contain entity names and counts, byte counts,
-actions, bounded labels, and a detector-scrubbed target path or URL. They never
+actions, bounded labels, and a detector-scrubbed target path or URL. Every
+record's target and tool label go through one scrub, bound to the loaded
+policy at its widest scope (every enabled, named and default type and the
+custom patterns) and never with a reveal tail; `hook._record_scrub` builds it,
+falling back to the default types when the settings cannot be read. They never
 contain a finding value, replacement value, prompt, response body, or shell
 command. Storage failure cannot disable masking or blocking.
 
 `session/_files.py` owns private descriptor validation, bounded reads, and
-non-blocking locked appends shared by the spool and ledger.
+locked appends shared by the spool and ledger. A lock held by a parallel hook
+is waited for up to 100 ms, never longer; a record still lost leaves a marker
+beside the spool, so the summary says it undercounts, and the ledger reports a
+month that lost an event as capped.
 
 The spool uses a hashed session filename in a private OS-temporary directory.
 Claude's `Stop` renders only unseen records and `SessionEnd` removes that

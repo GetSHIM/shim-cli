@@ -60,7 +60,7 @@ def _digits(row: int, count: int) -> str:
     ],
 )
 def test_a_megabyte_of_worst_case_text_is_inspected_whole_in_time(unit) -> None:
-    """The hook takes up to 1 MB and stops at 25 s. A 650 KB numeric CSV, a
+    """The hook takes up to 1 MB and stops at 20 s. A 650 KB numeric CSV, a
     960 KB phone list, the same list with extensions, 990 KB of U+FDFA, which
     NFKD writes as 18 characters, and runs of combining marks, which NFC
     orders by insertion sort, all used to reach the deadline and pass through
@@ -165,11 +165,13 @@ def test_a_field_that_expands_past_the_limit_is_cut_once_where_it_stops_fitting(
 _REFERENCE_VENDOR_TOKEN = re.compile(
     r"(?:AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{20,}|"
     r"sk_(?:live|test)_[A-Za-z0-9]{16,}|"
+    r"(?:(?<=\\[nrtfbv])|(?<![A-Za-z]))rk_(?:live|test)_[A-Za-z0-9]{16,}|"
     r"sk-(?:proj-)?[A-Za-z0-9_-]{16,}|"
     r"SG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}|"
     r"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+|"
-    r"(?<![\w-])(?:xox[abposr]-[0-9A-Za-z-]{10,}|AIza[0-9A-Za-z_-]{35}|"
-    r"github_pat_[0-9A-Za-z_]{22,}|glpat-[0-9A-Za-z_-]{20,}|"
+    r"(?:(?<=\\[nrtfbv])|(?<![\w-]))"
+    r"(?:(?:xox[abposr]|xapp)-[0-9A-Za-z-]{10,}|AIza[0-9A-Za-z_-]{35}|"
+    r"github_pat_[0-9A-Za-z_]{22,}|gl(?:pat|rt|dt|ptt|ft|soat)-[0-9A-Za-z_-]{20,}|"
     r"npm_[0-9A-Za-z]{36}|hf_[0-9A-Za-z]{30,})(?![\w-]))"
 )
 _TOKEN_PARTS = (
@@ -189,6 +191,10 @@ _TOKEN_PARTS = (
     "sk-" + "a1" * 8,
     "ghp_" + "b2" * 10,
     "xoxb-" + "1" * 10,
+    "rk_live_" + "e5" * 8,
+    "x" + "app-" + "3" * 10,
+    "glrt-" + "f6" * 10,
+    "\\n",
     "SG." + "c" * 16 + "." + "d" * 16,
     "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl",
 )

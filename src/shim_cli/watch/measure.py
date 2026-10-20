@@ -1,16 +1,13 @@
 from __future__ import annotations
 
-import base64
-import binascii
 import hashlib
 import json
 import math
 import re
-import struct
 import threading
 from dataclasses import dataclass, field
 
-from ..events.payload import PayloadTooLarge, walk
+from ..events.payload import PayloadTooLarge, image_size, walk
 
 # The paths of a model request; the rest of what a client sends is not counted.
 MODEL_PATHS = ("messages", "responses", "completions")
@@ -56,7 +53,6 @@ _SNAPSHOT = re.compile(r"-\d{8}$")
 # The vision page, read 8 October 2026: an image is scaled so its long edge
 # fits the model's tier, then billed one token per 28 x 28 patch, up to a cap.
 # Claude 4.7 and later read at the high-resolution tier.
-IMAGE_HEADER_CHARACTERS = 65_536
 HIGH_RESOLUTION = frozenset(
     {
         "claude-opus-4-7",
@@ -347,54 +343,6 @@ def valid_label(value: object, fallback: str = UNKNOWN_MODEL) -> str:
     """A name from the wire that is safe to print, else `fallback`."""
     printable = isinstance(value, str) and value and value.isprintable()
     return value if printable and len(value) <= MAX_MODEL_CHARS else fallback
-
-
-def _dimensions(raw: bytes) -> tuple[int, int] | None:
-    if raw[:8] == b"\x89PNG\r\n\x1a\n" and raw[12:16] == b"IHDR":
-        return struct.unpack(">II", raw[16:24])
-    if raw[:6] in (b"GIF87a", b"GIF89a"):
-        return struct.unpack("<HH", raw[6:10])
-    if raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
-        chunk = raw[12:16]
-        if chunk == b"VP8 " and raw[23:26] == b"\x9d\x01\x2a":
-            width, height = struct.unpack("<HH", raw[26:30])
-            return width & 0x3FFF, height & 0x3FFF
-        if chunk == b"VP8L" and raw[20:21] == b"\x2f":
-            bits = int.from_bytes(raw[21:25], "little")
-            return (bits & 0x3FFF) + 1, ((bits >> 14) & 0x3FFF) + 1
-        if chunk == b"VP8X":
-            width = int.from_bytes(raw[24:27], "little") + 1
-            return width, int.from_bytes(raw[27:30], "little") + 1
-        return None
-    if raw[:2] != b"\xff\xd8":
-        return None
-    position = 2
-    while position + 4 <= len(raw):
-        if raw[position] != 0xFF:
-            return None
-        marker = raw[position + 1]
-        if marker == 0xFF:
-            position += 1
-            continue
-        if marker == 0x01 or 0xD0 <= marker <= 0xD8:
-            position += 2
-            continue
-        if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
-            height, width = struct.unpack(">HH", raw[position + 5 : position + 9])
-            return width, height
-        position += 2 + struct.unpack(">H", raw[position + 2 : position + 4])[0]
-    return None
-
-
-def image_size(data: str) -> tuple[int, int] | None:
-    """Width and height from the header alone; None when it cannot be read."""
-    head = data[:IMAGE_HEADER_CHARACTERS]
-    try:
-        raw = base64.b64decode(head[: len(head) - len(head) % 4], validate=True)
-        size = _dimensions(raw)
-    except (binascii.Error, ValueError, struct.error):
-        return None
-    return size if size and size[0] > 0 and size[1] > 0 else None
 
 
 def image_tokens(size: tuple[int, int] | None, model: str) -> int:

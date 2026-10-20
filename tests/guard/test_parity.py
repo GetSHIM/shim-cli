@@ -44,8 +44,15 @@ NO_CREDENTIAL = (
     "secret, wherever it points (PRD-36 R3)."
 )
 
+DENIED_SSN = (
+    "078-05-1120 is the Woolworth wallet-card SSN, refused as no one's; the "
+    "frozen output read it as a phone. Written without separators after the SSN "
+    "cue it is no phone either: a bare digit run is a phone number only when "
+    "Turkish-shaped or phone-cued (PRD-21)."
+)
+
 DELIBERATE_DIVERGENCES = {
-    "ssn-bare-78051120": (BARE_ID, []),
+    "ssn-bare-78051120": (DENIED_SSN, []),
     "vkn-nocontext-123456789": (BARE_ID, []),
     "vkn-farcontext-123456789": (BARE_ID, []),
     "vkn-nocontext-222222222": (BARE_ID, []),
@@ -258,8 +265,37 @@ NARROWED_SPANS = {
 }
 
 
+LINE_BREAKS = (
+    "A key masked over several lines keeps their line breaks after its "
+    "placeholder, so every line after it keeps its number: a Read result's "
+    "line numbers and an edit by line still point at the right line."
+)
+
+# The frozen findings, with the placeholder followed by the line breaks of the
+# span it replaced. The text differs from the frozen text by those alone.
+KEPT_LINE_BREAKS = {
+    "secret-pem-complete": (LINE_BREAKS, "<SECRET_1>\n\n"),
+    "secret-pem-unterminated": (LINE_BREAKS, "<SECRET_1>\n\n"),
+    "secret-pem-openssh": (LINE_BREAKS, "<SECRET_1>\n\n"),
+}
+
+
+def test_kept_line_breaks_change_nothing_but_line_breaks() -> None:
+    by_id = {case["id"]: case for case in _CASES}
+    for identifier, (_reason, redacted) in KEPT_LINE_BREAKS.items():
+        case = by_id[identifier]
+        assert redacted != case["redacted"], identifier
+        assert redacted.replace("\n", "") == case["redacted"], identifier
+        assert redacted.count("\n") == case["text"].count("\n"), identifier
+
+
 def test_every_divergence_is_still_a_real_case() -> None:
-    tables = (set(DELIBERATE_DIVERGENCES), set(NARROWED_SPANS), set(TIGHTENED))
+    tables = (
+        set(DELIBERATE_DIVERGENCES),
+        set(NARROWED_SPANS),
+        set(TIGHTENED),
+        set(KEPT_LINE_BREAKS),
+    )
     assert set().union(*tables) <= {case["id"] for case in _CASES}
     assert sum(map(len, tables)) == len(set().union(*tables))
 
@@ -306,8 +342,18 @@ WHOLE_IBAN = (
     "gateway reads it."
 )
 
-# A ported gateway rule that masks more than the frozen build. Each new span
-# covers every frozen one, so nothing that was masked comes back.
+LONG_CARD = (
+    "A Luhn-valid 18- or 19-digit number of an issuer that prints them (Visa, "
+    "Discover and UnionPay, Maestro, JCB, Mir) is a card; the frozen build "
+    "stopped at 17 digits, or masked the first 16 and left the rest."
+)
+CUED_BARE_SSN = (
+    "Nine digits right after an SSN cue are an SSN when the same digits written "
+    "with separators would be one; databases and JSON store them bare."
+)
+
+# A rule that masks more than the frozen build. Each new span covers every
+# frozen one, so nothing that was masked comes back.
 TIGHTENED = {
     **{
         f"iban-lower-{country}": (
@@ -340,6 +386,23 @@ TIGHTENED = {
     },
     "iban-spaced-AT": (WHOLE_IBAN, [["IBAN", 5, 29, 1.0]], "IBAN <IBAN_1> confirmed"),
     "iban-spaced-PL": (WHOLE_IBAN, [["IBAN", 5, 39, 1.0]], "IBAN <IBAN_1> confirmed"),
+    **{
+        f"card-{form}{prefix}-19": (
+            LONG_CARD,
+            [["CREDIT_CARD", 5, 24 if form == "" else 28, 1.0]],
+            "Card <CREDIT_CARD_1> on file",
+        )
+        for prefix in ("4", "6011", "4111")
+        for form in ("", "spaced-", "hyphen-")
+    },
+    **{
+        f"ssn-bare-{digits}": (
+            CUED_BARE_SSN,
+            [["US_SSN", 4, 13, 0.5]],
+            "SSN <US_SSN_1> filed",
+        )
+        for digits in ("219099999", "111223333")
+    },
 }
 
 
@@ -375,6 +438,11 @@ def test_detection_is_unchanged(case: dict) -> None:
         reason, expected = DELIBERATE_DIVERGENCES[case["id"]]
         assert actual == expected, f"{case['id']} diverges on purpose: {reason}"
         assert decision.redacted_text == case["text"]
+        return
+    if case["id"] in KEPT_LINE_BREAKS:
+        reason, redacted = KEPT_LINE_BREAKS[case["id"]]
+        assert actual == case["findings"], case["id"]
+        assert decision.redacted_text == redacted, f"{case['id']}: {reason}"
         return
     assert actual == case["findings"], (
         f"findings changed for {case['id']!r}\n"

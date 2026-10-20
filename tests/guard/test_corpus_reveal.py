@@ -22,9 +22,9 @@ def test_partial_reveal_output_is_exact(case: dict) -> None:
     decision = evaluate(case["text"], reveal=reveal)
 
     assert decision.redacted_text == case["expected_output"]
-    assert decision.redacted_text == PLACEHOLDER.sub(
-        lambda match: match.group(), decision.redacted_text
-    )
+    # Every finding is written in the documented `<TYPE_n:dddd>` form, which
+    # is what the HTML diet and the placeholder exemption recognise.
+    assert len(PLACEHOLDER.findall(decision.redacted_text)) == len(decision.findings)
 
 
 @pytest.mark.parametrize("case", CORPUS["cases"], ids=lambda case: case["id"])

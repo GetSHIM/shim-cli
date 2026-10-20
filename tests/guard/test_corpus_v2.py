@@ -119,6 +119,14 @@ def test_published_prompt_metrics_match_the_detector() -> None:
         assert published["negative_cases"] == len(cases) - len(expected)
         assert published["precision"] == published["recall"] == 1.0
 
+    categories = METRICS["categories"].values()
+    assert METRICS["micro"] == {
+        "true_positive": sum(each["true_positive"] for each in categories),
+        "false_positive": sum(each["false_positive"] for each in categories),
+        "false_negative": sum(each["false_negative"] for each in categories),
+        "precision": 1.0,
+        "recall": 1.0,
+    }
     assert METRICS["evaluation_unit"] == "exact redacted output"
     assert METRICS["exact_output"] == {
         "cases": len(cases),

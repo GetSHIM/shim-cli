@@ -94,6 +94,12 @@ def archive(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return target
 
 
+def _pin_settings(environment: dict[str, str]) -> None:
+    """A SHIM_CONFIG that names a missing file is refused, so the file exists."""
+    if named := environment.get("SHIM_CONFIG"):
+        Path(named).touch(mode=0o600)
+
+
 def _run(
     client: str,
     environment: dict[str, str],
@@ -101,6 +107,7 @@ def _run(
     cwd: Path | None = None,
 ):
     """Run the launcher for a prompt event, the way every hook file calls it."""
+    _pin_settings(environment)
     return subprocess.run(
         (str(LAUNCHER), client, "", "prompt"),
         input=_payload(client, prompt),
@@ -115,6 +122,7 @@ def _run(
 def _run_tool_event(client: str, environment: dict[str, str], call: bool = False):
     """Run the launcher for a tool event; a call is marked, as the hook files
     mark PreToolUse."""
+    _pin_settings(environment)
     return subprocess.run(
         (str(LAUNCHER), client, "", "call") if call else (str(LAUNCHER), client),
         input=TOOL_CALL if call else TOOL_EVENT,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import errno
 import json
 import os
 import shutil
@@ -9,14 +10,13 @@ import sys
 import tempfile
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter
 
 import typer
 
 from shim_cli.cli.output import emit_error, emit_json
-from shim_cli.guard.entities import PLACEHOLDER
 from shim_cli.session.record import UNKNOWN_TOOL_LABEL, display_label, scrubbed_target
 
 MAX_LINE = 8_000_000
@@ -44,6 +44,7 @@ class _Scan:
     size: int = 0
     skipped: int = 0
     uninspected: int = 0
+    ledger: bool = False
 
 
 def _projects_folder() -> Path:
@@ -280,8 +281,6 @@ def _scan(
                     for kind, door, name, text in _texts(record, tools, index > 0):
                         if not text:
                             continue
-                        if kind == "tool":
-                            session.masked += len(PLACEHOLDER.findall(text))
                         try:
                             decision = evaluate(text)
                         except Exception:
@@ -302,6 +301,44 @@ def _scan(
         if session.last:
             scan.sessions.append(session)
     return scan
+
+
+def _count_masked(scan: _Scan, since: float | None, ledger_on: bool) -> None:
+    """What shim masked in each session, from its own records: the session's
+    log while it runs, and the ledger after. Placeholder-shaped text in a
+    transcript is not counted: a doc, a fixture or a file can hold it."""
+    from shim_cli.session import ledger, spool
+
+    moment = None if since is None else datetime.fromtimestamp(since, timezone.utc)
+    try:
+        kept = ledger.entries(moment)
+    except ledger.LedgerError:
+        kept, ledger_on = [], False
+    scan.ledger = ledger_on
+    boundary = "" if moment is None else moment.isoformat().replace("+00:00", "Z")
+
+    def masked(records: list, key: str) -> int:
+        return sum(
+            count
+            for record in records
+            if record.get("session_id") == key
+            and record.get("action") == "mask"
+            and isinstance(record.get("entities"), dict)
+            for count in record["entities"].values()
+            if type(count) is int
+        )
+
+    running = spool.root_path().is_dir()  # reading never creates it
+    for session in scan.sessions:
+        key = spool.session_key(session.id)
+        try:
+            live = spool.entries(session.id) if running else []
+        except spool.SpoolError:
+            live = []
+        # The spool has no `since` of its own: the same cut as the ledger's.
+        live = [record for record in live if str(record.get("ts", "")) >= boundary]
+        # The same event is in both while a session with the ledger runs.
+        session.masked = max(masked(live, key), masked(kept, key))
 
 
 def _summary(scan: _Scan, seconds: float) -> dict:
@@ -344,6 +381,7 @@ def _summary(scan: _Scan, seconds: float) -> dict:
         "masked": {
             "values": sum(session.masked for session in scan.sessions),
             "sessions": sum(session.masked > 0 for session in scan.sessions),
+            "ledger": scan.ledger,
         },
         "model_output": output,
         "scanned": {
@@ -397,6 +435,8 @@ def _report_lines(summary: dict) -> list[str]:
         if masked["values"]
         else "none"
     )
+    if not masked["ledger"]:
+        values += " (without the ledger, live sessions only)"
     written = ", ".join(
         f"{count:,} {entity}" for entity, count in _ordered(summary["model_output"])
     )
@@ -499,6 +539,7 @@ def _run_scan(
         )
     if widths:
         sys.stderr.write("\r" + " " * max(widths) + "\r")
+    _count_masked(scan, start, policy.ledger)
     return scan, _summary(scan, perf_counter() - started)
 
 
@@ -523,8 +564,10 @@ def _history_session(line: bytes) -> str:
 
 
 def _forget(history: Path, sessions: set[str]) -> int | None:
-    if not sessions or history.is_symlink() or not history.is_file():
+    if not sessions or not os.path.lexists(history):
         return 0
+    if history.is_symlink() or not history.is_file():
+        raise OSError(errno.EINVAL, "it is a symlink or not a regular file")
     before = _status(history)
     lines = history.read_bytes().splitlines(keepends=True)
     kept = [line for line in lines if _history_session(line) not in sessions]
@@ -654,8 +697,10 @@ def audit(
         )
     scan, summary = _run_scan(since=since, project=project, as_json=as_json)
     found = bool(summary["reached"])
+    incomplete = not found and bool(scan.skipped or scan.uninspected)
     if as_json:
-        emit_json("audit", "findings" if found else "safe", **summary)
+        status = "findings" if found else "incomplete" if incomplete else "safe"
+        emit_json("audit", status, **summary)
     elif not scan.sessions:
         typer.echo("shim: there are no Claude Code sessions to audit.")
     elif purge:
@@ -664,5 +709,5 @@ def audit(
         lines = _report_lines(summary)
         lines[-1] += " Nothing was changed, written or sent."
         typer.echo("\n".join(lines))
-    if found:
+    if found or incomplete:
         raise typer.Exit(1)

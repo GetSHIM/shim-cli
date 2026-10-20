@@ -148,7 +148,9 @@ def test_an_mcp_or_unknown_tool_is_refused_by_default_not_handed_placeholders(
             "permissionDecisionReason": (
                 f"shim: blocked SECRET (1) in {tool}. shim cannot tell where this "
                 "tool sends its input, so it refuses the call rather than rewrite "
-                "it. Leave these values out, or ask the user how to continue."
+                "it. Leave these values out, or ask the user how to continue. The "
+                f'user can allow this tool with "{tool}" = "warn" under [mode] in '
+                "shim's settings."
             ),
         }
     }

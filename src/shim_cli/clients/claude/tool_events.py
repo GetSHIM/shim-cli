@@ -23,10 +23,12 @@ WITHHELD = "[withheld by shim]"
 _WITHHELD_MESSAGE = (
     "shim: withheld this {tool} result; it could not be inspected ({reason})."
 )
+_NOT_EMPTY = (
+    "It is not empty; do not guess what it held, and ask the user how to continue."
+)
 _WITHHELD_CONTEXT = (
     "shim withheld this {tool} result because it could not be inspected "
-    "({reason}). It is not empty; do not guess what it held, and ask the user "
-    "how to continue."
+    "({reason}). " + _NOT_EMPTY
 )
 # Claude Code (2.1.286) checks a built-in tool's replacement against that
 # tool's output schema and, when it does not match, sends the model the
@@ -89,10 +91,10 @@ _WITHHELD_READ = {
         "totalLines": 0,
     },
 }
-_MASKED_CONTEXT = (
-    "Placeholders such as <EMAIL_1> stand for real values in the source; "
-    "the source does not contain placeholders."
-)
+_MASKED_CONTEXT = "Placeholders such as <EMAIL_1> stand for real values in the source"
+# Said only when true: shim's docs, a test fixture or a file the model wrote
+# can hold placeholder-shaped text, which shim's own numbers then start above.
+_NO_LITERALS = "; the source does not contain placeholders."
 _FAILED_MESSAGE = (
     "shim: found {found} in a failed {tool}. Claude Code does not let this "
     "output be masked; the model has these values."
@@ -215,6 +217,7 @@ def pre_tool_use(
     _found: str,
     tool: str,
     _name: str = "",
+    _literal: bool = False,
 ) -> bytes:
     if action == ALLOW:
         return b""
@@ -245,6 +248,7 @@ def post_tool_use(
     found: str,
     tool: str,
     name: str = "",
+    literal: bool = False,
 ) -> bytes:
     if action == ALLOW:
         return b""
@@ -254,8 +258,9 @@ def post_tool_use(
         output = _specific("PostToolUse", updatedToolOutput=payload)
         if message:
             # Placeholders are explained only where something was masked.
+            end = "." if literal else _NO_LITERALS
             output["hookSpecificOutput"]["additionalContext"] = (
-                f"{message} {_MASKED_CONTEXT}" if found else message
+                f"{message} {_MASKED_CONTEXT}{end}" if found else message
             )
         return _dump(output)
     if action == UNINSPECTED:
@@ -275,7 +280,17 @@ def post_tool_use(
             }
         )
     if action == DENY:
-        raise ValueError("a tool result cannot be denied")
+        # Inspected, but it cannot be masked: withheld, saying what it holds.
+        return _dump(
+            {
+                "systemMessage": message,
+                **_specific(
+                    "PostToolUse",
+                    updatedToolOutput=_withheld(name, payload),
+                    additionalContext=f"{message} {_NOT_EMPTY}",
+                ),
+            }
+        )
     raise ValueError("unsupported action")
 
 
@@ -302,6 +317,7 @@ def post_tool_use_failure(
     found: str,
     tool: str,
     _name: str = "",
+    _literal: bool = False,
 ) -> bytes:
     if action == ALLOW:
         return b""

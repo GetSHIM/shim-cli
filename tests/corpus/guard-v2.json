@@ -324,6 +324,113 @@
       "expected_output": "tax id <TR_VKN_1> on file"
     },
     {
+      "id": "tr-vkn-env-snake-key",
+      "text": "TAX_ID=1234567890",
+      "categories": [
+        "TR_VKN"
+      ],
+      "expected_output": "TAX_ID=<TR_VKN_1>"
+    },
+    {
+      "id": "tr-vkn-json-camel-key",
+      "text": "{\"taxId\": \"1234567890\"}",
+      "categories": [
+        "TR_VKN"
+      ],
+      "expected_output": "{\"taxId\": \"<TR_VKN_1>\"}"
+    },
+    {
+      "id": "tr-vkn-snake-number-key",
+      "text": "tax_number: 1234567890",
+      "categories": [
+        "TR_VKN"
+      ],
+      "expected_output": "tax_number: <TR_VKN_1>"
+    },
+    {
+      "id": "tr-vkn-joined-upper-key",
+      "text": "TAXID=1234567890",
+      "categories": [
+        "TR_VKN"
+      ],
+      "expected_output": "TAXID=<TR_VKN_1>"
+    },
+    {
+      "id": "tr-vkn-turkish-camel-key",
+      "text": "{\"vergiKimlikNo\": \"1234567890\"}",
+      "categories": [
+        "TR_VKN"
+      ],
+      "expected_output": "{\"vergiKimlikNo\": \"<TR_VKN_1>\"}"
+    },
+    {
+      "id": "tr-vkn-turkish-snake-key",
+      "text": "VERGI_NO=1234567890",
+      "categories": [
+        "TR_VKN"
+      ],
+      "expected_output": "VERGI_NO=<TR_VKN_1>"
+    },
+    {
+      "id": "tr-vkn-camel-long-key",
+      "text": "{\"taxIdentificationNumber\": \"1234567890\"}",
+      "categories": [
+        "TR_VKN"
+      ],
+      "expected_output": "{\"taxIdentificationNumber\": \"<TR_VKN_1>\"}"
+    },
+    {
+      "id": "tr-vkn-joined-turkish-key",
+      "text": "VERGINO=1234567890",
+      "categories": [
+        "TR_VKN"
+      ],
+      "expected_output": "VERGINO=<TR_VKN_1>"
+    },
+    {
+      "id": "tr-vkn-taxonomy-key-negative",
+      "text": "{\"taxonomyId\": \"1234567890\"}",
+      "categories": [],
+      "expected_output": "{\"taxonomyId\": \"1234567890\"}"
+    },
+    {
+      "id": "tr-vkn-turkish-letter-camel-key",
+      "text": "alıcıVkn=1234567890",
+      "categories": [
+        "TR_VKN"
+      ],
+      "expected_output": "alıcıVkn=<TR_VKN_1>",
+      "expected_spans": [
+        [
+          9,
+          19,
+          "TR_VKN"
+        ]
+      ]
+    },
+    {
+      "id": "tr-vkn-taxpayer-camel-key",
+      "text": "{\"taxpayerId\": \"1234567890\"}",
+      "categories": [
+        "TR_VKN"
+      ],
+      "expected_output": "{\"taxpayerId\": \"<TR_VKN_1>\"}"
+    },
+    {
+      "id": "tr-vkn-taxpayer-env-key",
+      "text": "TAXPAYER_ID=1234567890",
+      "categories": [
+        "TR_VKN"
+      ],
+      "expected_output": "TAXPAYER_ID=<TR_VKN_1>"
+    },
+    {
+      "id": "tr-vkn-cueless-id-negative",
+      "text": "{\"id\": \"1234567890\"}",
+      "categories": [],
+      "expected_output": "{\"id\": \"1234567890\"}"
+    },
+    {
       "id": "secret-positive",
       "text": "password = SuperSecret123!",
       "categories": [
@@ -413,7 +520,7 @@
       "categories": [
         "SECRET"
       ],
-      "expected_output": "<SECRET_1>"
+      "expected_output": "<SECRET_1>\n\n"
     },
     {
       "id": "db-uri-positive",
@@ -887,10 +994,12 @@
       "expected_output": "SESSION_TOKEN_TTL=604800"
     },
     {
-      "id": "secret-negative-pass-flag-digits",
+      "id": "secret-pass-flag-digits",
       "text": "PASS=123456",
-      "categories": [],
-      "expected_output": "PASS=123456"
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "PASS=<SECRET_1>"
     },
     {
       "id": "secret-negative-bypass",
@@ -917,10 +1026,12 @@
       "expected_output": "maxTokens: 100000"
     },
     {
-      "id": "secret-negative-db-password-digits",
+      "id": "secret-db-password-digits",
       "text": "DB_PASSWORD=12345678",
-      "categories": [],
-      "expected_output": "DB_PASSWORD=12345678"
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "DB_PASSWORD=<SECRET_1>"
     },
     {
       "id": "secret-negative-db-password-boolean",
@@ -1026,6 +1137,104 @@
       "expected_output": "AccountKey=short"
     },
     {
+      "id": "secret-glued-pgpassword",
+      "text": "PGPASSWORD=example-password-0000",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "PGPASSWORD=<SECRET_1>"
+    },
+    {
+      "id": "secret-glued-dbpassword-yaml",
+      "text": "    DBPASSWORD: example-password-0000",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "    DBPASSWORD: <SECRET_1>"
+    },
+    {
+      "id": "secret-glued-secretkey",
+      "text": "SECRETKEY=example-password-0000",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "SECRETKEY=<SECRET_1>"
+    },
+    {
+      "id": "secret-typed-python",
+      "text": "    db_password: str = \"example-password-0000\"",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "    db_password: str = \"<SECRET_1>\""
+    },
+    {
+      "id": "secret-typed-typescript",
+      "text": "const password: string = \"example-password-0000\";",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "const password: string = \"<SECRET_1>\";"
+    },
+    {
+      "id": "secret-typed-kotlin",
+      "text": "val dbPassword: String = \"example-password-0000\"",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "val dbPassword: String = \"<SECRET_1>\""
+    },
+    {
+      "id": "secret-maven-settings-server",
+      "text": "<server><id>nexus</id><username>deploy</username><password>example-password-0000</password></server>",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "<server><id>nexus</id><username>deploy</username><password><SECRET_1></password></server>"
+    },
+    {
+      "id": "secret-k8s-env-list",
+      "text": "env:\n  - name: DB_PASSWORD\n    value: \"example-password-0000\"\n  - name: LOG_LEVEL\n    value: verbose-mode",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "env:\n  - name: DB_PASSWORD\n    value: \"<SECRET_1>\"\n  - name: LOG_LEVEL\n    value: verbose-mode"
+    },
+    {
+      "id": "secret-ssm-parameter",
+      "text": "{\"Parameter\": {\"Name\": \"/prod/db/password\", \"Type\": \"SecureString\", \"Value\": \"example-password-0000\", \"Version\": 3}}",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "{\"Parameter\": {\"Name\": \"/prod/db/password\", \"Type\": \"SecureString\", \"Value\": \"<SECRET_1>\", \"Version\": 3}}"
+    },
+    {
+      "id": "secret-terraform-default",
+      "text": "variable \"db_password\" {\n  type      = string\n  sensitive = true\n  default   = \"example-password-0000\"\n}",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "variable \"db_password\" {\n  type      = string\n  sensitive = true\n  default   = \"<SECRET_1>\"\n}"
+    },
+    {
+      "id": "secret-negative-tokenizer-upper",
+      "text": "TOKENIZER=bert-base-uncased",
+      "categories": [],
+      "expected_output": "TOKENIZER=bert-base-uncased"
+    },
+    {
+      "id": "secret-negative-glued-max-tokens",
+      "text": "MAXTOKENS=4096",
+      "categories": [],
+      "expected_output": "MAXTOKENS=4096"
+    },
+    {
+      "id": "secret-negative-k8s-secret-ref",
+      "text": "env:\n  - name: DB_PASSWORD\n    valueFrom:\n      secretKeyRef:\n        name: db-credentials\n        key: password\n  - name: LOG_LEVEL\n    value: verbose-mode",
+      "categories": [],
+      "expected_output": "env:\n  - name: DB_PASSWORD\n    valueFrom:\n      secretKeyRef:\n        name: db-credentials\n        key: password\n  - name: LOG_LEVEL\n    value: verbose-mode"
+    },
+    {
       "id": "db-uri-postgres-userinfo",
       "text": "postgresql://kasa_app:synthetic-password@db-prod.kasa.internal:5432/kasa",
       "categories": [
@@ -1120,6 +1329,284 @@
       "expected_output": "https://<SECRET_1>@example.com/path"
     },
     {
+      "id": "db-uri-driver-asyncpg-env",
+      "text": "DATABASE_URL=postgresql+asyncpg://app:s3cr3tPass@db.internal:5432/app",
+      "categories": [
+        "DB_URI"
+      ],
+      "expected_output": "DATABASE_URL=postgresql+asyncpg://<DB_URI_1>@db.internal:5432/app"
+    },
+    {
+      "id": "db-uri-driver-psycopg2",
+      "text": "postgresql+psycopg2://app:s3cr3tPass@db.internal/app",
+      "categories": [
+        "DB_URI"
+      ],
+      "expected_output": "postgresql+psycopg2://<DB_URI_1>@db.internal/app"
+    },
+    {
+      "id": "db-uri-driver-pymysql",
+      "text": "mysql+pymysql://app:s3cr3tPass@db.internal/app",
+      "categories": [
+        "DB_URI"
+      ],
+      "expected_output": "mysql+pymysql://<DB_URI_1>@db.internal/app"
+    },
+    {
+      "id": "db-uri-driver-query-password",
+      "text": "postgresql+psycopg2://db.internal/app?sslmode=require&password=s3cr3tPass",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "postgresql+psycopg2://db.internal/app?sslmode=require&password=<SECRET_1>"
+    },
+    {
+      "id": "db-uri-driver-reference-quiet",
+      "text": "postgresql+asyncpg://${DB_USER}:${DB_PASS}@db.internal/app",
+      "categories": [],
+      "expected_output": "postgresql+asyncpg://${DB_USER}:${DB_PASS}@db.internal/app"
+    },
+    {
+      "id": "db-uri-mariadb",
+      "text": "mariadb://app:s3cr3tPass@db.internal/app",
+      "categories": [
+        "DB_URI"
+      ],
+      "expected_output": "mariadb://<DB_URI_1>@db.internal/app"
+    },
+    {
+      "id": "uri-userinfo-amqp",
+      "text": "amqp://app:s3cr3tPass@rabbit.internal:5672//",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "amqp://<SECRET_1>@rabbit.internal:5672//"
+    },
+    {
+      "id": "uri-userinfo-amqps",
+      "text": "amqps://app:s3cr3tPass@rabbit.internal:5671//",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "amqps://<SECRET_1>@rabbit.internal:5671//"
+    },
+    {
+      "id": "db-uri-clickhouse",
+      "text": "clickhouse://app:s3cr3tPass@ch.internal:9000/app",
+      "categories": [
+        "DB_URI"
+      ],
+      "expected_output": "clickhouse://<DB_URI_1>@ch.internal:9000/app"
+    },
+    {
+      "id": "db-uri-sqlserver",
+      "text": "sqlserver://app:s3cr3tPass@db.internal:1433/app",
+      "categories": [
+        "DB_URI"
+      ],
+      "expected_output": "sqlserver://<DB_URI_1>@db.internal:1433/app"
+    },
+    {
+      "id": "uri-userinfo-smtp",
+      "text": "smtp://app:s3cr3tPass@mail.internal:587",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "smtp://<SECRET_1>@mail.internal:587"
+    },
+    {
+      "id": "uri-userinfo-ssh",
+      "text": "ssh://app:s3cr3tPass@build.internal/srv",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "ssh://<SECRET_1>@build.internal/srv"
+    },
+    {
+      "id": "uri-userinfo-ldap",
+      "text": "ldap://app:s3cr3tPass@ldap.internal/dc=internal",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "ldap://<SECRET_1>@ldap.internal/dc=internal"
+    },
+    {
+      "id": "uri-userinfo-smtp-public-host-not-email",
+      "text": "smtp://mailer:s3cr3tPass@mail.example.com:587",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "smtp://<SECRET_1>@mail.example.com:587"
+    },
+    {
+      "id": "uri-userinfo-reference-password-quiet",
+      "text": "amqp://guest:${AMQP_PASS}@rabbit.internal:5672//",
+      "categories": [],
+      "expected_output": "amqp://guest:${AMQP_PASS}@rabbit.internal:5672//"
+    },
+    {
+      "id": "uri-userinfo-masked-password-quiet",
+      "text": "smtp://mailer:***@mail.internal:587",
+      "categories": [],
+      "expected_output": "smtp://mailer:***@mail.internal:587"
+    },
+    {
+      "id": "uri-userinfo-windows-reference-quiet",
+      "text": "ldap://admin:%LDAP_PASS%@ldap.internal",
+      "categories": [],
+      "expected_output": "ldap://admin:%LDAP_PASS%@ldap.internal",
+      "expected_spans": []
+    },
+    {
+      "id": "uri-userinfo-user-only-quiet",
+      "text": "ssh://git@git.internal/repo.git",
+      "categories": [],
+      "expected_output": "ssh://git@git.internal/repo.git"
+    },
+    {
+      "id": "uri-userinfo-then-email",
+      "text": "smtp://mail.internal:587 from alice@example.com",
+      "categories": [
+        "EMAIL"
+      ],
+      "expected_output": "smtp://mail.internal:587 from <EMAIL_1>"
+    },
+    {
+      "id": "uri-userinfo-diff-removed-amqp",
+      "text": "-amqp://guest:s3cr3tPass@rabbit.internal:5672//",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "-amqp://<SECRET_1>@rabbit.internal:5672//"
+    },
+    {
+      "id": "uri-userinfo-diff-added-amqp",
+      "text": "+amqp://guest:s3cr3tPass@rabbit.internal:5672//",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "+amqp://<SECRET_1>@rabbit.internal:5672//"
+    },
+    {
+      "id": "uri-userinfo-diff-added-smtp-public-host",
+      "text": "+smtp://mailer:s3cr3tPass@mail.example.com:587",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "+smtp://<SECRET_1>@mail.example.com:587"
+    },
+    {
+      "id": "uri-userinfo-encoded-slash",
+      "text": "amqp://app:s3cr%2F3tPass@rabbit.internal:5672//",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "amqp://<SECRET_1>@rabbit.internal:5672//",
+      "expected_spans": [
+        [
+          7,
+          24,
+          "SECRET"
+        ]
+      ]
+    },
+    {
+      "id": "uri-userinfo-encoded-question-mark",
+      "text": "amqp://app:s3cr%3F3tPass@rabbit.internal//",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "amqp://<SECRET_1>@rabbit.internal//",
+      "expected_spans": [
+        [
+          7,
+          24,
+          "SECRET"
+        ]
+      ]
+    },
+    {
+      "id": "uri-userinfo-encoded-hash",
+      "text": "smtp://app:s3cr%233tPass@mail.internal:587",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "smtp://<SECRET_1>@mail.internal:587",
+      "expected_spans": [
+        [
+          7,
+          24,
+          "SECRET"
+        ]
+      ]
+    },
+    {
+      "id": "uri-userinfo-encoded-space",
+      "text": "smtp://app:s3cr%203tPass@mail.internal:587",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "smtp://<SECRET_1>@mail.internal:587",
+      "expected_spans": [
+        [
+          7,
+          24,
+          "SECRET"
+        ]
+      ]
+    },
+    {
+      "id": "url-userinfo-encoded-slash-not-email",
+      "text": "https://app:s3cr%2F3tPass@example.com/path",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "https://<SECRET_1>@example.com/path",
+      "expected_spans": [
+        [
+          8,
+          25,
+          "SECRET"
+        ]
+      ]
+    },
+    {
+      "id": "db-uri-mariadb-encoded-slash",
+      "text": "mariadb://app:s3cr%2F3tPass@db.internal/app",
+      "categories": [
+        "DB_URI"
+      ],
+      "expected_output": "mariadb://<DB_URI_1>@db.internal/app",
+      "expected_spans": [
+        [
+          10,
+          27,
+          "DB_URI"
+        ]
+      ]
+    },
+    {
+      "id": "db-uri-driver-literal-user-reference",
+      "text": "postgresql+asyncpg://app:${DB_PASS}@db.internal/app",
+      "categories": [
+        "DB_URI"
+      ],
+      "expected_output": "postgresql+asyncpg://<DB_URI_1>@db.internal/app"
+    },
+    {
+      "id": "uri-userinfo-encoded-reference-quiet",
+      "text": "amqp://app:%24%7BAMQP_PASS%7D@rabbit.internal//",
+      "categories": [],
+      "expected_output": "amqp://app:%24%7BAMQP_PASS%7D@rabbit.internal//",
+      "expected_spans": []
+    },
+    {
+      "id": "uri-userinfo-image-digest-quiet",
+      "text": "uses: docker://alpine:3.8@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "categories": [],
+      "expected_output": "uses: docker://alpine:3.8@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    },
+    {
       "id": "url-then-email",
       "text": "see https://example.com/docs alice@example.com",
       "categories": [
@@ -1140,6 +1627,36 @@
         "EMAIL"
       ],
       "expected_output": "mailto:<EMAIL_1>"
+    },
+    {
+      "id": "email-in-file-path",
+      "text": "/work/x@example.com/notes.txt",
+      "categories": [
+        "EMAIL"
+      ],
+      "expected_output": "/work/<EMAIL_1>/notes.txt"
+    },
+    {
+      "id": "email-in-url-path",
+      "text": "GET https://api.example.com/v1/users/jane.doe@example.com",
+      "categories": [
+        "EMAIL"
+      ],
+      "expected_output": "GET https://api.example.com/v1/users/<EMAIL_1>"
+    },
+    {
+      "id": "email-after-url-fragment",
+      "text": "https://example.com/page#jane.doe@example.com",
+      "categories": [
+        "EMAIL"
+      ],
+      "expected_output": "https://example.com/page#<EMAIL_1>"
+    },
+    {
+      "id": "email-git-remote-negative",
+      "text": "git clone git@github.com:org/repo.git",
+      "categories": [],
+      "expected_output": "git clone git@github.com:org/repo.git"
     },
     {
       "id": "db-uri-placeholder-userinfo-quiet",
@@ -1308,6 +1825,136 @@
       "expected_output": "\"customer_phone\": \"<PHONE_1>\""
     },
     {
+      "id": "phone-camel-number-key",
+      "text": "{\"phoneNumber\": \"4155552671\"}",
+      "categories": [
+        "PHONE"
+      ],
+      "expected_output": "{\"phoneNumber\": \"<PHONE_1>\"}"
+    },
+    {
+      "id": "phone-camel-mobile-number-key",
+      "text": "mobileNumber: 4155552671",
+      "categories": [
+        "PHONE"
+      ],
+      "expected_output": "mobileNumber: <PHONE_1>"
+    },
+    {
+      "id": "phone-camel-suffix-key",
+      "text": "\"contactPhone\": \"4155552671\"",
+      "categories": [
+        "PHONE"
+      ],
+      "expected_output": "\"contactPhone\": \"<PHONE_1>\""
+    },
+    {
+      "id": "phone-cell-cue",
+      "text": "Cell: 4155552671",
+      "categories": [
+        "PHONE"
+      ],
+      "expected_output": "Cell: <PHONE_1>"
+    },
+    {
+      "id": "phone-vcard-typed-tel",
+      "text": "TEL;TYPE=WORK,VOICE:4155552671",
+      "categories": [
+        "PHONE"
+      ],
+      "expected_output": "TEL;TYPE=WORK,VOICE:<PHONE_1>"
+    },
+    {
+      "id": "phone-vcard-cell-tel",
+      "text": "TEL;TYPE=CELL:4155552671",
+      "categories": [
+        "PHONE"
+      ],
+      "expected_output": "TEL;TYPE=CELL:<PHONE_1>"
+    },
+    {
+      "id": "phone-vcard-repeated-params",
+      "text": "item1.TEL;type=CELL;type=VOICE;type=pref:4155552671",
+      "categories": [
+        "PHONE"
+      ],
+      "expected_output": "item1.TEL;type=CELL;type=VOICE;type=pref:<PHONE_1>"
+    },
+    {
+      "id": "phone-turkish-letter-camel-key",
+      "text": "kullanıcıPhone: 4155552671",
+      "categories": [
+        "PHONE"
+      ],
+      "expected_output": "kullanıcıPhone: <PHONE_1>",
+      "expected_spans": [
+        [
+          16,
+          26,
+          "PHONE"
+        ]
+      ]
+    },
+    {
+      "id": "phone-telephone-cue",
+      "text": "Telephone: 4155552671",
+      "categories": [
+        "PHONE"
+      ],
+      "expected_output": "Telephone: <PHONE_1>"
+    },
+    {
+      "id": "phone-telephone-camel-key",
+      "text": "telephoneNumber=4155552671",
+      "categories": [
+        "PHONE"
+      ],
+      "expected_output": "telephoneNumber=<PHONE_1>"
+    },
+    {
+      "id": "phone-turkish-possessive-camel-key",
+      "text": "{\"cepTelefonu\": \"4155552671\"}",
+      "categories": [
+        "PHONE"
+      ],
+      "expected_output": "{\"cepTelefonu\": \"<PHONE_1>\"}"
+    },
+    {
+      "id": "phone-turkish-possessive-snake-key",
+      "text": "cep_telefonu: 4155552671",
+      "categories": [
+        "PHONE"
+      ],
+      "expected_output": "cep_telefonu: <PHONE_1>"
+    },
+    {
+      "id": "phone-turkish-first-person-cue",
+      "text": "Telefonum: 4155552671",
+      "categories": [
+        "PHONE"
+      ],
+      "expected_output": "Telefonum: <PHONE_1>"
+    },
+    {
+      "id": "phone-telemetry-key-negative",
+      "text": "telemetryId=4155552671",
+      "categories": [],
+      "expected_output": "telemetryId=4155552671"
+    },
+    {
+      "id": "phone-camel-order-number-negative",
+      "text": "{\"orderNo\": \"4155552671\"}",
+      "categories": [],
+      "expected_output": "{\"orderNo\": \"4155552671\"}"
+    },
+    {
+      "id": "phone-turkish-camel-order-number-negative",
+      "text": "{\"siparişNo\": \"4155552671\"}",
+      "categories": [],
+      "expected_output": "{\"siparişNo\": \"4155552671\"}",
+      "expected_spans": []
+    },
+    {
       "id": "phone-order-number-negative",
       "text": "order no 4155552671",
       "categories": [],
@@ -1410,7 +2057,7 @@
       "categories": [
         "IBAN"
       ],
-      "expected_output": "IBAN <IBAN_1>"
+      "expected_output": "IBAN <IBAN_1>\n"
     },
     {
       "id": "iban-next-line-not-pulled-in",
@@ -1815,6 +2462,298 @@
         "TR_LICENSE_PLATE"
       ],
       "expected_output": "plaka: <TR_LICENSE_PLATE_1>"
+    },
+    {
+      "id": "secret-connection-string-keeps-its-options",
+      "text": "Server=db;User Id=sa;Password=s3cr3tPass;Encrypt=true",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "Server=db;User Id=sa;Password=<SECRET_1>;Encrypt=true"
+    },
+    {
+      "id": "secret-jdbc-url-keeps-its-options",
+      "text": "jdbc:sqlserver://h;user=sa;password=Hunter2abc9;databaseName=Orders;encrypt=true",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "jdbc:sqlserver://h;user=sa;password=<SECRET_1>;databaseName=Orders;encrypt=true"
+    },
+    {
+      "id": "secret-url-keeps-later-parameters",
+      "text": "https://h/x?password=s3cr3tPass&page=2",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "https://h/x?password=<SECRET_1>&page=2"
+    },
+    {
+      "id": "secret-pipe-separated-fields",
+      "text": "user=admin|password=s3cr3tPass|role=ops",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "user=admin|password=<SECRET_1>|role=ops"
+    },
+    {
+      "id": "secret-in-parentheses",
+      "text": "(password=s3cr3tPass)",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "(password=<SECRET_1>)"
+    },
+    {
+      "id": "secret-call-argument",
+      "text": "f(password=Hunter2abc9)",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "f(password=<SECRET_1>)"
+    },
+    {
+      "id": "secret-template-literal-url",
+      "text": "fetch(`https://x?token=abc123def456&limit=50`)",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "fetch(`https://x?token=<SECRET_1>&limit=50`)"
+    },
+    {
+      "id": "secret-template-literal-end",
+      "text": "fetch(`https://x?token=abc123def456`)",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "fetch(`https://x?token=<SECRET_1>`)"
+    },
+    {
+      "id": "secret-xml-app-setting-value",
+      "text": "<add key=\"DbPassword\" value=\"s3cr3tPass1\"/>",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "<add key=\"DbPassword\" value=\"<SECRET_1>\"/>"
+    },
+    {
+      "id": "secret-html-input-value",
+      "text": "<input name=\"password\" value=\"s3cr3tPass1\">",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "<input name=\"password\" value=\"<SECRET_1>\">"
+    },
+    {
+      "id": "secret-html-input-value-after-type",
+      "text": "<input name=\"password\" type=\"password\" value=\"s3cr3tPass1\">",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "<input name=\"password\" type=\"password\" value=\"<SECRET_1>\">"
+    },
+    {
+      "id": "secret-xml-setting-safe-negative",
+      "text": "<add key=\"Theme\" value=\"dark-mode-1\"/>",
+      "categories": [],
+      "expected_output": "<add key=\"Theme\" value=\"dark-mode-1\"/>"
+    },
+    {
+      "id": "secret-html-empty-password-negative",
+      "text": "<input name=\"password\" value=\"\">",
+      "categories": [],
+      "expected_output": "<input name=\"password\" value=\"\">"
+    },
+    {
+      "id": "secret-escaped-json-secret-string",
+      "text": "{\"SecretString\":\"{\\\"password\\\":\\\"s3cr3tPass1\\\"}\"}",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "{\"SecretString\":\"<SECRET_1>\"}"
+    },
+    {
+      "id": "secret-escaped-json-log-body",
+      "text": "{\"level\":\"info\",\"msg\":\"login\",\"body\":\"{\\\"user\\\":\\\"admin\\\",\\\"password\\\":\\\"s3cr3tPass1\\\"}\"}",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "{\"level\":\"info\",\"msg\":\"login\",\"body\":\"{\\\"user\\\":\\\"admin\\\",\\\"password\\\":\\\"<SECRET_1>\\\"}\"}"
+    },
+    {
+      "id": "secret-escaped-single-quotes",
+      "text": "{\\'password\\': \\'s3cr3tPass1\\'}",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "{\\'password\\': \\'<SECRET_1>\\'}"
+    },
+    {
+      "id": "secret-escaped-quote-inside-a-quoted-value",
+      "text": "\"password\": \"abcdefg\\\"xyz\"",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "\"password\": \"<SECRET_1>\""
+    },
+    {
+      "id": "secret-escaped-json-quote-inside-value",
+      "text": "{\"event\": \"login\", \"body\": \"{\\\"user\\\": \\\"admin\\\", \\\"password\\\": \\\"Xk9mP2qL7\\\\\\\"tail9Zq\\\"}\"}",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "{\"event\": \"login\", \"body\": \"{\\\"user\\\": \\\"admin\\\", \\\"password\\\": \\\"<SECRET_1>\\\"}\"}"
+    },
+    {
+      "id": "secret-escaped-code-negative",
+      "text": "json = \"{\\\"password\\\": \\\"\" + password + \"\\\"}\"",
+      "categories": [],
+      "expected_output": "json = \"{\\\"password\\\": \\\"\" + password + \"\\\"}\""
+    },
+    {
+      "id": "secret-connection-string-empty-password-negative",
+      "text": "Server=localhost;Uid=root;Pwd=;Database=app;Port=3306",
+      "categories": [],
+      "expected_output": "Server=localhost;Uid=root;Pwd=;Database=app;Port=3306"
+    },
+    {
+      "id": "secret-env-password-masks-through-delimiters",
+      "text": "DB_PASSWORD=Xk9;a=mP2qL7zz",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "DB_PASSWORD=<SECRET_1>"
+    },
+    {
+      "id": "secret-html-input-value-before-name",
+      "text": "<input value=\"S3cretPass1\" name=\"password\">",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "<input value=\"<SECRET_1>\" name=\"password\">"
+    },
+    {
+      "id": "secret-xml-legacy-key-numeric-value",
+      "text": "<entry key=\"jdbc.password\" value=\"12345678\"/>",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "<entry key=\"jdbc.password\" value=\"<SECRET_1>\"/>"
+    },
+    {
+      "id": "secret-pem-dsa",
+      "text": "key:\n-----BEGIN DSA PRIVATE KEY-----\nMIIBuwIBAAKBgQD0123456789abcdef0123456789abcdef\n-----END DSA PRIVATE KEY-----",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "key:\n<SECRET_1>\n\n"
+    },
+    {
+      "id": "secret-pgp-private-key-block",
+      "text": "-----BEGIN PGP PRIVATE KEY BLOCK-----\n\nMIIBuwIBAAKBgQD0123456789abcdef0123456789abcdef\n-----END PGP PRIVATE KEY BLOCK-----\nsigned",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "<SECRET_1>\n\n\n\nsigned"
+    },
+    {
+      "id": "secret-stripe-restricted-key",
+      "text": "STRIPE=rk_live_0123456789abcdef0123",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "STRIPE=<SECRET_1>"
+    },
+    {
+      "id": "secret-stripe-key-after-escaped-newline",
+      "text": "{\"env\": \"A=1\\nsk_live_51AbCdEfGhIjKlMnOpQr\"}",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "{\"env\": \"A=1\\n<SECRET_1>\"}"
+    },
+    {
+      "id": "secret-slack-app-token",
+      "text": "SLACK_APP \u0078app-1-A0123456789-0123456789-0123456789abcdef",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "SLACK_APP <SECRET_1>"
+    },
+    {
+      "id": "secret-gitlab-runner-token",
+      "text": "runner \u0067lrt-0123456789abcdefABCD registered",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "runner <SECRET_1> registered"
+    },
+    {
+      "id": "secret-proxy-authorization-basic",
+      "text": "Proxy-Authorization: Basic c3ludGhldGljOjAxMjM0NTY3ODlhYmNkZWY=",
+      "categories": [
+        "SECRET"
+      ],
+      "expected_output": "Proxy-Authorization: Basic <SECRET_1>"
+    },
+    {
+      "id": "us-ssn-bare-after-cue",
+      "text": "SSN 536221234",
+      "categories": [
+        "US_SSN"
+      ],
+      "expected_output": "SSN <US_SSN_1>"
+    },
+    {
+      "id": "us-ssn-bare-json-key",
+      "text": "{\"ssn\": \"536904399\", \"ssn2\": \"536-90-4399\"}",
+      "categories": [
+        "US_SSN",
+        "US_SSN"
+      ],
+      "expected_output": "{\"ssn\": \"<US_SSN_1>\", \"ssn2\": \"<US_SSN_1>\"}"
+    },
+    {
+      "id": "us-ssn-bare-without-cue-negative",
+      "text": "order 536221234 shipped",
+      "categories": [],
+      "expected_output": "order 536221234 shipped"
+    },
+    {
+      "id": "credit-card-nineteen-digits",
+      "text": "{\"pan\": \"4111111111111111110\"}",
+      "categories": [
+        "CREDIT_CARD"
+      ],
+      "expected_output": "{\"pan\": \"<CREDIT_CARD_1>\"}"
+    },
+    {
+      "id": "credit-card-eighteen-digits",
+      "text": "{\"pan\": \"411111111111111118\"}",
+      "categories": [
+        "CREDIT_CARD"
+      ],
+      "expected_output": "{\"pan\": \"<CREDIT_CARD_1>\"}"
+    },
+    {
+      "id": "credit-card-nineteen-digit-id-negative",
+      "text": "id 4111111111111111111",
+      "categories": [],
+      "expected_output": "id 4111111111111111111"
+    },
+    {
+      "id": "email-percent-escape-breaks-address",
+      "text": "alice%C3%28@example.com",
+      "categories": [
+        "EMAIL"
+      ],
+      "expected_output": "<EMAIL_1>",
+      "expected_spans": [
+        [
+          0,
+          23,
+          "EMAIL"
+        ]
+      ]
     }
   ],
   "generated_cases": [

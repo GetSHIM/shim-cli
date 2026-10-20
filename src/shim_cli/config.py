@@ -28,16 +28,34 @@ _READS = 3
 class SettingsRefused(ValueError):
     """The file was refused (owner, mode, link), not misparsed; `reason` says which."""
 
-    def __init__(self, reason: str) -> None:
+    def __init__(self, reason: str, path: Path | None = None) -> None:
         super().__init__(f"shim settings cannot be read safely: {reason}")
         self.reason = reason
+        self.path = path
+
+
+class SettingsInvalid(ValueError):
+    """The file at `path` is not valid settings; the cause says where."""
+
+    def __init__(self, path: Path) -> None:
+        super().__init__("shim settings are invalid")
+        self.path = path
+
+
+class SettingsPathInvalid(ValueError):
+    """SHIM_CONFIG, or the folder it falls back to, is not an absolute path."""
+
+    def __init__(self) -> None:
+        super().__init__("shim settings path is invalid")
 
 
 def _default_path(directory: str, home: Path | None) -> Path:
     if home is not None:
         return Path(home) / ".config" / directory / "config.toml"
-    if configured := os.environ.get("XDG_CONFIG_HOME"):
-        return Path(configured).expanduser() / directory / "config.toml"
+    # The XDG Base Directory spec: a relative XDG_CONFIG_HOME is ignored.
+    configured = Path(os.environ.get("XDG_CONFIG_HOME", "")).expanduser()
+    if configured.is_absolute():
+        return configured / directory / "config.toml"
     return Path.home() / ".config" / directory / "config.toml"
 
 
@@ -48,7 +66,7 @@ def config_path(home: Path | None = None) -> Path:
         else:
             target = _default_path("shim", home)
     except RuntimeError as error:
-        raise ValueError("shim settings path is invalid") from error
+        raise SettingsPathInvalid from error
     return _validated_path(target)
 
 
@@ -69,7 +87,7 @@ def _validated_path(path: Path) -> Path:
         or ".." in target.parts
         or not str(target).isprintable()
     ):
-        raise ValueError("shim settings path is invalid")
+        raise SettingsPathInvalid
     return target
 
 
@@ -236,6 +254,10 @@ def load_policy(path: Path | None = None) -> policy.Policy:
     # The hook reads the 0.2.0 file until a CLI command moves it. It never writes.
     if state.kind is StateKind.ABSENT and (legacy := legacy_config_path()) is not None:
         state = _inspect(legacy)
+    if state.kind is StateKind.ABSENT and os.environ.get("SHIM_CONFIG"):
+        # A named file that is not there is a typo or an unmounted volume, not
+        # a fresh install: running on the defaults would drop every setting.
+        raise SettingsRefused("the file SHIM_CONFIG names does not exist", state.path)
     return policy_from_state(state)
 
 
@@ -259,11 +281,11 @@ def policy_from_state(state: FileState) -> policy.Policy:
         # a symlink, a hard link, another user's ownership, a size, a change
         # mid-read. Carry it: a caller that has to guess will guess wrong.
         detail = getattr(state, "reason", "") or "the file could not be read safely"
-        raise SettingsRefused(detail)
+        raise SettingsRefused(detail, state.path)
     try:
         document = parse_settings(state.content.decode("utf-8"))
-    except (UnicodeDecodeError, RecursionError) as error:
-        raise ValueError("shim settings are invalid") from error
+    except (UnicodeDecodeError, RecursionError, ValueError) as error:
+        raise SettingsInvalid(state.path) from error
     try:
         return policy.Policy(
             entity_catalog.normalize_entities(document["enabled_entities"]),
@@ -276,7 +298,7 @@ def policy_from_state(state: FileState) -> policy.Policy:
             document["markers"],
         )
     except ValueError as error:
-        raise ValueError("shim settings are invalid") from error
+        raise SettingsInvalid(state.path) from error
 
 
 def describe_settings_error(error: BaseException) -> str:
@@ -287,12 +309,18 @@ def describe_settings_error(error: BaseException) -> str:
     with nothing to act on. The parser's own message carries the line number
     and is already on `__cause__`; it was just never read.
     """
-    try:
-        where = str(config_path())
-    except ValueError:
-        where = "the settings file"
+    if isinstance(error, SettingsPathInvalid):
+        return (
+            "The settings path is invalid: SHIM_CONFIG, when set, must be an absolute "
+            "path without .. in it."
+        )
+    # The file the error names, not the one the default would have been: the
+    # hook falls back to the 0.2.0 file, and SHIM_CONFIG moves the rest.
+    where = str(getattr(error, "path", None) or "the settings file")
     cause = error.__cause__
-    if isinstance(cause, tomllib.TOMLDecodeError) and str(cause):
+    while cause is not None and not isinstance(cause, tomllib.TOMLDecodeError):
+        cause = cause.__cause__
+    if cause is not None and str(cause):
         return (
             f"Settings at {where} are invalid: {cause}. Edit that line; as a last "
             "resort, shim config --reset starts over and discards every setting."

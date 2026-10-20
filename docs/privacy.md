@@ -32,7 +32,9 @@ Five things follow, and all five are limits rather than features:
   default `enforce`, a call carrying a finding is refused (`shim cannot tell
   where this tool sends its input, so it refuses the call rather than rewrite
   it.`); `outbound = "warn"`, or a key for that tool such as
-  `"mcp__crm__lookup" = "warn"` under `[mode]`, reports it instead. The input
+  `"mcp__crm__lookup" = "warn"` under `[mode]`, reports it instead, and the
+  refusal names that key: `The user can allow this tool with
+  "mcp__crm__lookup" = "warn" under [mode] in shim's settings.` The input
   of a local tool (`Read`, `Grep`, `Glob`, a sub-agent's task, a question to
   you) is never rewritten or refused at all: it names a file or a pattern on
   this machine, so rewriting it breaks the call and keeps nothing from
@@ -40,7 +42,9 @@ Five things follow, and all five are limits rather than features:
   modified.`), under the `local-tool` direction.
 - `Bash` commands and `Write`/`Edit` content are **never rewritten**. Editing a
   command changes what runs, and editing a write payload puts a placeholder
-  into a real file. Both are detected and can be warned about or denied.
+  into a real file. Both are detected and can be warned about or denied. A
+  write that would put back a placeholder shim gave the model is refused in
+  every mode ([below](#placeholders-are-never-written-back)).
 - The output of a failed tool call is **not masked**. Claude Code delivers it to
   `PostToolUseFailure` and ignores a replacement there, so shim reports it,
   tells the model not to repeat it, and counts it as `unmasked`.
@@ -54,7 +58,19 @@ is Turkish-shaped (`5321234567`, `05321234567`, `905321234567`, `02125551234`)
 or when a cue such as `tel`, `phone`, `gsm`, `cep` or `no` comes directly
 before it, with at most four spaces or punctuation marks between
 (`tel: 4155552671`, `phone number: 4155552671`); cues are Turkish and English
-only. A decimal is never a
+only. A cue counts inside a key written in code style too: `phone_number`,
+`phoneNumber`, `contactPhone`, `kullanıcıPhone`, `cepTelefonu`, and a vCard
+`TEL;TYPE=CELL:` line. That reads keys built on the generic `no` as cues as
+well, so `userNo`, `lineNo` and `pageNo` before a number mask it as `user_no`
+already did; `orderNo`, `refNo`, `siparişNo` and `faturaNo` are not cues.
+Still not read as cues: an all-capitals key with no separator
+(`CONTACTPHONE`), a key that starts with the cue (`phoneHome`, `phone_home`),
+a digit straight after the cue (`Tel1:`), and a vCard parameter quoted with a
+space in it (`TEL;TYPE="work voice":`). A Turkish tax ID (`VKN`) needs its
+checksum and a tax word before it, also in code style: `TAX_ID=`, `taxId`,
+`tax_number`, `taxpayerId`, `vergiKimlikNo`, `alıcıVkn`; a tax-prefixed key
+such as `taxRate` beside a 10-digit number with a valid checksum masks it too.
+A decimal is never a
 phone number. A bare timestamp or id is left as it was and counted on the
 summary's `warned` line. Bare numbers in other national
 formats without a cue are not detected, for example a CSV column of US numbers
@@ -107,59 +123,188 @@ withheld, tool calls are denied and tool results are withheld, each naming
 read again, up to three times, rather than refused.
 
 Where a checksum exists it is verified, so a mistyped IBAN or Turkish national
-ID is not reported. An email address counts only on a public domain, one on the
+ID is not reported. A card of 18 or 19 digits is read for the issuers that print
+them (Visa, Maestro, Discover and UnionPay, JCB, Mir). A US SSN written as nine
+bare digits is masked only right after an `ssn`, `SSNs` or `social security
+(number)` cue, with up to eight separator characters between
+(`"ssn": "219099999"`), or right after such an SSN in a list
+(`SSNs: 219099999, 111223333`); nine digits after other words are not, and in
+a list joined by a word (`SSNs: a and b`) only the first is. An email address
+counts only on a public domain, one on the
 public suffix list, so `ops@acme.internal` or `dev@build.local` is not an email
 to shim; a team with internal mail domains adds a custom pattern. Detection also stays deliberately quiet on values that name
 nobody: the loopback and unspecified addresses (`127.0.0.1`, `0.0.0.0`, `::1`)
-and connection strings that carry no credentials, wherever they point. Private
-and public IP addresses are still detected. A connection string is masked over
+and connection strings that carry no credentials, wherever they point, and a
+four-part version after a name ending in "version" (`<AssemblyVersion>1.0.0.0`,
+`APP_VERSION = "2.3.1.0"`, `__version__ = "4.0.0.1"`), so an address after
+such a name, `server_version: 10.1.2.3`, is not reported either. Private and public IP
+addresses are still detected. A connection string is masked over
 its user and password only, as one placeholder:
 `postgresql://<DB_URI_1>@db-prod.kasa.internal:5432/kasa` keeps the host the
 agent needs, and a password-like parameter in its query string (`?password=…`)
 is a `SECRET` at any length. A connection string's user-info is left alone only
 when it holds no credential at all: references such as
 `${POSTGRES_USER}:${POSTGRES_PASSWORD}` or `{user}:{password}`, or elision
-marks such as `…` and `***`. The user and
-password in any `http`, `https`, `ftp`, `ws` or `wss` URL are a `SECRET` too,
-so a Sentry DSN reads `https://<SECRET_1>@o123456.ingest.sentry.io/1234567`; a
-plain address and a `mailto:` link stay `EMAIL`. This is a precision choice
+marks such as `…` and `***`; a literal user with a reference password, as in
+`postgres://app:${DB_PASS}@host`, is still masked. This is a precision choice
 with a cost attached — a `10.x` address that really is internal topology is
 still masked, and a team that wants internal host names hidden adds a [custom
 pattern](commands.md#shim-config). The exemptions are written narrowly, so that
 they drop noise rather than credentials.
 
+The database schemes are `postgres(ql)`, `mysql`, `mariadb`, `mongodb`,
+`redis(s)`, `mssql`, `sqlserver` and `clickhouse`, with or without a driver
+suffix (`postgresql+asyncpg://`, `mongodb+srv://`), all reported as `DB_URI`.
+The user and password in a URI of any other scheme (`https`, `amqp`, `smtp`,
+`ssh`, `ldap` and so on) are a `SECRET`, so a Sentry DSN reads
+`https://<SECRET_1>@o123456.ingest.sentry.io/1234567`; a plain address and a
+`mailto:` link stay `EMAIL`. This holds for a percent-encoded password and on a
+line a diff adds or removes. Three limits: in a URI of a scheme outside the
+database family, a raw `/`, `?` or `#` in the password, which RFC 3986 requires
+to be percent-encoded, ends the user-info, so that password is not matched,
+while its encoded form is; `scheme://user@host` with no password is a credential
+only for `http`, `ftp`, `ws` and the database schemes, though the email rule may
+still read `user@host` as an address (`ssh://git@host.example.com/repo`); and an
+image pinned by a digest (`docker://image:tag@sha256:...`) is not a credential.
+A `printf` template such as `"%s://%s:%s@%s"` is masked as a `SECRET`, as noise.
+
 A secret is found by its key name or by its vendor prefix. `password`,
 `passwd`, `pwd`, `secret`, `token` or `api_key` followed by a space and a value
 on the same line is a secret too, the gateway's rule, when the value carries a
 digit or a symbol, so `password hunter2abc` and `export API_KEY abcdef123456`
-are masked and `token budget` is not. A key name counts
+are masked and `token budget` is not. A sentence's closing `.`, `;` or `?` is no
+symbol: `rotate the token weekly.` is prose. A key name counts
 when a secret word is one of its segments, in any case: `DB_PASSWORD`,
 `AWS_SECRET_ACCESS_KEY`, `LEDGER_API_TOKEN`, `client.secret`, `x-api-key`,
-`clientSecret`; `MAX_TOKENS`, `tokenizer` and `SORT_KEY` are not secrets. The
-prefixes are AWS, GitHub (classic and fine-grained), GitLab, Slack, Google, npm,
-Hugging Face, Stripe, OpenAI and SendGrid, plus JSON web tokens, private key
+`clientSecret`; `MAX_TOKENS`, `tokenizer` and `SORT_KEY` are not secrets. A
+secret word glued onto a prefix in the same case counts too: `PGPASSWORD`,
+`DBPASSWORD`, `SECRETKEY`, `ACCESSTOKEN`, `OPENAIAPIKEY`, `DBPassword`,
+`registrytoken`, `refreshtoken`. A glued `PASS` never does, so `BYPASS`,
+`COMPASS` and `LOWPASS` stay quiet. Digits, `_` or `.` may follow the secret
+word: `PASSWORD2`, `PGPASSWORD_PROD`, `DBPASSWORD.prod`. A value under a key
+needs at least six characters, so `DB_PASSWORD=admin` is not masked.
+
+The value need not follow `=` or `:` directly. A typed declaration masks its
+literal initializer in Python, TypeScript (also `password?:`), Kotlin, Swift
+and Rust (`&str`), a number included (`db_password: int = 12345678`); when the
+text between `key:` and `=` is not plain words spaced from the `=`, it may be
+the password, and the mask runs through it. The element forms
+`<password>...</password>` (attributes and line breaks allowed),
+`<entry key="db.password">...</entry>` and
+`<property name="...password">...</property>` mask their content. A name and
+its value in separate fields are paired: Kubernetes and ECS `env` lists, AWS
+SSM `Name`/`Value` as JSON or as `--name ... --value ...`, and a Terraform
+variable's `default`. Such a plain value runs to the end of its line, quotes
+and brackets included apart from the brackets it closes on that line, and
+under a name field a value is read as code when it is code
+(`value = var.db_password`). Not paired: a value field before its name field,
+a literal wrapped in a call (`SecretStr("...")`, `Field(default="...")`), and a
+name and value more than 256 characters apart. The pair and element forms also
+mask a template expression such as `{{ .Values.db.password }}` that the
+assignment form leaves alone; that is noise, not a leak.
+
+The prefixes are AWS, GitHub (classic and fine-grained), GitLab, Slack, Google,
+npm, Hugging Face, Stripe, OpenAI and SendGrid, plus JSON web tokens, private key
 blocks, Slack and Discord webhook URLs, Azure storage `AccountKey` values and
-HTTP `Authorization: Basic` and `Bearer` headers. A
+HTTP `Authorization: Basic` and `Bearer` headers, `Proxy-Authorization` too. A
+private key block is any PEM or PGP `... PRIVATE KEY` block, DSA and encrypted
+keys included, or the SSH2 `---- BEGIN ... ----` form. The GitLab prefixes
+include runner, deploy, trigger, feed and SCIM tokens (`glrt-`, `gldt-`,
+`glptt-`, `glft-`, `glsoat-`), and Slack's include app tokens (`xapp-`). A
+Stripe secret key (`sk_live_`, `sk_test_`) is read wherever it stands, glued
+to a word too, so an identifier such as `Task_live_SessionHandlerAdapter` is
+masked, as noise; a restricted key (`rk_live_`, `rk_test_`) is read unless a
+letter is glued right before it, because `rk_` ends words such as
+`benchmark_test_`. A token right after an escape written as text (`\n`, `\t`,
+`\r`, `\f`, `\b`, `\v`), as a JSON string holds one, is read too:
+`{"env": "A=1\\nsk_live_..."}` is masked. A
 value is not a secret when it only refers to another variable (`${DB_PASS}`,
-`os.environ[…]`, `process.env.X`), is a placeholder shim already wrote, or is a
-type name (`string`). For a key that is more than the bare word, such as
-`TOKEN_TTL` or `DB_PASSWORD_FILE`, a value made only of digits, an `http(s)`
-URL or a file path is not a secret either, so configuration stays quiet. Code
-that only names a secret stays quiet the same way: under such a key nothing is
+`$DB_PASS`, `os.environ[…]`, `process.env.X`, `process.env["X"]`,
+`import.meta.env.X`, `os.Getenv("X")`, `System.getenv("X")`,
+`Environment.GetEnvironmentVariable("X")`, `std::env::var("X")`), is the
+shell's check that a variable is set (`${API_TOKEN:?API_TOKEN is required}`)
+or a `:-` default that is another variable (`${APP_TOKEN:-${FALLBACK_TOKEN}}`),
+is a placeholder shim already wrote, a template placeholder
+(`<your-api-token>`, `<YOUR_API_TOKEN>`) or a type name (`string`, `String`),
+or is an `http(s)` URL. The literal such a lookup falls back to, or has added
+to it, is a secret when the variable it reads or the key it is assigned to
+names one: `os.getenv("DB_PASSWORD", "...")`, `os.environ.get(...)`,
+`process.env.X || "..."`, `process.env["X"] ?? "..."`,
+`System.getenv().getOrDefault("X", "...")`, `... ?: "..."`,
+`Optional.ofNullable(System.getenv("X")).orElse("...")`,
+`env::var("X").unwrap_or_else(|_| "...".to_string())`,
+`os.Getenv("X") + "..."`, `ENV.fetch("X", "...")`, `$_ENV["X"] ?? "..."`, and
+the text glued after a shell variable, `DB_PASSWORD=${DB_PASSWORD:?}...` or
+`${DB_PASSWORD:-${FALLBACK}}...`, when it carries a digit or a symbol. A
+comma leads to a default only inside a call that takes one, still open
+(`getenv(`, `environ.get(`, `getOrDefault(`, `ENV.fetch(`): the next argument
+or entry after a closed lookup, `process.env.X` or `ENV["X"]` is not one
+(`connect(os.getenv("DB_PASSWORD"), "dbname=app")`), and neither is a default
+of another variable inside a call the key is assigned from
+(`password = hash_password(os.getenv("DEFAULT_ROLE", "..."))`). An empty
+fallback, one of fewer than six characters, a placeholder, a path or a
+JavaScript template that interpolates (`` `${prefix}-default` ``) does not
+count, and neither does a name built on a variable (`${SECRET_PREFIX}-database`,
+`${SECRET_KEY}_backup`, `${API_TOKEN_VERSION}release`), so a glued tail of
+letters alone passes: `DB_PASSWORD=${X:?X}BlueHarborTide` is not masked. A development default
+under a secret's name is masked like any literal there:
+`os.environ.get("SECRET_KEY", "django-insecure-dev-only")`,
+`process.env.JWT_SECRET || "change-me"`. The literal is read whatever it is
+for, so text added to a lookup or or-ed with it is masked as noise
+(`"Bearer " + os.getenv("API_TOKEN") + " ; charset-utf8"`,
+`os.getenv("API_TOKEN") or "token not set!"`), and a variable whose name holds
+a secret word counts as a key does: `getOrDefault("API_TOKEN_REGION",
+"eu-west-1")` masks `eu-west-1`, as `AWS_SECRET_REGION=eu-central-1` does. Not
+read: a call whose arguments each start a line, as Black writes one, an
+operator that opens a line (`os.getenv("X")` then `or "..."` on the next),
+Ruby's `ENV["X"].presence || "..."`, a Java ternary
+(`System.getenv("X") != null ? System.getenv("X") : "..."`), Python's
+`os.environ["X"] if ... else "..."`, Swift's
+`ProcessInfo.processInfo.environment["X"] ?? "..."` and Elixir's
+`System.get_env("X", "...")`. A value made only of digits, or
+a file path, is not a secret when the key's last word is not a password word
+(`password`, `passwd`, `pwd`, `pass`, `secret`, `şifre`, `parola`, optionally
+followed by digits), so `TOKEN_TTL=86400` and `DB_PASSWORD_FILE=/run/secret`
+stay quiet while `DB_PASSWORD=12345678` is masked. Code that only names a
+secret stays quiet the same way: under such a key nothing is
 a secret when the key's last part is `_id`, `_ids`, `_type`, `_name`,
 `_header`, `_count`, `_limit`, `_regex` or `_service` (`token_type`,
 `api_key_header`, `tokenService`), and neither is an unquoted value of letters
 that reads as a call or lookup, closed or continued by a quote, comma or `]`
 (`tokenizer.encode(text)`, `self.auth_token`, `settings["DB_PASSWORD"]`), or,
-after a `:`, as a type name that is `String`, or that repeats a word of its key
-and ends like code (`clientSecret: String`, `authToken: AuthToken;`). A value with a
-digit in it, or longer than 1 KB, is never read as code, and a YAML password
-such as `adminPassword: BlueHarbor` or `REDIS_PASSWORD: RedisPassword` is
-masked. Three things stay undetected: a secret pasted with no key name and no
-known prefix; a value made only of digits under such a key, which is the cost
-of keeping `TOKEN_TTL=86400` quiet; and an unquoted password of letters that
-reads as code, such as `SMTP_PASSWORD=correct.horse.battery`, which is the cost
-of keeping code quiet. A block of base64 whose decoded text holds a secret or a
+after a `:`, as a type name that repeats a word of its key and ends like code
+(`authToken: AuthToken;`). Under a password word, code is exempt only when it
+is written in names (`config.db_password`, `settings["DB_PASSWORD"]`). Under
+every key, the bare word included, code that hands a variable on under its own
+name is not a secret either: with `=`, as an argument, an operand, or a member
+set in a statement that `;` ends or `self` or `this` owns (`password=password,`,
+`f(token=token)`, `self.token = token`, `this.token = token;`,
+`{ Password = password ?? "" }`), or a member set from a camel-case variable
+holding its key's word in a statement that `;` ends
+(`user.password = hashedPassword;`). Apart from a variable handed on, a value
+with a digit in it or longer than 1 KB is never read as code, and neither is
+any value under a bare key word (`password`, `token`, `secret`, `api_key`, a
+member's `.password` too), so a passphrase shaped like a call is masked
+whatever its argument (`DB_PASSWORD=summer2024.winter.go(1)`, `password = pass.word()`). That
+masks ordinary code too, and an MCP call that carries it is refused:
+`token = secrets.token_urlsafe(32)`, `password = getpass.getpass()`,
+`api_key = get_api_key()`, `password: z.string().min(12),`. A YAML or `.env`
+password such as `adminPassword: BlueHarbor`, `REDIS_PASSWORD: RedisPassword`,
+`PASSWORD=password` or `{user: admin, password: password}`, a `.properties`
+line (`spring.datasource.password = adminPassword`, `x.password = password`), a
+member set to any other bare value (`mail.smtp.password = letmein;`), and a
+`:-` default (`${DB_PASSWORD:-...}`), are masked. These stay undetected: a
+secret pasted with no key name and no known prefix; a value made only of digits
+under a key whose last word is not a password word (`PGPASSWORD_PROD=12345678`),
+which is the cost of keeping `TOKEN_TTL=86400` quiet; an unquoted password
+written in names that reads as code, such as
+`SMTP_PASSWORD=correct.horse.battery`, or as a variable handed on, such as
+`password=password)` or `user.password = myPassword;`, which is the cost of
+keeping code quiet; a password that is `$` and an identifier
+(`password=$ecretPass1`), which reads as a variable reference under any key;
+and a password of letters written as `key: Word = "..."`, which reads as a type
+annotation, so only the initializer is masked. A block of base64 whose decoded
+text holds a secret or a
 connection string with credentials, such as the output of `base64 .env` or a
 Kubernetes `.dockerconfigjson`, is masked as a whole, on one line or wrapped at
 60, 64 or 76 characters, inside YAML or a JSON string, with the line numbers
@@ -170,9 +315,48 @@ can stay readable.
 The `auth` value that `docker login` writes to a Docker `config.json` and npm's
 `_auth`, each a base64 `user:password`, are secrets as well, and so is Docker's
 `identitytoken`. Besides base64, only percent escapes that form UTF-8 text are
-decoded (`alice%40example.com` is an email): hex, compressed or reversed text,
-or a value with spaces put between its characters, reaches the model as it was
-written.
+decoded (`alice%40example.com` is an email), and text that holds escapes is
+read as written too, so an address beside a broken escape
+(`alice%C3%28@example.com`) is masked. A password, token or user-info that is
+a reference once its escapes are decoded (`%24%7BDB_PASS%7D`,
+`%3Cyour-password%3E`, `%2A%2A%2A`) is not masked. An address split by an
+encoded space (`jane.doe%20%40example.com`) is not detected. Hex, compressed or
+reversed text, or a value with spaces put between its characters, reaches the
+model as it was written.
+
+An email address's local part never holds `/`, `?`, `#`, `&`, `=` or `:`, so
+a path or a URL keeps everything before the address: a `WebFetch` URL becomes
+`https://api.example.com/v1/users/<EMAIL_1>` and a path
+`/work/<EMAIL_1>/notes.txt`. This holds even where the address is RFC-legal:
+`a/b@x.com` becomes `a/<EMAIL_1>` and `tom&jerry@example.com`
+`tom&<EMAIL_1>`, and a local part that ends in one of them (`x/@example.com`)
+is not detected. An address followed by `:` and a path ending in `.git`
+(`git@github.com:org/repo.git`) is a git remote, not an address. Any other
+text after the colon, a password, a port, or an `scp` or `rsync` path, leaves
+the address masked, so `email:password` lines stay masked and a remote
+without `.git` (`git@host:org/repo`) is still masked, as noise.
+
+A secret's placeholder covers its value and nothing beside it. In a list of
+fields, the list's separator ends the value: a connection string keeps its
+options (`Server=db;Password=<SECRET_1>;Encrypt=true`), a URL its later
+parameters (`?password=<SECRET_1>&page=2`), a log line its `|` fields. Only a
+separator or quote written as itself ends a value: one a percent escape stands
+for is the password's, so `?password=Pa55%26w%3Drd99&next=home` becomes
+`?password=<SECRET_1>&next=home` and `PASSWORD="Pa55word%22rd99"` becomes
+`PASSWORD="<SECRET_1>"`. A `)`, `>` or backtick that closes what the line
+opened stays outside the placeholder: `(password=<SECRET_1>)`. In an XML or
+HTML element the value attribute is masked, quoted or not, and not the
+attribute's name: `<add key="DbPassword" value="<SECRET_1>"/>`,
+`<input type=password value=<SECRET_1>>`. An unquoted value runs, as a browser
+reads it, to whitespace or `>`, so an `=`, `<` or backtick in it is masked
+with it. The attribute after a secret's name is not its value:
+`<input name="password" id=pwfield1>` is left alone. JSON held in a JSON
+string, as structured logs write it, is read one escape level down, and AWS
+Secrets Manager's `SecretString` is masked whole. Where a value's end is
+ambiguous, as in the `.env` line `PASSWORD=s3cr3tPass|next`, the placeholder
+runs through the trailing `;`, `&` or `|` text (`PASSWORD=<SECRET_1>`): outside
+a list each of them can be a character of the password, and a password is
+never partly exposed.
 
 ## What is recorded
 
@@ -180,12 +364,17 @@ shim keeps a record of what it did, so that a tool which is silent when it
 succeeds can still show its work. No entry holds prompt text, tool input or
 response bodies, command strings, or detected values. Records keep decisions,
 counts, byte measurements, bounded labels, and a scrubbed file path or URL
-because those are what make the summary useful. A target is run through the
-detector first, so a secret inside a path is masked there too. For an event
-shim could not inspect, and for the name of a file attached with `@`, that
-scrub uses the built-in default types only, so a value that only your custom
-pattern or an opt-in type matches is recorded as written; 1.2.3 scrubs every
-record with your settings. A shell command
+because those are what make the summary useful. A target and a tool name are
+run through the detector first, so a secret inside a path is masked there too,
+on every path that writes a record, an event shim could not inspect and the
+name of a file attached with `@` included. That scrub uses your settings at
+their widest: every type you enabled, every type named in `[entities]`, every
+default type and your `[[custom]]` patterns, and the defaults when the settings
+cannot be read. Invisible and control characters are removed before the scan,
+so a value split by one is still found. A `[[custom]]` literal must sit on word
+boundaries, so a codename joined to other word characters, as in
+`mcp__ACME-PROJECT-ZEBRA__read`, is not matched there and is stored as
+written, as it would pass in content. A shell command
 is never kept at all — the probe corpus contains one carrying a live
 credential.
 
@@ -210,7 +399,20 @@ with `0600` files). shim refuses to use that directory if it finds it readable
 by other users, and `shim doctor` reports when that has happened — recording
 never breaks the guard, so without that check the failure would be silent.
 
-The spool is capped at 1 MB; past that the summary undercounts and says so.
+Beside the log, a session keeps the names of the placeholders shim handed the
+model, so that a write putting one back can be refused (see "Placeholders are
+never written back" below). It holds a type and a range of numbers per line,
+`EMAIL 1 3` for `<EMAIL_1>` to `<EMAIL_3>`, and never a value or anything
+derived from one. It has its own 64 KB cap, so a full log cannot drop it, and
+`SessionEnd` deletes it with the log.
+
+Parallel hooks (Claude Code runs read-only tools side by side) append to the
+same file, so each append, and each read by the summary, waits up to 100 ms for
+the lock another hook holds for a moment; a record is not dropped because two
+events met. If a record still could not be written, or the spool reaches its
+1 MB cap, the summary undercounts and says so: the next `Stop` shows it even
+when no other record landed since the last summary, and a session whose first
+record was lost shows the note alone.
 Claude installs `Stop` and `SessionEnd`: `Stop` renders only records not shown
 in an earlier turn, and `SessionEnd` deletes that session's `.jsonl` spool and
 summary marker. Codex and Copilot currently install prompt events only, so they
@@ -230,7 +432,16 @@ that is where the numbers came from.
 `shim config --ledger` opts in to keeping the same records after the session
 ends. It is off unless you turn it on, and `shim config --no-ledger` turns it
 back off. Files live under `$XDG_STATE_HOME/shim` (or `~/.local/state/shim`),
-one per month, `0600`, capped at 5 MB each. A 0.2.0 install kept them under
+one per month, `0600`, capped at 5 MB each. Once a month has no room for
+another record, or an event could not be written because another process held
+the file past the 100 ms wait, the hook drops that event, and `shim ledger show` and the
+`shim report` fallback say so (`"capped": true` in `--json`); the next month
+starts a new file, and the warning stays for as long as the short month is
+retained. A live session whose records were all lost reads as incomplete in
+`shim report`, never as a session with nothing found. `shim doctor` checks, while the ledger is on, that the folder can be
+created or opened as private and yours and that this month's file is private
+and not a symlink, because the hook ignores a refused folder rather than fail a
+prompt. A 0.2.0 install kept them under
 `shim-guard/`; those files are read and moved once, by the first `shim report`,
 `shim ledger purge` or `shim install` after the upgrade.
 
@@ -258,11 +469,11 @@ and the value itself is still replaced.
 
 Four digits of a mobile number identify a person within a small team, so
 `PHONE` is the least conservative of the three; it is allowed, off by default,
-and worth a deliberate decision. A session record's target is scrubbed with the
-same setting, so a file path that holds an IBAN is recorded as
-`/<IBAN_1:5432>/...` and the revealed tail reaches the record and the ledger.
-That crosses the boundary this section draws, and 1.2.3 scrubs records without
-the tail.
+and worth a deliberate decision. The tail never reaches a record or the
+ledger: a file path or an MCP tool name that holds an IBAN is recorded as
+`/<IBAN_1>/...`, never `/<IBAN_1:5432>/...`. The tail is read from the value
+alone, after decoding, in ASCII digits, so a percent-encoded IBAN shows its
+own last digits and never those of a value beside it.
 
 ### Patterns you named yourself
 
@@ -272,6 +483,18 @@ record, and in the opt-in ledger. The text that matched it never does, exactly
 as with a built-in type, and the placeholder is `<CUSTOM_n>` so the name does
 not reach the model either. Names are bounded to 32 characters and there are at
 most 32 of them.
+
+A pattern that backtracks is refused by `shim config` and fails `shim doctor`
+([`CUSTOM_PATTERN_UNSAFE`](commands.md#error-codes)): it is tried, with its
+`ignore_case`, on runs of digits, letters, spaces and separators, on pairs of
+them alternating and on its own words, up to 10,000 characters. An unanchored
+greedy pattern such as `\w+@\w+\.internal`, `[A-Z]+_TOKEN` or `.*@corp` is
+refused for that reason: it is quadratic, about 11 s on 100,000 characters.
+Bound it instead (`\b\w{1,64}@\w{1,64}\.internal\b`). The check reads how far
+each part of a pattern reaches, and a lookaround with a bounded upper limit
+hides that: `\b(?!\d{0,1099}\D)\d*\d*\d*` is accepted and backtracks on a run
+of 1,100 digits or more. The hook still runs it, and an event that runs it into
+the deadline is withheld or refused, never passed on as inspected.
 
 ### Files you attach with `@`
 
@@ -286,7 +509,10 @@ or a binary file is skipped, and so is a file over 256 KiB, which Claude Code
 reads it, with the invalid bytes replaced. At most 8 files and 1 MB in total are
 read per prompt. A file past that, a file still unread 15 seconds into the hook,
 or one the detector cannot analyse is reported as not inspected, and it never
-withholds the prompt. What it keeps is
+withholds the prompt. A file named twice, or with fragments that name no lines
+(`@notes.txt#1 @notes.txt#2`), is read, reported and recorded once, and past
+the eight-file limit each file is named once. Mentions are found in time
+linear in the prompt, after `。`, `、`, `？` or `！` too. What it keeps is
 what it keeps for a prompt: entity names, counts and the scrubbed name of the
 file. The file's text is scanned in memory and stored nowhere, and shim still
 never reads the session transcript (`transcript_path`).
@@ -379,19 +605,41 @@ it is normalized, as Korean text does, is cut where it stopped fitting and the
 rest scanned as the next piece, so even text in which every character expands
 eighteen-fold (U+FDFA) is read in pieces of 11,111 characters: expanding
 Unicode cannot switch detection off for a field. If any piece fails, or the
-hook's own 25-second deadline runs out, the whole event is withheld or refused
+hook's own 20-second deadline runs out, the whole event is withheld or refused
 as described above.
+
+**The answer is out before the client stops waiting.** A client kills a hook
+that runs past the timeout shim registered for it, and Claude Code then goes
+on with the event as if no hook had run, so a refusal that arrives late is no
+refusal. The hook's clock therefore starts when the client started its
+process, as the kernel recorded it on macOS and Linux, not when Python got to
+run: a busy CPU, a slow disk or a crowd of hooks starting at once holds up the
+interpreter on the same clock the client is counting. Inspection stops 20
+seconds in. A hook that only gets to run after that still reads the event
+before it refuses, so the refusal fits it: a call is denied, an MCP result
+withheld, a stop allowed. If the refusal is still not written 25 seconds in,
+because the machine is too starved to finish even that, a fixed refusal for
+the event takes its place, written once and whole, with no record kept, and
+the hook exits. The shortest timeout shim registers is 30 seconds, for every
+client, whether `shim install` or the plugin's hook files wrote it, which
+leaves 5 seconds for the plugin launcher, the write and the exit. A hook
+frozen for longer than that, as on a machine put to sleep, can still miss it.
 
 The detector reads most text up to the 1 MB input bound well inside that
 deadline. Measured on an M1 under load, 1 MB took about 2.5 s for a numeric
-CSV, 3 s for a run of base64, 1 s for e-mail punctuation and 5 s for a list of
-IP addresses; text that expands eighteen-fold costs about 3 s per 100,000
-characters. Not all text: the phone scan reads a long line dense with short
-numbers, such as `- 0 - 0 - 0` repeated, at about 6 s per 100,000 characters,
-so a field of a few hundred thousand such characters reaches the deadline and
-is handled as above, as an event shim could not inspect. A phone-shaped number
-deep in a long table is still checked: the phone library's limit of 65,535
-tries per text no longer applies.
+CSV, 3 s for a run of base64, 1 s for e-mail punctuation, 5 s for a list of
+IP addresses and about 1.4 s for `- 0 - 0 - 0` repeated; text that expands
+eighteen-fold costs about 3 s per 100,000 characters. Not all text: one line
+of single digits in no repeating order joined by ` - `, `/` or `–` takes about
+2 s for 100 KB, 10 s for 500 KB and 20 s for 1 MB on an M1 under light load,
+so a line toward the 1 MB bound reaches the deadline, sooner on a busy
+machine, and is handled as above, as an event shim could not inspect: never
+passed on as inspected. The same text split into lines is read about ten
+times faster. A megabyte of distinct valid phone numbers takes about 5 to
+10 s, the lower figure with one number a line. Text whose keys add context (a
+JSON result dense with keys near 1 MB)
+takes 4 to 10 s. A phone-shaped number deep in a long table is still checked:
+the phone library's limit of 65,535 tries per text no longer applies.
 
 An event over shim's 1 MB input bound is not scanned at all. It is refused or
 withheld as above, and counted in the session summary by tool and file, so a
@@ -406,10 +654,52 @@ same hook output, beside the masked result and never on your screen:
 shim: masked EMAIL (1), SECRET (1) in Read. Placeholders such as <EMAIL_1> stand for real values in the source; the source does not contain placeholders.
 ```
 
-It carries entity names, their counts and the tool name, nothing else. Codex
+It carries entity names, their counts and the tool name, nothing else. The
+closing clause, `the source does not contain placeholders`, is said only when
+the event holds no placeholder-shaped text of any type or number; a doc, a test
+fixture or a file the model wrote can. Codex
 and Copilot do not mask tool results. A masked tool argument gets no sentence
 for the model; you are shown `shim: masked EMAIL (1) in WebFetch.` instead,
 because the call runs with input the model did not write.
+
+**Placeholders.** Within one prompt or one tool event a value always gets the
+same number, and two values never share one, across every field and the
+converted page. One account, card or phone written with different spacing,
+hyphens or case is one value. Numbers can skip, since a value in a `<script>`
+the `html` diet drops still takes one, but never repeat, and they start above
+the highest placeholder of shim's shape the model will read as text in that
+event (with the `html` diet on, `&lt;EMAIL_1&gt;` included), so shim's own never
+collide with one already there. The numbering is held in memory for that event
+only; no value or fingerprint of one is written anywhere, so numbers start
+again with the next event. A masked span that covered line breaks keeps them
+after its placeholder, so the line numbers of a `Read` stay true after a masked
+PEM key.
+
+**Keys, numbers and file bytes.** In a tool's JSON input or result, object
+keys and numbers are inspected as well as strings: an address used as a key is
+masked in the key, and a card, national ID or phone number sent as a JSON
+number is found (a whole float such as `9.05e11` is read as the integer it
+is). A value is read alone and also with its key beside it, and with the name
+in a `{"name": ..., "value": ...}` pair, so `{"password": "..."}` is masked;
+past 4,096 characters only the start of a value is read with its key, unless
+the key starts a finding there. In a tool result, a real PNG, GIF, WebP or JPEG
+reaches the model as a picture and its bytes are not read as text: an MCP
+image's `data`, a `Read` image's `file.base64`, a `Read` parts page. Real means
+a readable image header and a value that is base64 to its last character; any
+other character anywhere makes it text, read and withheld on a finding. So
+base64 characters after a real image's header, an encoded credential among
+them, pass with the image, and such an image is not counted in the session
+summary, which cannot tell it from a result with nothing found. Image-shaped
+data that is not a real image is read, and so is any image a call sends out. A
+PDF's bytes are read too, which finds an encoded credential in them.
+
+Nothing is ever written into a file's bytes. A finding in them, or in keys
+that two placeholders would make collide, cannot be masked without breaking
+what carries it, so under `enforce` the result is withheld, `shim: withheld
+this Read result; it holds SECRET (1), which a placeholder cannot replace
+without breaking it.`, and a call is refused with `A placeholder cannot replace
+it without breaking the call.` added. `observe` only records it and `warn` only
+reports it.
 
 One more sentence is opt-in. With `markers = "note"` in the
 settings file, a Claude Code `PostToolUse` result that reads as instructions
@@ -439,14 +729,18 @@ default. `whitespace` is opt in because it strips trailing spaces and tabs from
 every line, removing a Markdown hard line break since that break *is* two
 trailing spaces. It never changes a line count. `html` is opt in because it is
 not lossless: a result that is a whole HTML page reaches the model as text, its
-markup, scripts and styles dropped and a header line saying so. Masking runs
-first, and a placeholder stays a placeholder. The converted text is then scanned
-again, because decoding entities can assemble a value the first scan could not
-see: `ops&#64;example&#46;com` is masked and counted, and if that scan fails the
-page is left unconverted. A value split across tags is not yet caught whole: the
-first scan masks part of an IBAN split across two `<span>`s, so the second sees
-only the rest and its first groups reach the model (fixed in 1.2.3). Injection
-markers are read from the converted text too. Like every transform, the record
+markup, scripts and styles dropped and a header line saying so. A page is
+converted first and scanned as the model will read it: entities decode, so
+`ops&#64;example&#46;com` is masked and counted, and a value cut in two by tags,
+such as an IBAN across two `<span>`s, is masked whole. A value found in the
+markup that conversion glues to the text beside it is masked where it lands. A
+value that runs across tags (`password=<b>...</b>`) is masked in the markup
+before conversion, and a page that would show a placeholder only once
+converted some other way, split by a tag, is masked as markup and not
+converted. If the page cannot be converted, or its text cannot be scanned in
+full, the masked markup is handed on unconverted; masked markup is never
+converted. Injection markers are read from the converted text too. Like every
+transform, the record
 keeps only its name and the sizes before and after, never the page.
 
 JSON is compacted by a lexer rather than by parsing and re-serialising:
@@ -464,8 +758,8 @@ the model was shown, so reshaping a file on the way in makes the next edit of
 it miss. An MCP server that reads files is the exception: its result is
 compacted, with the sentence above. `shim config --no-diet` turns it off. To
 opt in to whitespace while keeping JSON, set `diet = ["json", "whitespace"]`;
-for HTML pages, `diet = ["json", "html"]`. No PDF, Word or other binary
-document is read, decoded or converted.
+for HTML pages, `diet = ["json", "html"]`. The diet never decodes or converts
+a PDF, Word or other binary document.
 
 shim also flags text in a result that reads as an instruction to the model.
 Invisible-character detection covers the zero-width space, the invisible
@@ -480,6 +774,32 @@ Those markers are **reported and never acted upon**, and they are not entities:
 no setting can turn one into a rewrite, because rewriting a result for looking
 imperative would corrupt legitimate content — a code review, a style guide, or
 documentation about prompt injection.
+
+### Placeholders are never written back
+
+After a masked `Read`, the model holds `<SECRET_1>` where the file holds the
+key; written back as the model saw it, the placeholder would replace the real
+value on disk. So in every mode the hook refuses a write whose new text holds
+a placeholder shim issued in this session:
+
+```text
+shim: this Write call would write <SECRET_1>, a placeholder shim gave you in place of a real value, instead of that value. Change the real value another way, or ask the user.
+```
+
+That covers `Write`, `Edit`, `MultiEdit` and `NotebookEdit` in Claude Code, VS
+Code's edit tools including `apply_patch` (its added lines), and every MCP or
+unknown tool's input, which shim cannot tell from a write. The text an edit
+replaces (`old_string`) is not new text, so an edit that removes a placeholder
+is allowed. Every placeholder shim hands the model counts as issued: a masked
+tool result or input, the redacted copy of a prompt blocked under `enforce`,
+and the prompt Copilot is given in place of yours; a prompt redaction issues
+exactly the names its copy shows. Placeholder-shaped text where shim never
+issued that name, such as `<EMAIL_1>` in a doc or a fixture, is written as it
+is, and so is the same write in another session. If the names cannot be read
+or written, the write is refused, and a result whose names cannot be kept is
+not handed on masked. Shell commands are not read for placeholders; their own
+rules apply. The record says `deny` with the note `placeholder`, and the
+session summary does not list these refusals.
 
 ## Outside shim's boundary
 
@@ -615,11 +935,16 @@ there is seen.
 
 The proxy sees the whole wire body — the system prompt, the tools array, the
 full message history and every file the client inlined for an `@` reference.
-None of it is kept.
+None of it is written to disk. One part of it stays in memory past its request:
+the detector remembers the phone-number-shaped text it has read, runs of digits
+and the punctuation between them with up to four characters around each, and
+its verdict on them, so a list repeated on every request is read once. That
+memory is capped at about 10 MiB: once its newer half fills, the older half is
+dropped, and all of it is dropped when `shim watch` exits.
 
-Every text field of that body is offered to the detector: message content in
-either form, the text inside a tool result, the arguments of a tool call, the
-system prompt and the tool definitions. Two kinds of field are skipped because
+Every text field, object key and number of that body is offered to the
+detector: message content in either form, the text inside a tool result, the
+arguments of a tool call, the system prompt and the tool definitions. Two kinds of field are skipped because
 they are opaque rather than prose — the `data` of a base64 attachment and a
 thinking block's `signature` (a field named `signature` in a tool call or
 anywhere else is scanned). Findings are attributed to the section they came
@@ -687,17 +1012,20 @@ scans them in memory as the hook scans a prompt, for the types your settings
 enable and your custom patterns. What it prints is entity
 names, counts, dates, and project folders with your home shown as `~`, tool
 names and attachment names, each scrubbed by the detector like a session
-record's target. It writes no record, no ledger entry, no cache and no
-log, follows no symbolic link out of the projects folder, and without
-`--purge` opens no file for writing.
+record's target. Its `already masked by shim` line is counted from shim's own
+records, the open session's log and the ledger if it is on, never from
+placeholder-shaped text in a transcript. It writes no record, no ledger entry,
+no cache and no log, follows no symbolic link out of the projects folder, and
+without `--purge` opens no file for writing.
 
 `--purge` deletes, for the sessions you confirm by typing `delete N`, each
 session's transcript, the folder of the same name beside it (Claude Code keeps
 sub-agent transcripts and tool output there) and the session's lines in
 `history.jsonl`, which holds what you typed in interactive sessions. That file
 is rewritten first, through a new file in the same folder with the same
-permissions; if it cannot be written, or Claude Code changed it meanwhile, it is
-left as it was, nothing is deleted and you are told. A transcript is deleted
+permissions; if it cannot be written, is a link or not a regular file, or
+Claude Code changed it meanwhile, it is left as it was, nothing is deleted and
+you are told. A transcript is deleted
 last, so a session whose folder could not be fully deleted is kept and found
 again by the next run. Nothing else is deleted: Claude Code keeps other files
 per session outside `projects/`, among them backups of the files the agent

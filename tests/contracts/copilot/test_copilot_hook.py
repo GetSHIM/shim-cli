@@ -19,13 +19,19 @@ def _redaction_files(root):
     return [
         item
         for item in root.rglob("*")
-        if item.is_file() and item.suffix not in (".jsonl", ".mark")
+        if item.is_file() and item.suffix not in (".jsonl", ".mark", ".names")
     ]
 
 
 def _run(raw: bytes, tmp_path: Path) -> subprocess.CompletedProcess[bytes]:
     environment = os.environ.copy()
-    environment["SHIM_CONFIG"] = str(tmp_path / "config.toml")
+    settings = tmp_path / "config.toml"
+    if not settings.exists():
+        # A SHIM_CONFIG that names a missing file is refused, so the file exists;
+        # beside tmp_path, whose leftovers some tests check.
+        settings = tmp_path.parent / f"{tmp_path.name}-config.toml"
+        settings.touch(mode=0o600)
+    environment["SHIM_CONFIG"] = str(settings)
     environment["TMPDIR"] = str(tmp_path)
     return subprocess.run(
         COMMAND,
@@ -90,10 +96,11 @@ def test_copilot_runner_replaces_invalid_input(tmp_path: Path) -> None:
 
 
 def test_copilot_stdin_deadline_uses_the_native_rewrite() -> None:
+    # Counted from `main`, as in the Codex test of the same deadline.
     code = (
         "import sys; from shim_cli import hook as runner; "
-        "sys.argv.append('copilot'); runner.HOOK_DEADLINE_SECONDS = 0.05; "
-        "runner.main()"
+        "sys.argv.append('copilot'); runner._process_age = lambda: 0.0; "
+        "runner.HOOK_DEADLINE_SECONDS = 0.05; runner.main()"
     )
     with subprocess.Popen(
         (sys.executable, "-I", "-B", "-c", code),

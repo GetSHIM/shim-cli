@@ -240,7 +240,7 @@ def _fragment_summary(client: str) -> str:
     return (
         f"Would add {count} hook {entry} ({named}), "
         f"{each}running {interpreter} -m shim_cli.hook {client}. "
-        "Nothing else in the file changes."
+        "The file is rewritten with 2-space indentation; no value in it changes."
     )
 
 
@@ -274,6 +274,35 @@ def parse_error(plan: Plan) -> str:
     return ""
 
 
+def unsafe_fix(reason: str, target: Path) -> str:
+    """What mends the refusal `reason` names; group-writable is not "not yours"."""
+    path, folder = shlex.quote(str(target)), shlex.quote(str(target.parent))
+    if "writable by another user" in reason:
+        where = (
+            f"the folder above {path} that others can write to"
+            if "ancestor" in reason
+            else folder
+            if "parent" in reason
+            else path
+        )
+        return f"Run chmod g-w,o-w {where}"
+    if "absolute" in reason:
+        return (
+            "Point the client's settings folder variable (CLAUDE_CONFIG_DIR, "
+            "CODEX_HOME or COPILOT_HOME) at an absolute path without .."
+        )
+    if "cannot create" in reason:
+        return f"Create {folder} yourself, with only you able to write to it"
+    return f"Make {path} a regular file owned by you"
+
+
+def conflict_fix(plan: Plan) -> str:
+    target = shlex.quote(str(plan.target))
+    if parse_error(plan):
+        return f"Fix {target} by hand so it parses"
+    return f"Resolve {target} by hand ({plan.message})"
+
+
 def _plan_refused(
     plan: Plan,
     client: str,
@@ -286,14 +315,25 @@ def _plan_refused(
 ) -> NoReturn:
     """CONFLICT and REFUSE: shim leaves a file it cannot change safely alone."""
     target = str(plan.target)
-    if plan.action is Action.CONFLICT:
+    conflict = plan.action is Action.CONFLICT
+    syntax = parse_error(plan) if conflict else ""
+    text = (
+        message + syntax if syntax else f"{message.removesuffix('.')}: {plan.message}."
+    )
+    fix = (
+        f"{conflict_fix(plan) if conflict else unsafe_fix(plan.message, plan.target)}"
+        ", then run the command again."
+    )
+    # The human form shows the fix too: it is what the reader has to do.
+    follow = f"{fix} {then}" if then else fix
+    if conflict:
         emit_error(
             command,
             "CLIENT_SETTINGS_MALFORMED",
-            message + parse_error(plan),
-            f"Fix {target} by hand so it parses, then run the command again.",
+            text,
+            fix,
             as_json=as_json,
-            then=then,
+            then=follow,
             client=client,
             target=target,
             **data,
@@ -301,10 +341,10 @@ def _plan_refused(
     emit_error(
         command,
         "CLIENT_SETTINGS_UNSAFE",
-        message,
-        f"Make {target} a regular file owned by you, then run the command again.",
+        text,
+        fix,
         as_json=as_json,
-        then=then,
+        then=follow,
         client=client,
         target=target,
         **data,
@@ -312,9 +352,19 @@ def _plan_refused(
 
 
 def _not_changed(
-    client: str, command: str, target: Path, error: BaseException, as_json: bool
+    client: str,
+    command: str,
+    target: Path,
+    error: BaseException,
+    as_json: bool,
+    *,
+    permanent: bool = False,
 ) -> NoReturn:
-    """A write refused for good says why; only a race is worth running again."""
+    """A write refused for good says why; only a race is worth running again.
+
+    `permanent`: the error came from a check of the folders, not from `apply`
+    finding the file changed since it was planned.
+    """
     name = client_name(client)
     if (found := unwritable(error, target)) is not None:
         reason, fix = found
@@ -325,6 +375,18 @@ def _not_changed(
             fix,
             as_json=as_json,
             client=client,
+        )
+    if permanent and isinstance(error, InstallationError):
+        fix = f"{unsafe_fix(str(error), target)}, then run the command again."
+        emit_error(
+            command,
+            "CLIENT_SETTINGS_UNSAFE",
+            f"{name} hook configuration was not changed: {error}.",
+            fix,
+            as_json=as_json,
+            then=fix,
+            client=client,
+            target=str(target),
         )
     emit_error(
         command,
@@ -467,7 +529,13 @@ def install(*, client: str, dry_run: bool, yes: bool, as_json: bool = False) -> 
                 dry_run=True,
             )
             return
-        verb = "create" if action is Action.CREATE else "append to"
+        verb = (
+            "create"
+            if action is Action.CREATE
+            else "append to"
+            if foreign_hooks
+            else "update"
+        )
         emit("WARN", f"Would {verb} {name} hooks at {plan.target} with this fragment:")
         emit("WARN", _fragment_summary(client))
         print(json.dumps(fragment, ensure_ascii=False, indent=2))
@@ -494,6 +562,8 @@ def install(*, client: str, dry_run: bool, yes: bool, as_json: bool = False) -> 
         f"Create shim's {name} hook?"
         if action is Action.CREATE
         else f"Append shim after existing {name} hooks?"
+        if foreign_hooks
+        else f"Add shim's {name} hook?"
     )
     if not yes and not typer.confirm(prompt, default=False):
         emit("WARN", "Installation cancelled.")
@@ -505,7 +575,7 @@ def install(*, client: str, dry_run: bool, yes: bool, as_json: bool = False) -> 
         except ValueError:
             _plan_error(client, "install", as_json)
         except (InstallationError, OSError) as error:
-            _not_changed(client, "install", plan.target, error, as_json)
+            _not_changed(client, "install", plan.target, error, as_json, permanent=True)
         if plan.action is Action.NOOP:
             if as_json:
                 emit_json("install", "ok", **{**result, "action": "noop", "events": []})

@@ -189,7 +189,7 @@ def test_an_uninspectable_tool_event_is_still_recorded(monkeypatch, tmp_path) ->
             "hook_event_name": "PostToolUse",
             "session_id": "dense",
             "tool_name": "Read",
-            "tool_input": {"file_path": "/work/customers.csv"},
+            "tool_input": {"file_path": "/work/AKIAIOSFODNN7EXAMPLE/customers.csv"},
             "tool_response": {"type": "text", "content": "a@b.com"},
         }
     ).encode()
@@ -207,6 +207,7 @@ def test_an_uninspectable_tool_event_is_still_recorded(monkeypatch, tmp_path) ->
     assert records[0]["action"] == "deny"
     assert records[0]["event"] == "PostToolUse"
     assert records[0]["tool_name"] == "Read"
+    assert records[0]["target"] == "/work/<SECRET_1>/customers.csv"
     assert records[0]["note"] == f"{NOT_INSPECTED}: analysis failed"
 
 
@@ -223,6 +224,7 @@ def test_uninspected_records_never_keep_raw_event_or_tool_labels(
             "hook_event_name": event,
             "session_id": "unsafe-labels",
             "tool_name": tool,
+            "tool_input": {"file_path": "/work/AKIAIOSFODNN7EXAMPLE/notes.txt"},
             "tool_response": {"text": "synthetic.user@example.com"},
         }
     ).encode()
@@ -234,6 +236,7 @@ def test_uninspected_records_never_keep_raw_event_or_tool_labels(
     assert len(records) == 1
     assert records[0]["event"] == "unsupported tool event"
     assert records[0]["tool_name"] == "<EMAIL_1>"
+    assert records[0]["target"] == "/work/<SECRET_1>/notes.txt"
     output = summary.render(records) + json.dumps(summary.as_json(records))
     stored = json.dumps(records)
     assert event not in output + stored

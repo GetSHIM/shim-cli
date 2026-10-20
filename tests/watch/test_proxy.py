@@ -795,10 +795,10 @@ def test_the_whole_request_is_scanned_and_none_of_it_is_kept(scanned) -> None:
 def test_a_large_tool_set_is_scanned_once_across_a_session(scanned) -> None:
     from types import SimpleNamespace
 
-    lengths: list[int] = []
+    texts: list[str] = []
 
     def counting(text: str):
-        lengths.append(len(text))
+        texts.append(text)
         return SimpleNamespace(counts=())
 
     running = scanned(counting)
@@ -814,8 +814,8 @@ def test_a_large_tool_set_is_scanned_once_across_a_session(scanned) -> None:
         _post(running, body, HEADERS)
 
     assert len(running.session.exchanges) == 3
-    assert sum(1 for length in lengths if length > 100_000) == 1
-    assert lengths.count(5) == 3
+    assert sum(1 for text in texts if len(text) > 100_000) == 1
+    assert texts.count("hello") == 3
 
 
 def test_a_truncated_response_is_recorded_and_relayed_unchanged(

@@ -129,6 +129,8 @@ def test_hardlink_added_before_publish_is_refused(
         apply(update)
     assert target.read_bytes() == b"old"
     assert shared.read_bytes() == b"old"
+    # A leftover temporary is a full copy of the user's settings, tokens included.
+    assert sorted(p.name for p in target.parent.iterdir()) == [target.name]
 
 
 def test_unsafe_targets_and_limits_are_refused(tmp_path: Path) -> None:

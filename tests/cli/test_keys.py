@@ -264,7 +264,9 @@ KEY_REPORTS = {
         "  DB_HOST                 set\n  DB_PASSWORD             set   SECRET\n"
     ),
     "bundle.pem": "  unparsed line 1\n",
-    "armored.env": "  PGP_KEY                 set\n  AFTER_PGP               set\n",
+    "armored.env": (
+        "  PGP_KEY                 set   SECRET\n  AFTER_PGP               set\n"
+    ),
     "privatekey": "  unparsed line 1\n",
     "mention.env": (
         "  TLS_KEY_HELP            set   SECRET\n"
@@ -281,7 +283,9 @@ KEY_REPORTS = {
     "fernet.key": "  unparsed line 1\n",
     "short.key": "  unparsed line 1\n",
     "armored-below.env": (
-        "  SIGNING_KEY             set\n  unparsed line 9\n  AFTER_SIGNING           set\n"
+        "  SIGNING_KEY             set   SECRET\n"
+        "  unparsed line 9\n"
+        "  AFTER_SIGNING           set\n"
     ),
 }
 HOSTILE_REPORT = """\

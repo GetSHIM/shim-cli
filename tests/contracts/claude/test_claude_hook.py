@@ -359,7 +359,7 @@ def test_an_oversized_mcp_result_is_withheld_and_still_reaches_the_summary(
         "mcp__drive__read",
         "tool_response",
         [{"type": "text", "text": f"AWS_ACCESS_KEY_ID={AWS_KEY}\n" + "x" * 1_200_000}],
-        tool_input={"path": "/work/big.txt"},
+        tool_input={"path": f"/work/{AWS_KEY}/big.txt"},
         session_id="oversized",
     )
 
@@ -372,8 +372,8 @@ def test_an_oversized_mcp_result_is_withheld_and_still_reaches_the_summary(
     )
     [record] = _spooled(tmp_path)
     assert record["tool_name"] == "mcp__drive__read"
-    # The record keeps the path; the summary is what shortens it to a name.
-    assert record["target"] == "/work/big.txt"
+    # The record keeps the path, scrubbed; the summary shortens it to a name.
+    assert record["target"] == "/work/<SECRET_1>/big.txt"
     assert (record["action"], record["note"]) == ("deny", "not inspected: too large")
 
 
@@ -389,7 +389,7 @@ def test_an_oversized_built_in_result_is_reported_as_reaching_the_model(
         "Read",
         "tool_response",
         {"content": "x" * 1_200_000},
-        tool_input={"file_path": "/work/big.txt"},
+        tool_input={"file_path": f"/work/{AWS_KEY}/big.txt"},
         session_id="oversized",
     )
 
@@ -398,7 +398,10 @@ def test_an_oversized_built_in_result_is_reported_as_reaching_the_model(
     assert (result.returncode, result.stderr) == (0, b"")
     assert json.loads(result.stdout) == _unreplaced("Read", "too large")
     [record] = _spooled(tmp_path)
-    assert (record["tool_name"], record["target"]) == ("Read", "/work/big.txt")
+    assert (record["tool_name"], record["target"]) == (
+        "Read",
+        "/work/<SECRET_1>/big.txt",
+    )
     assert (record["action"], record["note"]) == (
         "report",
         "not inspected: too large",
@@ -638,9 +641,14 @@ def test_a_result_nested_past_the_depth_bound_is_withheld(tmp_path: Path) -> Non
 
 
 def test_a_megabyte_of_tiny_fields_is_never_passed_through(tmp_path: Path) -> None:
-    """A full-size result of one-letter fields, with the deadline cut short:
-    whatever is left unread when it fires is withheld, the secret with it."""
-    rows = ["a"] * 249_950 + [f"AWS_ACCESS_KEY_ID={AWS_KEY}"]
+    """A full-size result of short fields, with the deadline cut short:
+    whatever is left unread when it fires is withheld, the secret with it.
+    The fields differ, as a text repeated in one event is read once."""
+    from itertools import islice, product
+    from string import ascii_lowercase
+
+    words = map("".join, product(ascii_lowercase, repeat=4))
+    rows = [*islice(words, 142_700), f"AWS_ACCESS_KEY_ID={AWS_KEY}"]
     raw = _event("PostToolUse", "mcp__sheets__read", "tool_response", rows)
     assert 999_000 < len(raw) <= 1_000_000
     code = (
@@ -694,6 +702,8 @@ def test_the_scan_stops_at_the_hooks_own_deadline_not_a_fresh_one(
     evaluate.__wrapped__ = guard.evaluate
     monkeypatch.setattr(guard, "evaluate", evaluate)
     monkeypatch.setattr(hook, "HOOK_DEADLINE_SECONDS", 0.2)
+    # main counts from when its process started, and this one is the test run.
+    monkeypatch.setattr(hook, "_process_age", lambda: 0.0)
     monkeypatch.setattr(signal, "setitimer", lambda *_args: (0.0, 0.0))
     monkeypatch.setattr(sys, "argv", ["shim", "claude"])
     monkeypatch.setattr(
@@ -859,7 +869,11 @@ def _failure(error: object) -> bytes:
 
 
 def _isolated(tmp_path: Path) -> dict:
-    return {"SHIM_CONFIG": str(tmp_path / "absent" / "config.toml")}
+    # A SHIM_CONFIG that names a missing file is refused, so the file exists.
+    settings = tmp_path / "isolated" / "config.toml"
+    settings.parent.mkdir(mode=0o700, exist_ok=True)
+    settings.touch(mode=0o600)
+    return {"SHIM_CONFIG": str(settings)}
 
 
 def test_a_failed_command_that_printed_a_secret_is_reported_to_both(

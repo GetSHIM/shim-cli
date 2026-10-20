@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from dataclasses import dataclass
 
 from shim_cli import json_bytes
+from shim_cli.guard.evaluate import evaluate as default_scrub
+from shim_cli.guard.evaluate import placeholder_names
 from shim_cli.policy import (
     ALLOW,
     DENY,
@@ -22,13 +25,12 @@ from shim_cli.policy import (
 )
 from shim_cli.session.record import (
     NOT_INSPECTED,
-    UNKNOWN_TOOL_LABEL,
     Record,
-    display_label,
+    scrubbed_label,
     scrubbed_target,
 )
 
-from .payload import PayloadTooLarge, inspect, past_deadline
+from .payload import PayloadTooLarge, inspect, past_deadline, walk
 
 
 @dataclass(frozen=True)
@@ -56,9 +58,11 @@ class Adapter:
     event: str
     root: str
     decode: Callable[[bytes | dict[str, object]], Event]
-    # (action, payload, message, found, tool label[, tool name]): the name is
-    # passed only for UNINSPECTED, where what can replace a result depends on
-    # which tool it came from and a label may no longer say.
+    # (action, payload, message, found, tool label[, tool name[, literal]]):
+    # the name matters where a result is withheld, as UNINSPECTED or DENY:
+    # what can replace it depends on which tool it came from, and a label may
+    # no longer say. `literal` is true when the event already held
+    # placeholder-shaped text.
     encode: Callable[..., bytes]
     # No default: a new adapter must say which of the three it is, because
     # claiming more than the client grants is how a user ends up trusting a
@@ -149,6 +153,16 @@ _UNROUTED = (
     "rather than rewrite it. Leave these values out, or ask the user how to "
     "continue."
 )
+# The per-tool `[mode]` key, as TOML writes it: a JSON string is a TOML string,
+# but for the surrogate pairs `ensure_ascii` would write.
+_ALLOW_TOOL = (
+    ' The user can allow this tool with {} = "warn" under [mode] in shim\'s settings.'
+)
+_UNMASKABLE = " A placeholder cannot replace it without breaking the call."
+_UNMASKABLE_RESULT = (
+    "shim: withheld this {tool} result; it holds {found}, which a placeholder "
+    "cannot replace without breaking it."
+)
 _RESHAPED = (
     "shim: reformatted this result to save space ({}); it is not byte-for-byte "
     "what the tool returned."
@@ -211,6 +225,80 @@ def _written(tool: str, body: dict) -> list:
                 if line.startswith(_PATCH_HEADERS):
                     paths.append(line.split(":", 1)[1].strip())
     return paths
+
+
+# D3: after a masked read the model holds `<SECRET_1>` where the file holds
+# the key, and writing back what it saw would put the placeholder over the
+# value. A write whose new text holds a placeholder shim issued in this
+# session is refused in every mode. Shell commands are not read for it.
+_WRITE_BACK = "placeholder"
+_WRITE_BACK_REFUSAL = (
+    "shim: this {tool} call would write {names}, a placeholder shim gave you in "
+    "place of a real value, instead of that value. Change the real value another "
+    "way, or ask the user."
+)
+_WRITE_BACK_REFUSALS = (
+    "shim: this {tool} call would write {names}, placeholders shim gave you in "
+    "place of real values, instead of those values. Change the real values "
+    "another way, or ask the user."
+)
+_WRITE_BACK_UNCHECKED = (
+    "shim: could not check this {tool} call for placeholders shim gave you "
+    "(session record unreadable), so it was not allowed."
+)
+# What a write tool's input carries but does not write: the text an edit
+# replaces, and VS Code's note on why. Everything else may reach the file.
+_NOT_WRITTEN = frozenset(("old_string", "oldString", "explanation"))
+
+
+def _new_text(tool: str, body: dict, unrouted: bool) -> list:
+    """The text a call may write: an apply_patch patch's added lines, every
+    other field of a write tool but `_NOT_WRITTEN`, and all of an MCP or
+    unknown tool's input, which shim cannot tell a write from."""
+    if tool == "apply_patch" and not unrouted:
+        return [
+            line
+            for value in body.values()
+            if isinstance(value, str)
+            for line in value.splitlines()
+            if line.startswith("+")
+        ]
+    return [
+        text
+        for path, text in walk(body, partial=True).leaves
+        if unrouted or not _NOT_WRITTEN.intersection(map(str, path))
+    ]
+
+
+def _write_back(tool: str, label: str, body, unrouted: bool, issued) -> str:
+    """Why a write is refused for a placeholder shim issued, or "".
+
+    `issued()` gives this session's (type, first, last) runs and is read only
+    when the new text holds placeholder-shaped text; if it cannot be read,
+    the write is refused.
+    """
+    if not isinstance(body, dict):
+        return ""
+    written = dict.fromkeys(
+        name
+        for text in _new_text(tool, body, unrouted)
+        for name in placeholder_names(text)
+    )
+    if not written:
+        return ""
+    try:
+        runs = issued()
+    except Exception:
+        return _WRITE_BACK_UNCHECKED.format(tool=label)
+    names = [
+        f"<{kind}_{number}>"
+        for kind, number in written
+        if any(kind == of and first <= number <= last for of, first, last in runs)
+    ]
+    if not names:
+        return ""
+    refusal = _WRITE_BACK_REFUSAL if len(names) == 1 else _WRITE_BACK_REFUSALS
+    return refusal.format(tool=label, names=", ".join(names))
 
 
 def _task_text(value):
@@ -316,7 +404,21 @@ def process(
     diet: tuple = (),
     entities_for=None,
     protected=None,
+    issued=None,
+    issue=None,
+    scrub=None,
 ) -> Outcome:
+    """One tool event's answer and record.
+
+    `scrub` scans the target and tool label the record keeps, with the
+    settings' whole scope and no reveal. The hook always passes the one
+    built from the settings; the default types, used when it is left out,
+    serve only the unit tests that call this without any settings.
+
+    `issued()` gives the (type, first, last) runs of placeholder numbers shim
+    issued in this session, and `issue(runs)` adds to them when this event is
+    masked; it raises if it cannot, and nothing masked is handed on.
+    """
     event = entry.decode(raw)
     tool = event.tool
 
@@ -325,18 +427,15 @@ def process(
     # An MCP or unknown tool's input may go anywhere: never rewritten.
     unrouted = direction == OUTBOUND and kind != OUTBOUND
     mode = mode_for(direction, tool)
-    target = scrubbed_target(event.target, evaluate)
-    tool_label = display_label(tool, UNKNOWN_TOOL_LABEL)
-    if tool_label != UNKNOWN_TOOL_LABEL:
-        decision = evaluate(tool_label)
-        if decision.counts:
-            tool_label = display_label(decision.redacted_text, UNKNOWN_TOOL_LABEL)
+    scrub = scrub or default_scrub
+    target = scrubbed_target(event.target, scrub)
+    tool_label = scrubbed_label(tool, scrub)
     if entities_for is not None:
         scoped = entities_for(tool, entry.event)
         original = evaluate
 
-        def evaluate(text, _entities=scoped):
-            return original(text, _entities)
+        def evaluate(text, numbering=None, _entities=scoped):
+            return original(text, _entities, numbering=numbering)
 
     body = event.payload
     in_bytes = _size(body) if body else 0
@@ -381,6 +480,14 @@ def process(
             record(DENY, note=_SELF_PROTECTION),
         )
 
+    if issued is not None and (direction == LOCAL_WRITE or unrouted):
+        refusal = _write_back(tool, tool_label, body, unrouted, issued)
+        if refusal:
+            return Outcome(
+                entry.encode(DENY, body, refusal, "", tool_label),
+                record(DENY, note=_WRITE_BACK),
+            )
+
     inbound = direction == INBOUND
     # Only what came over a network or from an MCP server is reshaped: a local
     # tool's or a command's output may be a file the model goes on to edit.
@@ -391,7 +498,7 @@ def process(
         and entry.power == REWRITE
     )
     transforms = diet if shrinkable else ()
-    result = inspect(body, evaluate, transforms, scan_markers=inbound)
+    result = inspect(body, evaluate, transforms, inbound)
     if result.skipped:
         reason = _skipped_reason(result.reasons)
         counts = _counts(result.findings)
@@ -462,13 +569,30 @@ def process(
             ),
         )
 
+    # Found in a file's bytes, or in keys that would become one: masked, it
+    # would no longer be what it is, so it is withheld or refused instead.
+    unmaskable = action == MASK and result.unmaskable
+    if unmaskable:
+        action = DENY
     message = _message(tool_label, counts, action)
     if action == DENY and unrouted:
         message += _UNROUTED
+        if tool_label == tool:
+            message += _ALLOW_TOOL.format(json.dumps(tool, ensure_ascii=False))
+    elif unmaskable:
+        message = (
+            _UNMASKABLE_RESULT.format(tool=tool_label, found=_summary(counts))
+            if inbound
+            else message + _UNMASKABLE
+        )
     if action == MASK and result.transforms:
         message = f"{_RESHAPED.format(', '.join(result.transforms))} {message}"
     emitted = rewritten if action == MASK and changed else body
-    output = entry.encode(action, emitted, message, _summary(counts), tool_label)
+    if action == MASK and issue is not None and result.issued:
+        issue(result.issued)
+    output = entry.encode(
+        action, emitted, message, _summary(counts), tool_label, tool, result.literal
+    )
     out_bytes = _size(emitted) if action == MASK else in_bytes
     return Outcome(
         output,

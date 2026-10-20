@@ -18,23 +18,44 @@ NESTED = {
 }
 
 
-def test_walk_finds_string_leaves_in_document_order() -> None:
+def test_walk_finds_keys_text_and_numbers_in_document_order() -> None:
     found = walk(NESTED)
 
-    assert [path for path, _ in found.leaves] == [
-        ("tool_response", 0, "type"),
-        ("tool_response", 0, "text"),
-        ("tool_response", 1, "type"),
-        ("tool_response", 1, "text"),
-        ("tags", 0),
+    # A key's leaf is `(key,)` after the path of the object that holds it.
+    assert found.leaves == [
+        ((("tool_response",),), "tool_response"),
+        (("tool_response", 0, ("type",)), "type"),
+        (("tool_response", 0, "type"), "text"),
+        (("tool_response", 0, ("text",)), "text"),
+        (("tool_response", 0, "text"), "Contact alice@example.com"),
+        (("tool_response", 1, ("type",)), "type"),
+        (("tool_response", 1, "type"), "text"),
+        (("tool_response", 1, ("text",)), "text"),
+        (("tool_response", 1, "text"), "nothing here"),
+        ((("meta",),), "meta"),
+        (("meta", ("count",)), "count"),
+        (("meta", "count"), "2"),
+        (("meta", ("ok",)), "ok"),
+        (("meta", ("ratio",)), "ratio"),
+        (("meta", "ratio"), "0.5"),
+        (("meta", ("empty",)), "empty"),
+        (("meta", ("blank",)), "blank"),
+        ((("tags",),), "tags"),
+        (("tags", 0), "a"),
     ]
     assert found.characters == sum(len(text) for _, text in found.leaves)
 
 
-def test_walk_skips_empty_strings_and_non_string_scalars() -> None:
-    found = walk({"a": "", "b": None, "c": 1, "d": True, "e": 2.5})
+def test_walk_skips_empty_text_flags_and_nulls() -> None:
+    found = walk({"": "x", "a": "", "b": None, "c": True, "d": False})
 
-    assert found.leaves == []
+    assert found.leaves == [
+        (("",), "x"),
+        ((("a",),), "a"),
+        ((("b",),), "b"),
+        ((("c",),), "c"),
+        ((("d",),), "d"),
+    ]
 
 
 def test_replace_rebuilds_the_same_shape_without_changing_types() -> None:
@@ -72,14 +93,15 @@ def test_mask_returns_the_original_object_when_nothing_is_found() -> None:
     assert (findings, changed) == ([], False)
 
 
-def test_ordinals_restart_for_each_leaf() -> None:
+def test_ordinals_run_on_across_the_leaves_of_one_event() -> None:
+    # They restarted for each leaf, so two addresses were both <EMAIL_1>.
     document = {
         "first": "Contact alice@example.com",
         "second": "Contact bob@example.org",
     }
     result, _findings, _changed = mask(document, evaluate)
 
-    assert result == {"first": "Contact <EMAIL_1>", "second": "Contact <EMAIL_1>"}
+    assert result == {"first": "Contact <EMAIL_1>", "second": "Contact <EMAIL_2>"}
 
 
 def test_deep_nesting_is_refused_rather_than_partially_scanned() -> None:
@@ -98,7 +120,12 @@ def test_a_caller_off_the_hook_path_may_raise_the_limits() -> None:
 
     found = walk(document, max_depth=payload.MAX_DEPTH + 4)
 
-    assert len(found.leaves) == 1
+    # One leaf for each `next` key, and the text at the bottom.
+    assert len(found.leaves) == payload.MAX_DEPTH + 3
+    assert found.leaves[-1] == (
+        ("next",) * (payload.MAX_DEPTH + 2),
+        "Contact alice@example.com",
+    )
 
 
 def test_oversized_text_is_refused_rather_than_partially_scanned() -> None:
@@ -152,11 +179,11 @@ def test_a_real_read_result_is_masked_in_place() -> None:
 def test_inspection_stops_at_the_deadline_and_hands_back_nothing_to_emit():
     seen = []
 
-    def deadline(text):
+    def deadline(text, **kwargs):
         seen.append(text)
         if text == "timeout":
             raise ValueError("analysis limit") from TimeoutError("hook deadline")
-        return evaluate(text)
+        return evaluate(text, **kwargs)
 
     result = payload.inspect(["alice@example.com", "timeout", "never scan"], deadline)
     assert seen == ["alice@example.com", "timeout"]
