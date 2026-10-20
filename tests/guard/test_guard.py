@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import base64
+import gc
 import importlib
 import json
+import math
 import os
 import random
 import signal
@@ -1424,36 +1426,54 @@ def _address_lines(count: int) -> str:
     )
 
 
+_LEAST = 0.4
+
+
 def _seconds(text: str) -> tuple[float, float]:
-    """Wall and CPU seconds of one evaluation. The CPU time is the detector's
-    own work, so the ratio of two holds on a machine busy with other things."""
-    wall, cpu = time.perf_counter(), time.process_time()
+    """Wall and CPU seconds of one evaluation of `text`: the fastest of three
+    runs of as many evaluations as fill `_LEAST` seconds, with the collector
+    off, as `timeit` reads it. The CPU time is the detector's own work, so the
+    ratio of two holds on a machine busy with other things."""
+    gc.collect()
+    started = time.process_time()
     evaluate(text, ENTITY_TYPES)
-    return time.perf_counter() - wall, time.process_time() - cpu
+    repeats = math.ceil(_LEAST / max(time.process_time() - started, 0.001))
+    best = (math.inf, math.inf)
+    gc.disable()
+    try:
+        for _ in range(3):
+            wall, cpu = time.perf_counter(), time.process_time()
+            for _ in range(repeats):
+                evaluate(text, ENTITY_TYPES)
+            run = (time.perf_counter() - wall, time.process_time() - cpu)
+            best = (min(best[0], run[0]), min(best[1], run[1]))
+    finally:
+        gc.enable()
+    return best[0] / repeats, best[1] / repeats
 
 
 @pytest.mark.parametrize(
     ("shape", "count"),
     [
-        (lambda count: ("a." * count + "[at]") * 3, 20_000),
-        (lambda count: "x@" + "a." * count + "com", 20_000),
+        (lambda count: ("a." * count + "[at]") * 3, 16_000),
+        (lambda count: "x@" + "a." * count + "com", 48_000),
         (lambda count: "[at]" * count, 25_000),
-        (lambda count: "tr12 " + "abcd " * count, 20_000),
-        (lambda count: "34 " * count + "ABC", 30_000),
+        (lambda count: "tr12 " + "abcd " * count, 19_000),
+        (lambda count: "34 " * count + "ABC", 32_000),
         (lambda count: "Tr12-" * count, 20_000),
-        (lambda count: "a." * count + "@", 20_000),
-        (lambda count: ("a." * count + "@ ") * 10, 4_000),
-        (lambda count: "postgres://x" + "?" * count, 40_000),
-        (lambda count: "a." * count + "://", 20_000),
-        (lambda count: "x://" + "a:" * count, 20_000),
-        (lambda count: "postgres+" * count + "x://", 8_000),
-        (lambda count: "-a" * count + "://", 20_000),
-        (lambda count: "a%3A%2F%2F" * count, 8_000),
-        (lambda count: "eyJ" * count, 13_334),
-        (lambda count: "ZXlK" * count, 10_000),
-        (lambda count: "1 " * count, 20_000),
-        (_numeric_rows, 1_200),
-        (_address_lines, 2_900),
+        (lambda count: "a." * count + "@", 48_000),
+        (lambda count: ("a." * count + "@ ") * 10, 4_800),
+        (lambda count: "postgres://x" + "?" * count, 96_000),
+        (lambda count: "a." * count + "://", 48_000),
+        (lambda count: "x://" + "a:" * count, 48_000),
+        (lambda count: "postgres+" * count + "x://", 10_400),
+        (lambda count: "-a" * count + "://", 48_000),
+        (lambda count: "a%3A%2F%2F" * count, 9_600),
+        (lambda count: "eyJ" * count, 32_000),
+        (lambda count: "ZXlK" * count, 24_000),
+        (lambda count: "1 " * count, 48_000),
+        (_numeric_rows, 2_800),
+        (_address_lines, 6_800),
     ],
     ids=[
         "written-at",
@@ -1479,10 +1499,21 @@ def _seconds(text: str) -> tuple[float, float]:
 )
 def test_the_ported_shapes_scan_in_linear_time(shape, count: int) -> None:
     """Every recogniser at once, on the shape that once made one of them
-    quadratic: `a.` repeated before an `@` took 9 s at 40 KB. Doubling the
-    input may double the time, with room for noise, and never quadruple it."""
-    half = _seconds(shape(count // 2))[1]
-    wall, full = _seconds(shape(count))
+    quadratic: `a.` repeated before an `@` took 9 s at 40 KB. A text four
+    times as long takes four times as long to read, and a quadratic scan
+    sixteen: the bound, eight, is twice the first and half the second, so
+    neither runner noise nor a quadratic scan can be mistaken for the other.
+
+    Both texts are one analysis: past `MAX_SOURCE_CHARACTERS` the text is cut
+    into pieces, and a cost that grows with a piece's length grows only with
+    their number. Each time is read over at least `_LEAST` seconds: two
+    evaluations of 0.06 and 0.27 s, which the bound used to compare, differ
+    by more than a slow runner's noise allows."""
+    text = shape(count)
+    assert len(text) <= MAX_SOURCE_CHARACTERS
+
+    quarter = _seconds(shape(count // 4))[1]
+    wall, whole = _seconds(text)
 
     assert wall < 2
-    assert full <= 2.5 * half + 0.05, (half, full)
+    assert whole <= 8 * quarter, (quarter, whole)
